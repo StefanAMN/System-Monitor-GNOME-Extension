@@ -20,212 +20,155 @@
 
 /* Dropdown Menu Layout */
 .resource-pulse-menu-section {
-    padding: 8px;
-    min-width: 320px;
-    max-width: 450px;
+    padding: 16px;
+    min-width: 380px;
+    max-width: 500px;
 }
 
-.resource-pulse-section-title {
-    font-size: 0.85em;
-    font-weight: bold;
-    color: #888;
-    text-transform: uppercase;
-    margin-bottom: 6px;
-    margin-top: 4px;
-}
-
-/* Single-Row Picker */
-.resource-pulse-picker-row {
-    spacing: 4px;
-    margin-bottom: 8px;
-    justify-content: center;
-}
-
-.resource-pulse-grid-button {
-    background-color: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    padding: 4px;
-    width: 32px;
-    height: 32px;
-    transition-duration: 100ms;
-}
-
-.resource-pulse-grid-button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-.resource-pulse-grid-button:active {
-    background-color: rgba(255, 255, 255, 0.15);
-}
-
-.resource-pulse-grid-button-active {
-    background-color: rgba(53, 132, 228, 0.25);
-    border: 1px solid rgba(53, 132, 228, 0.6);
-}
-
-.resource-pulse-grid-button-active:hover {
-    background-color: rgba(53, 132, 228, 0.35);
-}
-
-/* Dashboard Cards */
 .resource-pulse-dashboard {
-    spacing: 8px;
+    spacing: 12px;
 }
 
-.resource-pulse-card {
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    padding: 8px;
+/* Summary Grid */
+.resource-pulse-summary-grid {
+    spacing-rows: 8px;
+    spacing-columns: 8px;
+    margin-bottom: 8px;
 }
 
-.resource-pulse-card-header {
-    margin-bottom: 4px;
-}
-
-.resource-pulse-card-title {
-    font-weight: bold;
-    font-size: 0.95em;
-}
-
-.resource-pulse-card-subtitle {
-    font-size: 0.8em;
-    color: #999;
-}
-
-.resource-pulse-card-details {
-    font-size: 0.8em;
-    color: #bbb;
-    margin-top: 4px;
-}
-
-/* Drawing Areas */
-.resource-pulse-sparkline {
-    color: #3584e4; /* Default accent blue */
-    background-color: rgba(255, 255, 255, 0.02);
+.resource-pulse-summary-card {
+    background-color: #2a2a2b;
     border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-    margin-left: 8px;
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 110px;
 }
 
-.resource-pulse-ring {
-    color: #3584e4; /* Default accent blue */
-    margin-right: 8px;
+.resource-pulse-summary-card-active {
+    border: 1px solid #3584e4;
+    background-color: rgba(53, 132, 228, 0.05);
 }
 
-/* Processes Section */
-.resource-pulse-process-item {
-    font-size: 0.8em;
-    color: #ddd;
-    padding: 2px 4px;
-    background-color: rgba(255, 255, 255, 0.02);
-    border-radius: 4px;
-    margin-top: 2px;
+.resource-pulse-summary-header {
+    spacing: 6px;
+    margin-bottom: 8px;
 }
 
-.resource-pulse-process-name {
-    font-weight: 500;
+.resource-pulse-summary-title {
+    font-size: 0.9em;
+    color: #a0a0a0;
+    font-weight: 600;
 }
 
-.resource-pulse-process-stat {
-    font-weight: bold;
-    color: rgba(53, 132, 228, 0.9);
-}
-
-/* Density & Compact Styles */
-.resource-pulse-dashboard-header {
-    margin-bottom: 6px;
-}
-
-.resource-pulse-density-button {
-    background-color: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    padding: 2px 8px;
-    transition-duration: 100ms;
-}
-
-.resource-pulse-density-button:hover {
-    background-color: rgba(255, 255, 255, 0.12);
-}
-
-.resource-pulse-density-button:checked {
-    background-color: rgba(53, 132, 228, 0.25);
-    border-color: rgba(53, 132, 228, 0.5);
-}
-
-.resource-pulse-density-label {
-    font-size: 0.75em;
-    font-weight: bold;
-    color: #ddd;
-}
-
-/* CPU Core Heatmap Grid */
-.resource-pulse-core-grid {
-    spacing-rows: 2px;
-    spacing-columns: 2px;
-    margin-top: 6px;
-    margin-bottom: 2px;
-}
-
-.resource-pulse-core-box {
-    border-radius: 3px;
-    width: 22px;
-    height: 22px;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-
-.resource-pulse-core-label {
-    font-size: 7pt;
+.resource-pulse-summary-value {
+    font-size: 1.4em;
     font-weight: bold;
     color: #ffffff;
 }
 
-/* Tighter Dashboard Padding & Margins */
-.resource-pulse-dashboard {
-    spacing: 4px;
-}
-
-.resource-pulse-card-content {
-    margin-top: 2px;
-}
-
-.resource-pulse-sparkline {
-    margin-left: 0px;
-    margin-right: 0px;
-}
-
-/* Tabbed Navigation Layout */
+/* Tab Bar */
 .resource-pulse-tab-bar {
     spacing: 6px;
-    margin-bottom: 8px;
-    justify-content: center;
+    margin-bottom: 12px;
 }
 
 .resource-pulse-tab-button {
-    background-color: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: transparent;
+    border: 1px solid #444;
     border-radius: 6px;
-    padding: 6px;
-    width: 36px;
-    height: 36px;
+    padding: 6px 14px;
+    color: #a0a0a0;
+    font-size: 0.85em;
+    font-weight: 600;
     transition-duration: 150ms;
 }
 
 .resource-pulse-tab-button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .resource-pulse-tab-button:active {
-    background-color: rgba(255, 255, 255, 0.15);
+    background-color: rgba(255, 255, 255, 0.12);
 }
 
 .resource-pulse-tab-button-active {
-    background-color: rgba(53, 132, 228, 0.25);
-    border: 1px solid rgba(53, 132, 228, 0.6);
+    background-color: rgba(53, 132, 228, 0.15);
+    border-color: #3584e4;
+    color: #3584e4;
 }
 
 .resource-pulse-tab-button-active:hover {
-    background-color: rgba(53, 132, 228, 0.35);
+    background-color: rgba(53, 132, 228, 0.25);
+}
+
+/* Detail Area */
+.resource-pulse-detail-area {
+    margin-top: 4px;
+}
+
+.resource-pulse-detail-title {
+    font-size: 1.05em;
+    font-weight: bold;
+    color: #ffffff;
+    margin-bottom: 12px;
+}
+
+.resource-pulse-detail-row {
+    spacing: 12px;
+    margin-bottom: 8px;
+}
+
+.resource-pulse-detail-label {
+    color: #a0a0a0;
+    font-size: 0.9em;
+}
+
+.resource-pulse-detail-value {
+    color: #ffffff;
+    font-size: 0.9em;
+    font-weight: bold;
+    text-align: right;
+}
+
+/* Sparkline Chart */
+.resource-pulse-sparkline {
+    color: #3584e4;
+    margin-bottom: 12px;
+}
+
+/* CPU Core Grid */
+.resource-pulse-core-section-title {
+    font-size: 0.9em;
+    color: #a0a0a0;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+.resource-pulse-core-grid {
+    spacing-rows: 6px;
+    spacing-columns: 6px;
+    margin-bottom: 12px;
+}
+
+.resource-pulse-core-box {
+    background-color: #2a2a2b;
+    border-radius: 8px;
+    padding: 8px;
+    min-width: 60px;
+}
+
+.resource-pulse-core-label {
+    font-size: 0.8em;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+.resource-pulse-core-value {
+    font-size: 1.1em;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.system-status-icon {
+    icon-size: 16px;
 }
