@@ -1,0 +1,10 @@
+{
+  "uuid": "resource-pulse@yourdomain.example",
+  "name": "Resource Pulse",
+  "description": "Monitors system resources (CPU, Memory, Battery, Disk, Network, Thermal, GPU) in a customizable top bar and panel dropdown dashboard.",
+  "shell-version": [
+    "50"
+  ],
+  "url": "https://github.com/StefanAMN/Monte-Carlo-Simulations",
+  "settings-schema": "org.gnome.shell.extensions.resource-pulse"
+}

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.resource-pulse" path="/org/gnome/shell/extensions/resource-pulse/">
+    <key name="pinned-metrics" type="as">
+      <default>['cpu', 'memory', 'battery']</default>
+      <summary>Pinned Metrics</summary>
+      <description>List of metrics to show in the top bar.</description>
+    </key>
+    <key name="poll-interval" type="i">
+      <default>2</default>
+      <summary>Poll Interval</summary>
+      <description>Update interval in seconds (1 to 10).</description>
+    </key>
+    <key name="unit-temp" type="s">
+      <default>'C'</default>
+      <summary>Temperature Unit</summary>
+      <description>Temperature unit (C or F).</description>
+    </key>
+    <key name="unit-mem" type="s">
+      <default>'GB'</default>
+      <summary>Memory Unit</summary>
+      <description>Memory unit (GB or GiB).</description>
+    </key>
+    <key name="compact-label" type="b">
+      <default>false</default>
+      <summary>Compact Label Mode</summary>
+      <description>Show icons only in the top bar indicator without text labels.</description>
+    </key>
+    <key name="threshold-cpu" type="i">
+      <default>90</default>
+      <summary>CPU Alert Threshold</summary>
+      <description>CPU percentage threshold to trigger warning style.</description>
+    </key>
+    <key name="threshold-mem" type="i">
+      <default>90</default>
+      <summary>Memory Alert Threshold</summary>
+      <description>Memory percentage threshold to trigger warning style.</description>
+    </key>
+    <key name="threshold-temp" type="i">
+      <default>80</default>
+      <summary>Temperature Alert Threshold</summary>
+      <description>Temperature threshold to trigger warning style.</description>
+    </key>
+  </schema>
+</schemalist>
