@@ -331,6 +331,7 @@ export default class ResourcePulseExtension extends Extension {
         this._indicator.menu.addMenuItem(this._menuSection);
 
         // Build Dropdown Parts
+        this._activeTab = 'cpu';
         this._buildPinGrid();
         this._buildDashboard();
 
@@ -667,26 +668,11 @@ export default class ResourcePulseExtension extends Extension {
         });
         headerRow.add_child(title);
 
-        this._densityBtn = new St.Button({
-            style_class: 'resource-pulse-density-button',
-            can_focus: true,
-            toggle_mode: true,
-            y_align: Clutter.ActorAlign.CENTER
-        });
-        this._densityLabel = new St.Label({
-            text: 'Compact',
-            style_class: 'resource-pulse-density-label',
-            y_align: Clutter.ActorAlign.CENTER
-        });
-        this._densityBtn.set_child(this._densityLabel);
 
-        this._densityBtn.connect('clicked', () => {
-            const isDetailed = this._densityBtn.checked;
-            this._settings.set_string('density-mode', isDetailed ? 'detailed' : 'compact');
-        });
 
-        headerRow.add_child(this._densityBtn);
         this._menuContainer.add_child(headerRow);
+
+        this._buildTabBar();
 
         this._dashboardBox = new St.BoxLayout({
             vertical: true,
@@ -743,6 +729,86 @@ export default class ResourcePulseExtension extends Extension {
         this._cards.processes = this._createProcessesCard();
 
         this._menuContainer.add_child(this._dashboardBox);
+
+        // Set initial visibility
+        this._updateTabVisibility();
+    }
+
+    _buildTabBar() {
+        this._tabBar = new St.BoxLayout({
+            style_class: 'resource-pulse-tab-bar',
+            vertical: false
+        });
+
+        this._tabButtons = {};
+
+        const tabs = [
+            { key: 'cpu', label: 'CPU & Processes' },
+            { key: 'memory', label: 'Memory' },
+            { key: 'battery', label: 'Battery' },
+            { key: 'power', label: 'Power' },
+            { key: 'disk', label: 'Disk' },
+            { key: 'network', label: 'Network' },
+            { key: 'thermal', label: 'Thermal' },
+            { key: 'gpu', label: 'GPU' }
+        ];
+
+        tabs.forEach((tab) => {
+            const button = new St.Button({
+                style_class: 'resource-pulse-tab-button',
+                can_focus: true,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER
+            });
+
+            const icon = new St.Icon({
+                icon_name: this._getIconName(tab.key),
+                style_class: 'system-status-icon',
+                y_align: Clutter.ActorAlign.CENTER,
+                x_align: Clutter.ActorAlign.CENTER
+            });
+            button.set_child(icon);
+            button.accessible_name = tab.label;
+
+            button.connect('clicked', () => {
+                this._activeTab = tab.key;
+                this._updateTabVisibility();
+            });
+
+            this._tabBar.add_child(button);
+            this._tabButtons[tab.key] = button;
+        });
+
+        this._menuContainer.add_child(this._tabBar);
+    }
+
+    _updateTabVisibility() {
+        if (!this._tabButtons) return;
+
+        // Update button states
+        Object.keys(this._tabButtons).forEach(key => {
+            const btn = this._tabButtons[key];
+            if (key === this._activeTab) {
+                btn.add_style_class_name('resource-pulse-tab-button-active');
+            } else {
+                btn.remove_style_class_name('resource-pulse-tab-button-active');
+            }
+        });
+
+        // Update card visibility
+        Object.keys(this._cards).forEach(key => {
+            const cardObj = this._cards[key];
+            if (!cardObj || !cardObj.card) return;
+
+            let isVisible = false;
+            if (key === this._activeTab) {
+                isVisible = true;
+            } else if (key === 'processes' && this._activeTab === 'cpu') {
+                isVisible = true;
+            }
+
+            cardObj.card.visible = isVisible;
+        });
     }
 
     _createCard(titleText, key, options = {}) {
@@ -837,30 +903,15 @@ export default class ResourcePulseExtension extends Extension {
 
         this._dashboardBox.add_child(card);
 
-        const cardObj = { card, subtitle, details, ring, batteryGlyph, sparkline, coreGrid, expanded: false };
-
-        card.reactive = true;
-        card.connect('button-press-event', () => {
-            cardObj.expanded = !cardObj.expanded;
-            this._updateCardLayout(key);
-            return Clutter.EVENT_STOP;
-        });
+        const cardObj = { card, subtitle, details, ring, batteryGlyph, sparkline, coreGrid, expanded: true };
 
         return cardObj;
     }
 
     _syncDensityMode() {
-        const mode = this._settings.get_string('density-mode') || 'compact';
-        const isDetailed = mode === 'detailed';
-
-        if (this._densityBtn) {
-            this._densityBtn.checked = isDetailed;
-            this._densityLabel.text = isDetailed ? 'Detailed' : 'Compact';
-        }
-
         Object.keys(this._cards).forEach(key => {
             if (key === 'processes') return;
-            this._cards[key].expanded = isDetailed;
+            this._cards[key].expanded = true;
             this._updateCardLayout(key);
         });
     }
