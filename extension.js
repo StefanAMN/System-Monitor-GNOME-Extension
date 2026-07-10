@@ -374,12 +374,6 @@ export default class ResourcePulseExtension extends Extension {
     // ── Pin Grid ──────────────────────────────────────────────────────────────
 
     _buildPinGrid() {
-        const title = new St.Label({
-            text: 'Pin Metrics to Top Bar',
-            style_class: 'resource-pulse-section-title'
-        });
-        this._menuContainer.add_child(title);
-
         this._pinGrid = new St.BoxLayout({
             style_class: 'resource-pulse-picker-row',
             vertical: false
@@ -403,17 +397,11 @@ export default class ResourcePulseExtension extends Extension {
             });
             button.set_child(new St.Icon({
                 icon_name: this._getIconName(metric.key),
-                style_class: 'system-status-icon',
+                style_class: `system-status-icon icon-${metric.key}`,
                 y_align: Clutter.ActorAlign.CENTER,
                 x_align: Clutter.ActorAlign.CENTER
             }));
             button.accessible_name = metric.key;
-
-            button.connect('notify::hover', () => {
-                title.text = button.hover
-                    ? `Pin to Top Bar: ${metric.key.charAt(0).toUpperCase() + metric.key.slice(1)}`
-                    : 'Pin Metrics to Top Bar';
-            });
 
             button.connect('clicked', () => {
                 let current = this._settings.get_strv('pinned-metrics') || [];
@@ -478,7 +466,7 @@ export default class ResourcePulseExtension extends Extension {
             const header = new St.BoxLayout({ vertical: false, style_class: 'resource-pulse-summary-header' });
             header.add_child(new St.Icon({
                 icon_name: this._getIconName(metric.key),
-                style_class: 'system-status-icon',
+                style_class: `system-status-icon icon-${metric.key}`,
                 y_align: Clutter.ActorAlign.CENTER
             }));
             card.add_child(header);
