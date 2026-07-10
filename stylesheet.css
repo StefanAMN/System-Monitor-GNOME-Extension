@@ -100,6 +100,7 @@
 
 /* Drawing Areas */
 .resource-pulse-sparkline {
+    color: #3584e4; /* Default accent blue */
     background-color: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 4px;
@@ -107,6 +108,7 @@
 }
 
 .resource-pulse-ring {
+    color: #3584e4; /* Default accent blue */
     margin-right: 8px;
 }
 
