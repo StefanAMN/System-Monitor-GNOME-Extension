@@ -65,7 +65,7 @@ function runSubprocess(argv) {
             proc.init(null);
             proc.communicate_utf8_async(null, null, (obj, res) => {
                 try {
-                    const [stdout] = obj.communicate_utf8_finish(res);
+                    const [, stdout] = obj.communicate_utf8_finish(res);
                     resolve(stdout || '');
                 } catch (e) {
                     resolve('');
@@ -321,8 +321,7 @@ export default class ResourcePulseExtension extends Extension {
         // Dropdown Menu setup
         this._menuSection = new PopupMenu.PopupBaseMenuItem({
             reactive: false,
-            activate: false,
-            closeOnActivate: false
+            activate: false
         });
         this._menuContainer = new St.BoxLayout({
             vertical: true,
@@ -463,12 +462,11 @@ export default class ResourcePulseExtension extends Extension {
                 this._indicatorBox.add_child(div);
             }
 
-            const box = new St.BoxLayout({
-                align_items: Clutter.ActorAlign.CENTER
-            });
+            const box = new St.BoxLayout();
             const icon = new St.Icon({
                 icon_name: this._getIconName(key),
-                style_class: 'system-status-icon'
+                style_class: 'system-status-icon',
+                y_align: Clutter.ActorAlign.CENTER
             });
             box.add_child(icon);
 
@@ -568,10 +566,14 @@ export default class ResourcePulseExtension extends Extension {
         });
         this._menuContainer.add_child(title);
 
-        this._grid = new St.GridLayout({
-            style_class: 'resource-pulse-grid',
-            uniform_row_height: true,
-            uniform_column_width: true
+        const gridLayout = new Clutter.GridLayout({
+            column_homogeneous: true,
+            row_homogeneous: true
+        });
+
+        this._grid = new St.Widget({
+            layout_manager: gridLayout,
+            style_class: 'resource-pulse-grid'
         });
 
         this._gridButtons = {};
@@ -598,12 +600,12 @@ export default class ResourcePulseExtension extends Extension {
             });
 
             const box = new St.BoxLayout({
-                align_items: Clutter.ActorAlign.CENTER,
-                spacing: 4
+                style: 'spacing: 4px;'
             });
             const icon = new St.Icon({
                 icon_name: this._getIconName(metric.key),
-                style_class: 'system-status-icon'
+                style_class: 'system-status-icon',
+                y_align: Clutter.ActorAlign.CENTER
             });
             const label = new St.Label({
                 text: metric.label,
@@ -626,7 +628,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._settings.set_strv('pinned-metrics', current);
             });
 
-            this._grid.add(button, col, row, 1, 1);
+            gridLayout.attach(button, col, row, 1, 1);
             this._gridButtons[metric.key] = button;
         });
 
@@ -719,13 +721,13 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         const header = new St.BoxLayout({
-            style_class: 'resource-pulse-card-header',
-            align_items: Clutter.ActorAlign.CENTER
+            style_class: 'resource-pulse-card-header'
         });
         const icon = new St.Icon({
             icon_name: this._getIconName(key),
             style_class: 'system-status-icon',
-            margin_right: 6
+            margin_right: 6,
+            y_align: Clutter.ActorAlign.CENTER
         });
         const title = new St.Label({
             text: titleText,
@@ -746,9 +748,7 @@ export default class ResourcePulseExtension extends Extension {
         card.add_child(header);
 
         // Content layout (left meter + right sparkline)
-        const contentBox = new St.BoxLayout({
-            align_items: Clutter.ActorAlign.CENTER
-        });
+        const contentBox = new St.BoxLayout();
 
         let ring = null;
         let batteryGlyph = null;
@@ -757,17 +757,20 @@ export default class ResourcePulseExtension extends Extension {
             // CPU/Mem warning color threshold
             const cpuWarn = this._settings.get_int('threshold-cpu') || 90;
             ring = new RingProgress(36, 36, key === 'cpu' ? cpuWarn : 90);
+            ring.y_align = Clutter.ActorAlign.CENTER;
             contentBox.add_child(ring);
         }
 
         if (options.hasBatteryGlyph) {
             batteryGlyph = new BatteryGlyph();
+            batteryGlyph.y_align = Clutter.ActorAlign.CENTER;
             contentBox.add_child(batteryGlyph);
         }
 
         let sparkline = null;
         if (options.hasSpark) {
             sparkline = new Sparkline(160, 32, 100, key === 'power' || key === 'disk' || key === 'network');
+            sparkline.y_align = Clutter.ActorAlign.CENTER;
             contentBox.add_child(sparkline);
         }
 
@@ -940,18 +943,19 @@ export default class ResourcePulseExtension extends Extension {
             this._cards.processes.list.destroy_all_children();
             data.processes.forEach(proc => {
                 const item = new St.BoxLayout({
-                    style_class: 'resource-pulse-process-item',
-                    align_items: Clutter.ActorAlign.CENTER
+                    style_class: 'resource-pulse-process-item'
                 });
                 const name = new St.Label({
                     text: proc.comm,
                     style_class: 'resource-pulse-process-name',
-                    x_expand: true
+                    x_expand: true,
+                    y_align: Clutter.ActorAlign.CENTER
                 });
                 const stat = new St.Label({
                     text: `${Math.round(proc.cpu)}% CPU   ${Math.round(proc.mem)}% MEM`,
                     style_class: 'resource-pulse-process-stat',
-                    x_align: Clutter.ActorAlign.END
+                    x_align: Clutter.ActorAlign.END,
+                    y_align: Clutter.ActorAlign.CENTER
                 });
                 item.add_child(name);
                 item.add_child(stat);
