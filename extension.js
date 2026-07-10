@@ -84,6 +84,7 @@ const Sparkline = GObject.registerClass({
         this.history = [];
         this.maxVal = maxVal;
         this.autoScale = autoScale;
+        this.scaleLabel = '';
         this.connect('repaint', this._draw.bind(this));
     }
 
@@ -91,6 +92,13 @@ const Sparkline = GObject.registerClass({
         this.history.push(val);
         if (this.history.length > 60) this.history.shift();
         this.queue_repaint();
+    }
+
+    setScaleLabel(label) {
+        if (this.scaleLabel !== label) {
+            this.scaleLabel = label;
+            this.queue_repaint();
+        }
     }
 
     _draw(area) {
@@ -132,6 +140,16 @@ const Sparkline = GObject.registerClass({
             else cr.lineTo(x, y);
         }
         cr.stroke();
+
+        // Scale label text
+        if (this.scaleLabel) {
+            cr.selectFontFace("Sans", Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
+            cr.setFontSize(10);
+            cr.setSourceRGBA(1, 1, 1, 0.4);
+            cr.moveTo(4, 12);
+            cr.showText(this.scaleLabel);
+        }
+
         cr.restore();
     }
 });
@@ -445,6 +463,8 @@ export default class ResourcePulseExtension extends Extension {
             { key: 'power',   label: 'Power' },
             { key: 'disk',    label: 'Disk' },
             { key: 'network', label: 'Network' },
+            { key: 'thermal', label: 'Thermal' },
+            { key: 'gpu',     label: 'GPU' },
         ];
 
         SUMMARY_METRICS.forEach((metric, i) => {
@@ -481,46 +501,13 @@ export default class ResourcePulseExtension extends Extension {
                 return Clutter.EVENT_STOP;
             });
 
-            gridLayout.attach(card, i % 3, Math.floor(i / 3), 1, 1);
+            gridLayout.attach(card, i % 4, Math.floor(i / 4), 1, 1);
             this._summaryCards[metric.key] = { box: card, valueLabel: valueLbl };
         });
 
         this._menuContainer.add_child(this._summaryGrid);
 
-        // ── Tab Bar ──
-        this._tabBar = new St.BoxLayout({
-            style_class: 'resource-pulse-tab-bar',
-            vertical: false
-        });
-        this._tabButtons = {};
 
-        const TABS = [
-            { key: 'cpu',     label: 'CPU' },
-            { key: 'memory',  label: 'Memory' },
-            { key: 'battery', label: 'Battery' },
-            { key: 'power',   label: 'Power' },
-            { key: 'disk',    label: 'Disk' },
-            { key: 'network', label: 'Network' },
-            { key: 'thermal', label: 'Thermal' },
-            { key: 'gpu',     label: 'GPU' },
-        ];
-
-        TABS.forEach(tab => {
-            const btn = new St.Button({
-                style_class: 'resource-pulse-tab-button',
-                label: tab.label,
-                can_focus: true,
-                y_align: Clutter.ActorAlign.CENTER
-            });
-            btn.connect('clicked', () => {
-                this._activeTab = tab.key;
-                this._updateTabVisibility();
-            });
-            this._tabBar.add_child(btn);
-            this._tabButtons[tab.key] = btn;
-        });
-
-        this._menuContainer.add_child(this._tabBar);
 
         // ── Detail Area ──
         this._detailArea = new St.BoxLayout({
@@ -552,11 +539,6 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _updateTabVisibility() {
-        // Tab buttons
-        for (const [key, btn] of Object.entries(this._tabButtons || {})) {
-            if (key === this._activeTab) btn.add_style_class_name('resource-pulse-tab-button-active');
-            else btn.remove_style_class_name('resource-pulse-tab-button-active');
-        }
 
         // Summary cards highlight
         for (const [key, card] of Object.entries(this._summaryCards || {})) {
@@ -762,7 +744,10 @@ export default class ResourcePulseExtension extends Extension {
             const cpu = data.cpu;
             if (this._summaryCards?.cpu)
                 this._summaryCards.cpu.valueLabel.text = `${Math.round(cpu.total)}%`;
-            if (this._cpuSparkline) this._cpuSparkline.addSample(cpu.total);
+            if (this._cpuSparkline) {
+                this._cpuSparkline.addSample(cpu.total);
+                this._cpuSparkline.setScaleLabel(`Cur: ${Math.round(cpu.total)}%`);
+            }
             if (this._cpuLoadAvg)   this._cpuLoadAvg.val.text = cpu.loadavg.join(' · ');
             if (this._cpuUptime)    this._cpuUptime.val.text  = formatUptime(cpu.uptime);
             if (cpu.cores)          this._updateCpuCoresUI(cpu.cores);
@@ -773,7 +758,10 @@ export default class ResourcePulseExtension extends Extension {
             const mem = data.mem;
             if (this._summaryCards?.memory)
                 this._summaryCards.memory.valueLabel.text = `${Math.round(mem.percent)}%`;
-            if (this._memSparkline) this._memSparkline.addSample(mem.percent);
+            if (this._memSparkline) {
+                this._memSparkline.addSample(mem.percent);
+                this._memSparkline.setScaleLabel(`Used: ${Math.round(mem.percent)}%`);
+            }
             if (this._memUsed) this._memUsed.val.text =
                 `${formatBytes(mem.used, useGiB)} / ${formatBytes(mem.total, useGiB)}`;
             if (this._memSwap) this._memSwap.val.text =
@@ -789,7 +777,10 @@ export default class ResourcePulseExtension extends Extension {
                 if (bat.present) sc.valueLabel.text = `${Math.round(bat.percent)}%`;
             }
             if (bat.present) {
-                if (this._batSparkline) this._batSparkline.addSample(bat.percent);
+                if (this._batSparkline) {
+                    this._batSparkline.addSample(bat.percent);
+                    this._batSparkline.setScaleLabel(`Cur: ${Math.round(bat.percent)}%`);
+                }
                 if (this._batState) {
                     const s = bat.state === 'charging' ? 'Charging'
                         : bat.state === 'discharging' ? 'Discharging' : 'Full';
@@ -814,7 +805,10 @@ export default class ResourcePulseExtension extends Extension {
             }
             if (hasDraw) {
                 const draw = pwr.systemPower !== null ? pwr.systemPower : (pwr.packagePower || 0);
-                if (this._pwrSparkline) this._pwrSparkline.addSample(draw);
+                if (this._pwrSparkline) {
+                    this._pwrSparkline.addSample(draw);
+                    this._pwrSparkline.setScaleLabel(`Draw: ${draw.toFixed(1)}W`);
+                }
                 if (this._pwrSystem)  this._pwrSystem.val.text  = pwr.systemPower  !== null ? `${pwr.systemPower.toFixed(1)} W`  : '--';
                 if (this._pwrPackage) this._pwrPackage.val.text = pwr.packagePower !== null ? `${pwr.packagePower.toFixed(1)} W` : '--';
             }
@@ -827,7 +821,10 @@ export default class ResourcePulseExtension extends Extension {
             if (this._summaryCards?.disk) this._summaryCards.disk.valueLabel.text = `${Math.round(maxPct)}%`;
             const readMB  = dsk.readRate  / (1024 * 1024);
             const writeMB = dsk.writeRate / (1024 * 1024);
-            if (this._dskSparkline) this._dskSparkline.addSample(writeMB);
+            if (this._dskSparkline) {
+                this._dskSparkline.addSample(writeMB);
+                this._dskSparkline.setScaleLabel(`W: ${writeMB.toFixed(1)} MB/s`);
+            }
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
             if (this._dskUsage) this._dskUsage.val.text = dsk.mounts.map(m => `${m.mount} ${Math.round(m.percent)}%`).join('  ') || '--';
@@ -837,7 +834,10 @@ export default class ResourcePulseExtension extends Extension {
         if (data.net) {
             const net = data.net;
             if (this._summaryCards?.network) this._summaryCards.network.valueLabel.text = formatSpeed(net.total.rxRate);
-            if (this._netSparkline) this._netSparkline.addSample(net.total.rxRate / 1024);
+            if (this._netSparkline) {
+                this._netSparkline.addSample(net.total.rxRate / 1024);
+                this._netSparkline.setScaleLabel(`DL: ${formatSpeed(net.total.rxRate)}`);
+            }
             if (this._netRx) this._netRx.val.text = formatSpeed(net.total.rxRate);
             if (this._netTx) this._netTx.val.text = formatSpeed(net.total.txRate);
         }
@@ -846,7 +846,10 @@ export default class ResourcePulseExtension extends Extension {
         if (data.thm) {
             const thm = data.thm;
             if (this._summaryCards?.thermal) this._summaryCards.thermal.valueLabel.text = formatTemp(thm.temp, tempUnit);
-            if (this._thmSparkline) this._thmSparkline.addSample(thm.temp);
+            if (this._thmSparkline) {
+                this._thmSparkline.addSample(thm.temp);
+                this._thmSparkline.setScaleLabel(`Temp: ${formatTemp(thm.temp, tempUnit)}`);
+            }
             if (this._thmPackage)   this._thmPackage.val.text = formatTemp(thm.temp, tempUnit);
             if (this._thmFan) {
                 this._thmFan.val.text = thm.fans && thm.fans.length > 0
@@ -864,7 +867,10 @@ export default class ResourcePulseExtension extends Extension {
                 if (gpu.present) sc.valueLabel.text = `${Math.round(gpu.percent)}%`;
             }
             if (gpu.present) {
-                if (this._gpuSparkline) this._gpuSparkline.addSample(gpu.percent);
+                if (this._gpuSparkline) {
+                    this._gpuSparkline.addSample(gpu.percent);
+                    this._gpuSparkline.setScaleLabel(`Cur: ${Math.round(gpu.percent)}%`);
+                }
                 if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
                 if (this._gpuMem)   this._gpuMem.val.text   = `${Math.round(gpu.memPercent)}% (${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)})`;
                 if (this._gpuTemp)  this._gpuTemp.val.text  = formatTemp(gpu.temp, tempUnit);
