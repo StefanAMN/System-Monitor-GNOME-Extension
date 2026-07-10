@@ -1,21 +1,21 @@
 /* Resource Pulse Extension Stylesheet */
 
 .resource-pulse-indicator-box {
-    spacing: 6px;
+    spacing: 3px;
     align-items: center;
 }
 
 .resource-pulse-divider {
-    color: rgba(200, 200, 200, 0.3);
+    color: rgba(200, 200, 200, 0.2);
     font-weight: 300;
-    font-size: 1.1em;
-    padding: 0 2px;
+    font-size: 1.0em;
+    padding: 0 1px;
 }
 
 .resource-pulse-label {
-    font-size: 0.9em;
+    font-size: 0.85em;
     font-weight: bold;
-    margin-left: 2px;
+    margin-left: 1px;
 }
 
 /* Dropdown Menu Layout */
@@ -34,18 +34,20 @@
     margin-top: 4px;
 }
 
-/* Grid Selector */
-.resource-pulse-grid {
-    spacing-rows: 6px;
-    spacing-columns: 6px;
-    margin-bottom: 12px;
+/* Single-Row Picker */
+.resource-pulse-picker-row {
+    spacing: 4px;
+    margin-bottom: 8px;
+    justify-content: center;
 }
 
 .resource-pulse-grid-button {
     background-color: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 6px;
-    padding: 6px 12px;
+    padding: 4px;
+    width: 32px;
+    height: 32px;
     transition-duration: 100ms;
 }
 
@@ -129,4 +131,67 @@
 .resource-pulse-process-stat {
     font-weight: bold;
     color: rgba(53, 132, 228, 0.9);
+}
+
+/* Density & Compact Styles */
+.resource-pulse-dashboard-header {
+    margin-bottom: 6px;
+}
+
+.resource-pulse-density-button {
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 2px 8px;
+    transition-duration: 100ms;
+}
+
+.resource-pulse-density-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.resource-pulse-density-button:checked {
+    background-color: rgba(53, 132, 228, 0.25);
+    border-color: rgba(53, 132, 228, 0.5);
+}
+
+.resource-pulse-density-label {
+    font-size: 0.75em;
+    font-weight: bold;
+    color: #ddd;
+}
+
+/* CPU Core Heatmap Grid */
+.resource-pulse-core-grid {
+    spacing-rows: 2px;
+    spacing-columns: 2px;
+    margin-top: 6px;
+    margin-bottom: 2px;
+}
+
+.resource-pulse-core-box {
+    border-radius: 3px;
+    width: 22px;
+    height: 22px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.resource-pulse-core-label {
+    font-size: 7pt;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+/* Tighter Dashboard Padding & Margins */
+.resource-pulse-dashboard {
+    spacing: 4px;
+}
+
+.resource-pulse-card-content {
+    margin-top: 2px;
+}
+
+.resource-pulse-sparkline {
+    margin-left: 0px;
+    margin-right: 0px;
 }

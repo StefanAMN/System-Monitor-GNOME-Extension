@@ -41,5 +41,10 @@
       <summary>Temperature Alert Threshold</summary>
       <description>Temperature threshold to trigger warning style.</description>
     </key>
+    <key name="density-mode" type="s">
+      <default>'compact'</default>
+      <summary>Density Mode</summary>
+      <description>Density mode for the dashboard cards ('compact' or 'detailed').</description>
+    </key>
   </schema>
 </schemalist>

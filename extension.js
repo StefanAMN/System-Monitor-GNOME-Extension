@@ -348,9 +348,13 @@ export default class ResourcePulseExtension extends Extension {
         this._pinnedId = this._settings.connect('changed::pinned-metrics', () => this._rebuildTopBar());
         this._compactId = this._settings.connect('changed::compact-label', () => this._rebuildTopBar());
         this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
+        this._densityId = this._settings.connect('changed::density-mode', () => this._syncDensityMode());
 
         // Rebuild top bar initially
         this._rebuildTopBar();
+
+        // Sync initial density mode
+        this._syncDensityMode();
 
         // Start polling loop
         this._startPolling();
@@ -361,6 +365,7 @@ export default class ResourcePulseExtension extends Extension {
         if (this._pinnedId) this._settings.disconnect(this._pinnedId);
         if (this._compactId) this._settings.disconnect(this._compactId);
         if (this._pollId) this._settings.disconnect(this._pollId);
+        if (this._densityId) this._settings.disconnect(this._densityId);
 
         // Remove timer
         if (this._timeoutId) {
@@ -566,14 +571,9 @@ export default class ResourcePulseExtension extends Extension {
         });
         this._menuContainer.add_child(title);
 
-        const gridLayout = new Clutter.GridLayout({
-            column_homogeneous: true,
-            row_homogeneous: true
-        });
-
-        this._grid = new St.Widget({
-            layout_manager: gridLayout,
-            style_class: 'resource-pulse-grid'
+        this._grid = new St.BoxLayout({
+            style_class: 'resource-pulse-picker-row',
+            vertical: false
         });
 
         this._gridButtons = {};
@@ -589,31 +589,33 @@ export default class ResourcePulseExtension extends Extension {
             { key: 'gpu', label: 'GPU' }
         ];
 
-        metrics.forEach((metric, index) => {
-            const row = Math.floor(index / 4);
-            const col = index % 4;
-
+        metrics.forEach((metric) => {
             const button = new St.Button({
                 style_class: 'resource-pulse-grid-button',
                 can_focus: true,
-                toggle_mode: true
+                toggle_mode: true,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER
             });
 
-            const box = new St.BoxLayout({
-                style: 'spacing: 4px;'
-            });
             const icon = new St.Icon({
                 icon_name: this._getIconName(metric.key),
                 style_class: 'system-status-icon',
-                y_align: Clutter.ActorAlign.CENTER
+                y_align: Clutter.ActorAlign.CENTER,
+                x_align: Clutter.ActorAlign.CENTER
             });
-            const label = new St.Label({
-                text: metric.label,
-                y_align: Clutter.ActorAlign.CENTER
+            button.set_child(icon);
+
+            button.accessible_name = metric.label;
+
+            // Hover tooltip handler
+            button.connect('notify::hover', () => {
+                if (button.hover) {
+                    title.text = `Pin to Top Bar: ${metric.label}`;
+                } else {
+                    title.text = 'Pin Metrics to Top Bar';
+                }
             });
-            box.add_child(icon);
-            box.add_child(label);
-            button.set_child(box);
 
             // Connect button event
             button.connect('clicked', () => {
@@ -628,7 +630,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._settings.set_strv('pinned-metrics', current);
             });
 
-            gridLayout.attach(button, col, row, 1, 1);
+            this._grid.add_child(button);
             this._gridButtons[metric.key] = button;
         });
 
@@ -651,11 +653,40 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildDashboard() {
+        const headerRow = new St.BoxLayout({
+            style_class: 'resource-pulse-dashboard-header',
+            vertical: false,
+            x_expand: true
+        });
+
         const title = new St.Label({
             text: 'System Dashboard',
-            style_class: 'resource-pulse-section-title'
+            style_class: 'resource-pulse-section-title',
+            y_align: Clutter.ActorAlign.CENTER,
+            x_expand: true
         });
-        this._menuContainer.add_child(title);
+        headerRow.add_child(title);
+
+        this._densityBtn = new St.Button({
+            style_class: 'resource-pulse-density-button',
+            can_focus: true,
+            toggle_mode: true,
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        this._densityLabel = new St.Label({
+            text: 'Compact',
+            style_class: 'resource-pulse-density-label',
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        this._densityBtn.set_child(this._densityLabel);
+
+        this._densityBtn.connect('clicked', () => {
+            const isDetailed = this._densityBtn.checked;
+            this._settings.set_string('density-mode', isDetailed ? 'detailed' : 'compact');
+        });
+
+        headerRow.add_child(this._densityBtn);
+        this._menuContainer.add_child(headerRow);
 
         this._dashboardBox = new St.BoxLayout({
             vertical: true,
@@ -721,7 +752,8 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         const header = new St.BoxLayout({
-            style_class: 'resource-pulse-card-header'
+            style_class: 'resource-pulse-card-header',
+            vertical: false
         });
         const icon = new St.Icon({
             icon_name: this._getIconName(key),
@@ -748,13 +780,16 @@ export default class ResourcePulseExtension extends Extension {
         card.add_child(header);
 
         // Content layout (left meter + right sparkline)
-        const contentBox = new St.BoxLayout();
+        const contentBox = new St.BoxLayout({
+            vertical: false,
+            x_expand: true,
+            style_class: 'resource-pulse-card-content'
+        });
 
         let ring = null;
         let batteryGlyph = null;
 
         if (options.hasRing) {
-            // CPU/Mem warning color threshold
             const cpuWarn = this._settings.get_int('threshold-cpu') || 90;
             ring = new RingProgress(36, 36, key === 'cpu' ? cpuWarn : 90);
             ring.y_align = Clutter.ActorAlign.CENTER;
@@ -771,21 +806,144 @@ export default class ResourcePulseExtension extends Extension {
         if (options.hasSpark) {
             sparkline = new Sparkline(160, 32, 100, key === 'power' || key === 'disk' || key === 'network');
             sparkline.y_align = Clutter.ActorAlign.CENTER;
+            sparkline.x_expand = true;
             contentBox.add_child(sparkline);
         }
 
         card.add_child(contentBox);
 
+        // CPU Core Grid
+        let coreGrid = null;
+        if (key === 'cpu') {
+            const coreLayout = new Clutter.GridLayout({
+                column_homogeneous: true,
+                row_homogeneous: true
+            });
+            coreGrid = new St.Widget({
+                layout_manager: coreLayout,
+                style_class: 'resource-pulse-core-grid',
+                visible: false
+            });
+            card.add_child(coreGrid);
+        }
+
         // Details label
         const details = new St.Label({
             text: '',
-            style_class: 'resource-pulse-card-details'
+            style_class: 'resource-pulse-card-details',
+            visible: false
         });
         card.add_child(details);
 
         this._dashboardBox.add_child(card);
 
-        return { card, subtitle, details, ring, batteryGlyph, sparkline };
+        const cardObj = { card, subtitle, details, ring, batteryGlyph, sparkline, coreGrid, expanded: false };
+
+        card.reactive = true;
+        card.connect('button-press-event', () => {
+            cardObj.expanded = !cardObj.expanded;
+            this._updateCardLayout(key);
+            return Clutter.EVENT_STOP;
+        });
+
+        return cardObj;
+    }
+
+    _syncDensityMode() {
+        const mode = this._settings.get_string('density-mode') || 'compact';
+        const isDetailed = mode === 'detailed';
+
+        if (this._densityBtn) {
+            this._densityBtn.checked = isDetailed;
+            this._densityLabel.text = isDetailed ? 'Detailed' : 'Compact';
+        }
+
+        Object.keys(this._cards).forEach(key => {
+            if (key === 'processes') return;
+            this._cards[key].expanded = isDetailed;
+            this._updateCardLayout(key);
+        });
+    }
+
+    _updateCardLayout(key) {
+        const cardObj = this._cards[key];
+        if (!cardObj) return;
+
+        const expanded = cardObj.expanded;
+
+        if (cardObj.ring) {
+            cardObj.ring.visible = expanded;
+        }
+        if (cardObj.batteryGlyph) {
+            cardObj.batteryGlyph.visible = expanded;
+        }
+        if (cardObj.details) {
+            cardObj.details.visible = expanded;
+        }
+        if (key === 'cpu' && cardObj.coreGrid) {
+            cardObj.coreGrid.visible = expanded;
+        }
+        if (cardObj.sparkline) {
+            const h = expanded ? 32 : 16;
+            cardObj.sparkline.set_height(h);
+            cardObj.sparkline.queue_repaint();
+        }
+
+        if (expanded) {
+            cardObj.card.style = 'padding: 8px; margin-bottom: 6px;';
+        } else {
+            cardObj.card.style = 'padding: 4px 6px; margin-bottom: 4px;';
+        }
+    }
+
+    _updateCpuCoresUI(cores) {
+        if (!this._cards.cpu || !this._cards.cpu.coreGrid) return;
+        const grid = this._cards.cpu.coreGrid;
+        const layout = grid.layout_manager;
+
+        const getCoreColor = (load) => {
+            if (load < 50) {
+                const alpha = 0.15 + (load / 50) * 0.45;
+                return `rgba(53, 132, 228, ${alpha})`;
+            } else if (load < 90) {
+                const alpha = 0.5 + ((load - 50) / 40) * 0.4;
+                return `rgba(240, 173, 78, ${alpha})`;
+            } else {
+                const alpha = 0.7 + ((load - 90) / 10) * 0.3;
+                return `rgba(224, 27, 36, ${alpha})`;
+            }
+        };
+
+        if (!this._coreWidgets) {
+            this._coreWidgets = [];
+            cores.forEach((load, i) => {
+                const box = new St.BoxLayout({
+                    style_class: 'resource-pulse-core-box',
+                    style: `background-color: ${getCoreColor(load)};`
+                });
+                const label = new St.Label({
+                    text: `${i}`,
+                    style_class: 'resource-pulse-core-label',
+                    x_align: Clutter.ActorAlign.CENTER,
+                    y_align: Clutter.ActorAlign.CENTER,
+                    x_expand: true,
+                    y_expand: true
+                });
+                box.add_child(label);
+                
+                const row = Math.floor(i / 8);
+                const col = i % 8;
+                layout.attach(box, col, row, 1, 1);
+                this._coreWidgets.push(box);
+            });
+        } else {
+            cores.forEach((load, i) => {
+                const box = this._coreWidgets[i];
+                if (box) {
+                    box.style = `background-color: ${getCoreColor(load)};`;
+                }
+            });
+        }
     }
 
     _createProcessesCard() {
@@ -823,6 +981,10 @@ export default class ResourcePulseExtension extends Extension {
             this._cards.cpu.ring.setValue(cpu.total);
             this._cards.cpu.sparkline.addSample(cpu.total);
             this._cards.cpu.details.text = `Load: ${cpu.loadavg.join(' · ')}  |  Uptime: ${formatUptime(cpu.uptime)}`;
+            
+            if (cpu.cores) {
+                this._updateCpuCoresUI(cpu.cores);
+            }
         }
 
         // 2. Update Memory Card
@@ -851,7 +1013,15 @@ export default class ResourcePulseExtension extends Extension {
                     timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
                 }
 
-                this._cards.battery.details.text = `Time Remaining: ${timeStr}  |  Health: ${Math.round(bat.health)}%  |  Cycles: ${bat.cycleCount}`;
+                let energyStr = '';
+                if (bat.energy !== undefined && bat.energy !== null && bat.energy > 0) {
+                    const en = bat.energy.toFixed(1);
+                    const ef = bat.energyFull ? bat.energyFull.toFixed(1) : '--';
+                    const efd = bat.energyFullDesign ? bat.energyFullDesign.toFixed(1) : '--';
+                    energyStr = `  |  Energy: ${en} / ${ef} Wh (design: ${efd} Wh)`;
+                }
+
+                this._cards.battery.details.text = `Time Remaining: ${timeStr}  |  Health: ${Math.round(bat.health)}%  |  Cycles: ${bat.cycleCount}${energyStr}`;
             } else {
                 this._cards.battery.card.visible = false;
             }
