@@ -160,5 +160,49 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
         });
         settings.bind('threshold-temp', tempAlertRow, 'value', Gio.SettingsBindFlags.DEFAULT);
         alertGroup.add(tempAlertRow);
+        // 5. Group: Advanced Settings
+        const advancedGroup = new Adw.PreferencesGroup({
+            title: 'Advanced Settings',
+            description: 'Advanced features and system troubleshooting'
+        });
+        page.add(advancedGroup);
+
+        const powerFixRow = new Adw.ActionRow({
+            title: 'Enable CPU Power Monitoring',
+            subtitle: 'Fixes 0W reading by granting permission to Intel/AMD RAPL sensors (Requires Admin)'
+        });
+        
+        const powerFixButton = new Gtk.Button({
+            label: 'Fix Permissions',
+            valign: Gtk.Align.CENTER,
+            has_frame: true
+        });
+        
+        powerFixButton.connect('clicked', () => {
+            try {
+                const script = `
+echo 'SUBSYSTEM=="powercap", ACTION=="add", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj"' | tee /etc/udev/rules.d/99-powercap-read.rules
+udevadm control --reload-rules
+udevadm trigger
+chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
+`;
+                const proc = Gio.Subprocess.new(['pkexec', 'bash', '-c', script], Gio.SubprocessFlags.NONE);
+                proc.wait_async(null, (obj, res) => {
+                    try {
+                        obj.wait_finish(res);
+                        powerFixRow.subtitle = 'Permissions successfully updated!';
+                        powerFixButton.sensitive = false;
+                    } catch (e) {
+                        powerFixRow.subtitle = `Failed: ${e.message}`;
+                    }
+                });
+            } catch (e) {
+                console.error(e);
+            }
+        });
+        
+        powerFixRow.add_suffix(powerFixButton);
+        powerFixRow.activatable_widget = powerFixButton;
+        advancedGroup.add(powerFixRow);
     }
 }
