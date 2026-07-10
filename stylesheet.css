@@ -1,0 +1,130 @@
+/* Resource Pulse Extension Stylesheet */
+
+.resource-pulse-indicator-box {
+    spacing: 6px;
+    align-items: center;
+}
+
+.resource-pulse-divider {
+    color: rgba(200, 200, 200, 0.3);
+    font-weight: 300;
+    font-size: 1.1em;
+    padding: 0 2px;
+}
+
+.resource-pulse-label {
+    font-size: 0.9em;
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+/* Dropdown Menu Layout */
+.resource-pulse-menu-section {
+    padding: 8px;
+    min-width: 320px;
+    max-width: 450px;
+}
+
+.resource-pulse-section-title {
+    font-size: 0.85em;
+    font-weight: bold;
+    color: #888;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    margin-top: 4px;
+}
+
+/* Grid Selector */
+.resource-pulse-grid {
+    spacing-rows: 6px;
+    spacing-columns: 6px;
+    margin-bottom: 12px;
+}
+
+.resource-pulse-grid-button {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px 12px;
+    transition-duration: 100ms;
+}
+
+.resource-pulse-grid-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.resource-pulse-grid-button:active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.resource-pulse-grid-button-active {
+    background-color: rgba(53, 132, 228, 0.25);
+    border: 1px solid rgba(53, 132, 228, 0.6);
+}
+
+.resource-pulse-grid-button-active:hover {
+    background-color: rgba(53, 132, 228, 0.35);
+}
+
+/* Dashboard Cards */
+.resource-pulse-dashboard {
+    spacing: 8px;
+}
+
+.resource-pulse-card {
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px;
+}
+
+.resource-pulse-card-header {
+    margin-bottom: 4px;
+}
+
+.resource-pulse-card-title {
+    font-weight: bold;
+    font-size: 0.95em;
+}
+
+.resource-pulse-card-subtitle {
+    font-size: 0.8em;
+    color: #999;
+}
+
+.resource-pulse-card-details {
+    font-size: 0.8em;
+    color: #bbb;
+    margin-top: 4px;
+}
+
+/* Drawing Areas */
+.resource-pulse-sparkline {
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    margin-left: 8px;
+}
+
+.resource-pulse-ring {
+    margin-right: 8px;
+}
+
+/* Processes Section */
+.resource-pulse-process-item {
+    font-size: 0.8em;
+    color: #ddd;
+    padding: 2px 4px;
+    background-color: rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+    margin-top: 2px;
+}
+
+.resource-pulse-process-name {
+    font-weight: 500;
+}
+
+.resource-pulse-process-stat {
+    font-weight: bold;
+    color: rgba(53, 132, 228, 0.9);
+}
