@@ -10,7 +10,7 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import * as Config from 'resource:///org/gnome/shell/shared/config.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 import { CpuSampler } from './lib/cpu.js';
 import { MemorySampler } from './lib/memory.js';
