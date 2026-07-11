@@ -74,12 +74,13 @@ function runSubprocess(argv) {
     });
 }
 
+
 // ─── Custom Cairo Widgets ─────────────────────────────────────────────────────
 
 const Sparkline = GObject.registerClass({
     GTypeName: 'ResourcePulseSparkline',
 }, class Sparkline extends St.DrawingArea {
-    _init(width = 360, height = 40, maxVal = 100, autoScale = false) {
+    _init(width = 400, height = 100, maxVal = 100, autoScale = false) {
         super._init({ style_class: 'resource-pulse-sparkline', width, height });
         this.history = [];
         this.maxVal = maxVal;
@@ -106,7 +107,6 @@ const Sparkline = GObject.registerClass({
         const [w, h] = area.get_surface_size();
         cr.save();
 
-        // Accent blue
         const fgR = 0.208, fgG = 0.518, fgB = 0.894, fgA = 1.0;
 
         if (this.history.length < 2) { cr.restore(); return; }
@@ -120,7 +120,6 @@ const Sparkline = GObject.registerClass({
 
         const step = w / 59;
 
-        // Fill
         cr.moveTo(0, h);
         for (let i = 0; i < this.history.length; i++) {
             cr.lineTo(i * step, h - (this.history[i] / max) * (h - 2));
@@ -130,7 +129,6 @@ const Sparkline = GObject.registerClass({
         cr.setSourceRGBA(fgR, fgG, fgB, 0.12);
         cr.fill();
 
-        // Line
         cr.setLineWidth(1.5);
         cr.setSourceRGBA(fgR, fgG, fgB, fgA);
         for (let i = 0; i < this.history.length; i++) {
@@ -141,15 +139,52 @@ const Sparkline = GObject.registerClass({
         }
         cr.stroke();
 
-        // Scale label text
         if (this.scaleLabel) {
             cr.selectFontFace("Sans", Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
-            cr.setFontSize(10);
-            cr.setSourceRGBA(1, 1, 1, 0.4);
-            cr.moveTo(4, 12);
+            cr.setFontSize(11);
+            cr.setSourceRGBA(1, 1, 1, 0.6);
+            cr.moveTo(6, 16);
             cr.showText(this.scaleLabel);
         }
 
+        cr.restore();
+    }
+});
+
+const ProgressBar = GObject.registerClass({
+    GTypeName: 'ResourcePulseProgressBar',
+}, class ProgressBar extends St.DrawingArea {
+    _init(height = 6, r=0.2, g=0.51, b=0.89) {
+        super._init({ style_class: 'resource-pulse-progress-track', height, x_expand: true });
+        this.pct = 0;
+        this.r = r; this.g = g; this.b = b;
+        this.connect('repaint', this._draw.bind(this));
+    }
+    setPercent(pct) {
+        pct = Math.max(0, Math.min(100, pct));
+        if (this.pct !== pct) {
+            this.pct = pct;
+            this.queue_repaint();
+        }
+    }
+    _draw(area) {
+        const cr = area.get_context();
+        const [w, h] = area.get_surface_size();
+        cr.save();
+        
+        // Track
+        cr.setSourceRGBA(0, 0, 0, 0.3);
+        cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
+        cr.arc(w - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
+        cr.fill();
+
+        // Fill
+        const fillW = Math.max(h, w * (this.pct / 100));
+        cr.setSourceRGBA(this.r, this.g, this.b, 1.0);
+        cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
+        cr.arc(fillW - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
+        cr.fill();
+        
         cr.restore();
     }
 });
@@ -187,10 +222,12 @@ export default class ResourcePulseExtension extends Extension {
         this._indicator.menu.addMenuItem(this._menuSection);
 
         // Build UI
-        this._activeTab = 'cpu';
+        this._activeTab = 'overview';
         this._coreWidgets = null;
-        this._buildPinGrid();
-        this._buildDashboard();
+        this._procWidgets = [];
+        this._buildOverview();
+        this._buildDetails();
+        this._updateTabVisibility();
 
         // Track menu open
         this._menuOpen = false;
@@ -227,6 +264,15 @@ export default class ResourcePulseExtension extends Extension {
         this._topBarWidgets = {};
         this._settings = null;
         this._coreWidgets = null;
+        this._procWidgets = [];
+        this._cpu = null;
+        this._mem = null;
+        this._bat = null;
+        this._pwr = null;
+        this._dsk = null;
+        this._net = null;
+        this._thm = null;
+        this._gpu = null;
     }
 
     // ── Polling ──────────────────────────────────────────────────────────────
@@ -250,7 +296,7 @@ export default class ResourcePulseExtension extends Extension {
             const pwr = await this._pwr.sample(bat);
 
             let processes = [];
-            if (this._menuOpen) {
+            if (this._menuOpen && this._activeTab === 'cpu') {
                 const stdout = await runSubprocess(['ps', '-eo', 'pid,%cpu,%mem,comm', '--sort=-%cpu']);
                 if (stdout) {
                     const lines = stdout.trim().split('\n').slice(1, 6);
@@ -329,8 +375,6 @@ export default class ResourcePulseExtension extends Extension {
             this._indicatorBox.add_child(box);
             this._topBarWidgets[key] = { label, icon };
         });
-
-        this._updatePinGridState(pinned);
     }
 
     _updateTopBarUI(data) {
@@ -371,137 +415,123 @@ export default class ResourcePulseExtension extends Extension {
         });
     }
 
-    // ── Pin Grid ──────────────────────────────────────────────────────────────
+    // ── Overview Page ─────────────────────────────────────────────────────────
 
-    _buildPinGrid() {
-        this._pinGrid = new St.BoxLayout({
-            style_class: 'resource-pulse-picker-row',
-            vertical: false
-        });
+    _buildOverview() {
+        this._overviewPage = new St.BoxLayout({ vertical: true });
+        
+        // Primary List (CPU, Memory, Battery)
+        this._primaryList = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-primary-list' });
+        this._overviewPage.add_child(this._primaryList);
 
-        this._gridButtons = {};
-
-        const metrics = [
-            { key: 'cpu' }, { key: 'memory' }, { key: 'battery' },
-            { key: 'power' }, { key: 'disk' }, { key: 'network' },
-            { key: 'thermal' }, { key: 'gpu' }
+        const primaryMetrics = [
+            { key: 'cpu', label: 'CPU', tint: 'tint-cpu', rgb: [0.208, 0.518, 0.894] },
+            { key: 'memory', label: 'Memory', tint: 'tint-memory', rgb: [0.569, 0.255, 0.675] },
+            { key: 'battery', label: 'Battery', tint: 'tint-battery', rgb: [0.18, 0.76, 0.494] }
         ];
 
-        metrics.forEach(metric => {
-            const button = new St.Button({
-                style_class: 'resource-pulse-grid-button',
-                can_focus: true,
-                toggle_mode: true,
-                x_align: Clutter.ActorAlign.CENTER,
-                y_align: Clutter.ActorAlign.CENTER
-            });
-            button.set_child(new St.Icon({
-                icon_name: this._getIconName(metric.key),
-                style_class: `system-status-icon icon-${metric.key}`,
-                y_align: Clutter.ActorAlign.CENTER,
-                x_align: Clutter.ActorAlign.CENTER
-            }));
-            button.accessible_name = metric.key;
-
-            button.connect('clicked', () => {
-                let current = this._settings.get_strv('pinned-metrics') || [];
-                if (button.checked) {
-                    if (!current.includes(metric.key)) current.push(metric.key);
-                } else {
-                    current = current.filter(k => k !== metric.key);
-                }
-                this._settings.set_strv('pinned-metrics', current);
-            });
-
-            this._pinGrid.add_child(button);
-            this._gridButtons[metric.key] = button;
-        });
-
-        this._menuContainer.add_child(this._pinGrid);
-    }
-
-    _updatePinGridState(pinned) {
-        if (!this._gridButtons) return;
-        Object.keys(this._gridButtons).forEach(key => {
-            const btn = this._gridButtons[key];
-            btn.checked = pinned.includes(key);
-            if (btn.checked) btn.add_style_class_name('resource-pulse-grid-button-active');
-            else btn.remove_style_class_name('resource-pulse-grid-button-active');
-        });
-    }
-
-    // ── Dashboard ─────────────────────────────────────────────────────────────
-
-    _buildDashboard() {
-        // ── Summary Grid ──
-        const gridLayout = new Clutter.GridLayout({
-            column_homogeneous: true,
-            row_homogeneous: false
-        });
-        this._summaryGrid = new St.Widget({
-            layout_manager: gridLayout,
-            style_class: 'resource-pulse-summary-grid'
-        });
         this._summaryCards = {};
 
-        const SUMMARY_METRICS = [
-            { key: 'cpu',     label: 'CPU' },
-            { key: 'memory',  label: 'Memory' },
-            { key: 'battery', label: 'Battery' },
-            { key: 'power',   label: 'Power' },
-            { key: 'disk',    label: 'Disk' },
-            { key: 'network', label: 'Network' },
-            { key: 'thermal', label: 'Thermal' },
-            { key: 'gpu',     label: 'GPU' },
-        ];
-
-        SUMMARY_METRICS.forEach((metric, i) => {
+        primaryMetrics.forEach(m => {
             const card = new St.BoxLayout({
-                style_class: 'resource-pulse-summary-card',
-                vertical: true,
-                reactive: true,
-                can_focus: true
+                style_class: `resource-pulse-primary-card ${m.tint}`,
+                vertical: true, reactive: true, can_focus: true
             });
-
-            const header = new St.BoxLayout({ vertical: false, style_class: 'resource-pulse-summary-header' });
+            const header = new St.BoxLayout({ style_class: 'resource-pulse-primary-header' });
             header.add_child(new St.Icon({
-                icon_name: this._getIconName(metric.key),
-                style_class: `system-status-icon icon-${metric.key}`,
+                icon_name: this._getIconName(m.key),
+                style_class: `system-status-icon icon-${m.key}`,
                 y_align: Clutter.ActorAlign.CENTER
             }));
+            header.add_child(new St.Label({
+                text: m.label,
+                style_class: 'resource-pulse-primary-title',
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER
+            }));
+            
+            const valueLbl = new St.Label({ text: '-- %', style_class: 'resource-pulse-primary-value' });
+            header.add_child(valueLbl);
             card.add_child(header);
 
-            const titleLbl = new St.Label({
-                text: metric.label,
-                style_class: 'resource-pulse-summary-title'
-            });
-            card.add_child(titleLbl);
-
-            const valueLbl = new St.Label({
-                text: '--',
-                style_class: 'resource-pulse-summary-value'
-            });
-            card.add_child(valueLbl);
+            const pbar = new ProgressBar(6, m.rgb[0], m.rgb[1], m.rgb[2]);
+            card.add_child(pbar);
 
             card.connect('button-press-event', () => {
-                this._activeTab = metric.key;
+                this._activeTab = m.key;
                 this._updateTabVisibility();
                 return Clutter.EVENT_STOP;
             });
 
-            gridLayout.attach(card, i % 4, Math.floor(i / 4), 1, 1);
-            this._summaryCards[metric.key] = { box: card, valueLabel: valueLbl };
+            this._primaryList.add_child(card);
+            this._summaryCards[m.key] = { box: card, valueLabel: valueLbl, pbar };
         });
 
-        this._menuContainer.add_child(this._summaryGrid);
+        // Secondary Grid (Disk, Net, Thermal, Power, GPU)
+        const secondaryGrid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
+        this._secondaryBox = new St.Widget({
+            layout_manager: secondaryGrid,
+            style_class: 'resource-pulse-secondary-grid'
+        });
+        this._overviewPage.add_child(this._secondaryBox);
 
+        const secondaryMetrics = [
+            { key: 'disk', label: 'Disk', tint: 'tint-disk' },
+            { key: 'network', label: 'Network', tint: 'tint-network' },
+            { key: 'thermal', label: 'Thermals', tint: 'tint-thermal' },
+            { key: 'power', label: 'Power', tint: 'tint-power' },
+            { key: 'gpu', label: 'GPU', tint: 'tint-gpu' }
+        ];
 
+        secondaryMetrics.forEach((m, i) => {
+            const card = new St.BoxLayout({
+                style_class: `resource-pulse-secondary-card ${m.tint}`,
+                vertical: true, reactive: true, can_focus: true
+            });
+            
+            card.add_child(new St.Label({
+                text: m.label,
+                style_class: 'resource-pulse-secondary-title'
+            }));
+            
+            const valueLbl = new St.Label({
+                text: '--',
+                style_class: 'resource-pulse-secondary-value'
+            });
+            card.add_child(valueLbl);
 
-        // ── Detail Area ──
+            card.connect('button-press-event', () => {
+                this._activeTab = m.key;
+                this._updateTabVisibility();
+                return Clutter.EVENT_STOP;
+            });
+
+            secondaryGrid.attach(card, i % 2, Math.floor(i / 2), 1, 1);
+            this._summaryCards[m.key] = { box: card, valueLabel: valueLbl };
+        });
+
+        this._menuContainer.add_child(this._overviewPage);
+    }
+
+    // ── Details Page ──────────────────────────────────────────────────────────
+
+    _buildDetails() {
         this._detailArea = new St.BoxLayout({
             vertical: true,
             style_class: 'resource-pulse-detail-area'
         });
+
+        // Back button
+        const backBtn = new St.Button({
+            style_class: 'resource-pulse-back-button',
+            label: '← Overview',
+            x_align: Clutter.ActorAlign.START
+        });
+        backBtn.connect('clicked', () => {
+            this._activeTab = 'overview';
+            this._updateTabVisibility();
+        });
+        this._detailArea.add_child(backBtn);
 
         this._detailSections = {
             cpu:     this._buildCpuDetails(),
@@ -514,7 +544,6 @@ export default class ResourcePulseExtension extends Extension {
             gpu:     this._buildGpuDetails(),
         };
 
-        // Add all sections hidden; only one will be shown
         for (const key of Object.keys(this._detailSections)) {
             if (this._detailSections[key]) {
                 this._detailArea.add_child(this._detailSections[key]);
@@ -523,24 +552,20 @@ export default class ResourcePulseExtension extends Extension {
         }
 
         this._menuContainer.add_child(this._detailArea);
-        this._updateTabVisibility();
     }
 
     _updateTabVisibility() {
-
-        // Summary cards highlight
-        for (const [key, card] of Object.entries(this._summaryCards || {})) {
-            if (key === this._activeTab) card.box.add_style_class_name('resource-pulse-summary-card-active');
-            else card.box.remove_style_class_name('resource-pulse-summary-card-active');
-        }
-
-        // Show ONLY the active detail section
-        for (const [key, section] of Object.entries(this._detailSections || {})) {
-            if (section) section.visible = (key === this._activeTab);
+        if (this._activeTab === 'overview') {
+            this._overviewPage.visible = true;
+            this._detailArea.visible = false;
+        } else {
+            this._overviewPage.visible = false;
+            this._detailArea.visible = true;
+            for (const [key, section] of Object.entries(this._detailSections || {})) {
+                if (section) section.visible = (key === this._activeTab);
+            }
         }
     }
-
-    // ── Detail Section Builders ───────────────────────────────────────────────
 
     _detailRow(labelText, valueText = '--') {
         const row = new St.BoxLayout({ style_class: 'resource-pulse-detail-row', x_expand: true });
@@ -552,40 +577,72 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildCpuDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
+        const box = new St.BoxLayout({ vertical: true });
 
-        box.add_child(new St.Label({ text: 'CPU details', style_class: 'resource-pulse-detail-title' }));
+        this._cpuHardware = new St.Label({ text: 'CPU', style_class: 'resource-pulse-hardware-header' });
+        box.add_child(this._cpuHardware);
+        
+        box.add_child(new St.Label({ text: 'Current Usage', style_class: 'resource-pulse-sub-section-title' }));
 
-        this._cpuSparkline = new Sparkline(360, 40, 100, false);
+        this._cpuSparkline = new Sparkline(400, 80, 100, false);
         this._cpuSparkline.x_expand = true;
         box.add_child(this._cpuSparkline);
 
-        box.add_child(new St.Label({ text: 'Per core', style_class: 'resource-pulse-core-section-title' }));
+        box.add_child(new St.Label({ text: 'Per-Core Usage', style_class: 'resource-pulse-sub-section-title' }));
+        this._cpuCoreList = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;' });
+        box.add_child(this._cpuCoreList);
 
-        // Core grid: 4 columns of boxes  (Core 0–N)
-        const coreLayout = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
-        this._cpuCoreGrid = new St.Widget({ layout_manager: coreLayout, style_class: 'resource-pulse-core-grid' });
-        box.add_child(this._cpuCoreGrid);
-
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._cpuLoadAvg = this._detailRow('Load average');
         box.add_child(this._cpuLoadAvg.row);
-
         this._cpuUptime = this._detailRow('Uptime');
         box.add_child(this._cpuUptime.row);
 
-        box.add_child(new St.Label({ text: 'Top Processes', style_class: 'resource-pulse-core-section-title' }));
+        box.add_child(new St.Label({ text: 'Top Processes', style_class: 'resource-pulse-sub-section-title' }));
         this._procList = new St.BoxLayout({ vertical: true });
         box.add_child(this._procList);
 
         return box;
     }
 
+    _updateCpuCoresUI(cores) {
+        if (!this._cpuCoreList) return;
+        if (!this._coreWidgets || this._coreWidgets.length !== cores.length) {
+            this._cpuCoreList.destroy_all_children();
+            this._coreWidgets = [];
+            cores.forEach((load, i) => {
+                const row = new St.BoxLayout({ style: 'spacing: 10px;', y_align: Clutter.ActorAlign.CENTER, margin_bottom: 4 });
+                const lbl = new St.Label({ text: `Core ${i}`, style_class: 'resource-pulse-detail-label', width: 50 });
+                const pbar = new ProgressBar(6, 0.208, 0.518, 0.894);
+                pbar.x_expand = true;
+                const val = new St.Label({ text: `${Math.round(load)} %`, style_class: 'resource-pulse-detail-value', width: 40 });
+                val.x_align = Clutter.ActorAlign.END;
+                
+                row.add_child(lbl);
+                row.add_child(pbar);
+                row.add_child(val);
+                
+                this._cpuCoreList.add_child(row);
+                this._coreWidgets.push({ pbar, val });
+            });
+        }
+        
+        cores.forEach((load, i) => {
+            if (this._coreWidgets[i]) {
+                this._coreWidgets[i].pbar.setPercent(load);
+                this._coreWidgets[i].val.text = `${Math.round(load)} %`;
+            }
+        });
+    }
+
     _buildMemoryDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
-        box.add_child(new St.Label({ text: 'Memory details', style_class: 'resource-pulse-detail-title' }));
-        this._memSparkline = new Sparkline(360, 40, 100, false);
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Memory', style_class: 'resource-pulse-hardware-header' }));
+        box.add_child(new St.Label({ text: 'Current Usage', style_class: 'resource-pulse-sub-section-title' }));
+        this._memSparkline = new Sparkline(400, 80, 100, false);
         this._memSparkline.x_expand = true;
         box.add_child(this._memSparkline);
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._memUsed = this._detailRow('Used / Total');
         box.add_child(this._memUsed.row);
         this._memSwap = this._detailRow('Swap');
@@ -594,11 +651,14 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildBatteryDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
-        box.add_child(new St.Label({ text: 'Battery details', style_class: 'resource-pulse-detail-title' }));
-        this._batSparkline = new Sparkline(360, 40, 100, false);
+        const box = new St.BoxLayout({ vertical: true });
+        this._batHardware = new St.Label({ text: 'Battery', style_class: 'resource-pulse-hardware-header' });
+        box.add_child(this._batHardware);
+        box.add_child(new St.Label({ text: 'Charge History', style_class: 'resource-pulse-sub-section-title' }));
+        this._batSparkline = new Sparkline(400, 80, 100, false);
         this._batSparkline.x_expand = true;
         box.add_child(this._batSparkline);
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._batState  = this._detailRow('State');
         box.add_child(this._batState.row);
         this._batHealth = this._detailRow('Health');
@@ -607,11 +667,13 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildPowerDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
-        box.add_child(new St.Label({ text: 'Power details', style_class: 'resource-pulse-detail-title' }));
-        this._pwrSparkline = new Sparkline(360, 40, 100, true);
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Power', style_class: 'resource-pulse-hardware-header' }));
+        box.add_child(new St.Label({ text: 'Draw History', style_class: 'resource-pulse-sub-section-title' }));
+        this._pwrSparkline = new Sparkline(400, 80, 100, true);
         this._pwrSparkline.x_expand = true;
         box.add_child(this._pwrSparkline);
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._pwrSystem  = this._detailRow('System Draw');
         box.add_child(this._pwrSystem.row);
         this._pwrPackage = this._detailRow('CPU Package');
@@ -620,11 +682,14 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildDiskDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
-        box.add_child(new St.Label({ text: 'Disk details', style_class: 'resource-pulse-detail-title' }));
-        this._dskSparkline = new Sparkline(360, 40, 100, true);
+        const box = new St.BoxLayout({ vertical: true });
+        this._dskHardware = new St.Label({ text: 'Disk', style_class: 'resource-pulse-hardware-header' });
+        box.add_child(this._dskHardware);
+        box.add_child(new St.Label({ text: 'Write Activity', style_class: 'resource-pulse-sub-section-title' }));
+        this._dskSparkline = new Sparkline(400, 80, 100, true);
         this._dskSparkline.x_expand = true;
         box.add_child(this._dskSparkline);
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._dskRead  = this._detailRow('Read rate');
         box.add_child(this._dskRead.row);
         this._dskWrite = this._detailRow('Write rate');
@@ -635,11 +700,14 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildNetworkDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
-        box.add_child(new St.Label({ text: 'Network details', style_class: 'resource-pulse-detail-title' }));
-        this._netSparkline = new Sparkline(360, 40, 100, true);
+        const box = new St.BoxLayout({ vertical: true });
+        this._netHardware = new St.Label({ text: 'Network', style_class: 'resource-pulse-hardware-header' });
+        box.add_child(this._netHardware);
+        box.add_child(new St.Label({ text: 'Download Activity', style_class: 'resource-pulse-sub-section-title' }));
+        this._netSparkline = new Sparkline(400, 80, 100, true);
         this._netSparkline.x_expand = true;
         box.add_child(this._netSparkline);
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._netRx = this._detailRow('Download');
         box.add_child(this._netRx.row);
         this._netTx = this._detailRow('Upload');
@@ -648,11 +716,13 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildThermalDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
-        box.add_child(new St.Label({ text: 'Thermal details', style_class: 'resource-pulse-detail-title' }));
-        this._thmSparkline = new Sparkline(360, 40, 100, true);
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Thermals', style_class: 'resource-pulse-hardware-header' }));
+        box.add_child(new St.Label({ text: 'Temperature History', style_class: 'resource-pulse-sub-section-title' }));
+        this._thmSparkline = new Sparkline(400, 80, 100, true);
         this._thmSparkline.x_expand = true;
         box.add_child(this._thmSparkline);
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._thmPackage = this._detailRow('Package temp');
         box.add_child(this._thmPackage.row);
         this._thmFan = this._detailRow('Fan speed');
@@ -661,11 +731,14 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildGpuDetails() {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-detail-section' });
-        box.add_child(new St.Label({ text: 'GPU details', style_class: 'resource-pulse-detail-title' }));
-        this._gpuSparkline = new Sparkline(360, 40, 100, false);
+        const box = new St.BoxLayout({ vertical: true });
+        this._gpuHardware = new St.Label({ text: 'GPU', style_class: 'resource-pulse-hardware-header' });
+        box.add_child(this._gpuHardware);
+        box.add_child(new St.Label({ text: 'Current Usage', style_class: 'resource-pulse-sub-section-title' }));
+        this._gpuSparkline = new Sparkline(400, 80, 100, false);
         this._gpuSparkline.x_expand = true;
         box.add_child(this._gpuSparkline);
+        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
         this._gpuUsage = this._detailRow('Usage');
         box.add_child(this._gpuUsage.row);
         this._gpuMem   = this._detailRow('VRAM');
@@ -673,51 +746,6 @@ export default class ResourcePulseExtension extends Extension {
         this._gpuTemp  = this._detailRow('Temperature');
         box.add_child(this._gpuTemp.row);
         return box;
-    }
-
-    // ── CPU Core Grid ─────────────────────────────────────────────────────────
-
-    _updateCpuCoresUI(cores) {
-        if (!this._cpuCoreGrid) return;
-        const layout = this._cpuCoreGrid.layout_manager;
-
-        const coreColor = (load) => {
-            if (load < 50)  return `rgba(53, 132, 228, ${(0.20 + (load / 50) * 0.45).toFixed(2)})`;
-            if (load < 90)  return `rgba(240, 173, 78, ${(0.50 + ((load - 50) / 40) * 0.40).toFixed(2)})`;
-            return `rgba(224, 27, 36, ${(0.70 + ((load - 90) / 10) * 0.30).toFixed(2)})`;
-        };
-
-        if (!this._coreWidgets || this._coreWidgets.length !== cores.length) {
-            // Rebuild grid
-            this._cpuCoreGrid.destroy_all_children();
-            this._coreWidgets = [];
-            cores.forEach((load, i) => {
-                const box = new St.BoxLayout({
-                    style_class: 'resource-pulse-core-box',
-                    style: `background-color: ${coreColor(load)};`,
-                    vertical: true
-                });
-                const lblCore = new St.Label({
-                    text: `Core ${i}`,
-                    style_class: 'resource-pulse-core-label'
-                });
-                const lblVal = new St.Label({
-                    text: `${Math.round(load)}%`,
-                    style_class: 'resource-pulse-core-value'
-                });
-                box.add_child(lblCore);
-                box.add_child(lblVal);
-                layout.attach(box, i % 4, Math.floor(i / 4), 1, 1);
-                this._coreWidgets.push({ box, lblVal });
-            });
-        } else {
-            cores.forEach((load, i) => {
-                if (this._coreWidgets[i]) {
-                    this._coreWidgets[i].box.style = `background-color: ${coreColor(load)};`;
-                    this._coreWidgets[i].lblVal.text = `${Math.round(load)}%`;
-                }
-            });
-        }
     }
 
     // ── Dashboard Update ──────────────────────────────────────────────────────
@@ -730,12 +758,15 @@ export default class ResourcePulseExtension extends Extension {
         // ── CPU ──
         if (data.cpu) {
             const cpu = data.cpu;
-            if (this._summaryCards?.cpu)
-                this._summaryCards.cpu.valueLabel.text = `${Math.round(cpu.total)}%`;
+            if (this._summaryCards?.cpu) {
+                this._summaryCards.cpu.valueLabel.text = `${Math.round(cpu.total)} %`;
+                this._summaryCards.cpu.pbar.setPercent(cpu.total);
+            }
             if (this._cpuSparkline) {
                 this._cpuSparkline.addSample(cpu.total);
-                this._cpuSparkline.setScaleLabel(`Cur: ${Math.round(cpu.total)}%`);
+                this._cpuSparkline.setScaleLabel(`Cur: ${Math.round(cpu.total)} %`);
             }
+            if (this._cpuHardware)  this._cpuHardware.text = cpu.hardwareModel || 'Unknown CPU';
             if (this._cpuLoadAvg)   this._cpuLoadAvg.val.text = cpu.loadavg.join(' · ');
             if (this._cpuUptime)    this._cpuUptime.val.text  = formatUptime(cpu.uptime);
             if (cpu.cores)          this._updateCpuCoresUI(cpu.cores);
@@ -744,16 +775,18 @@ export default class ResourcePulseExtension extends Extension {
         // ── Memory ──
         if (data.mem) {
             const mem = data.mem;
-            if (this._summaryCards?.memory)
-                this._summaryCards.memory.valueLabel.text = `${Math.round(mem.percent)}%`;
+            if (this._summaryCards?.memory) {
+                this._summaryCards.memory.valueLabel.text = `${Math.round(mem.percent)} %`;
+                this._summaryCards.memory.pbar.setPercent(mem.percent);
+            }
             if (this._memSparkline) {
                 this._memSparkline.addSample(mem.percent);
-                this._memSparkline.setScaleLabel(`Used: ${Math.round(mem.percent)}%`);
+                this._memSparkline.setScaleLabel(`Used: ${Math.round(mem.percent)} %`);
             }
             if (this._memUsed) this._memUsed.val.text =
                 `${formatBytes(mem.used, useGiB)} / ${formatBytes(mem.total, useGiB)}`;
             if (this._memSwap) this._memSwap.val.text =
-                `${Math.round(mem.swapPercent)}% (${formatBytes(mem.swapUsed, useGiB)} / ${formatBytes(mem.swapTotal, useGiB)})`;
+                `${Math.round(mem.swapPercent)} % (${formatBytes(mem.swapUsed, useGiB)} / ${formatBytes(mem.swapTotal, useGiB)})`;
         }
 
         // ── Battery ──
@@ -762,12 +795,22 @@ export default class ResourcePulseExtension extends Extension {
             const sc = this._summaryCards?.battery;
             if (sc) {
                 sc.box.visible = bat.present;
-                if (bat.present) sc.valueLabel.text = `${Math.round(bat.percent)}%`;
+                if (bat.present) {
+                    sc.valueLabel.text = `${Math.round(bat.percent)} %`;
+                    sc.pbar.setPercent(bat.percent);
+                }
             }
             if (bat.present) {
                 if (this._batSparkline) {
                     this._batSparkline.addSample(bat.percent);
-                    this._batSparkline.setScaleLabel(`Cur: ${Math.round(bat.percent)}%`);
+                    this._batSparkline.setScaleLabel(`Cur: ${Math.round(bat.percent)} %`);
+                }
+                if (this._batHardware) {
+                    const info = [];
+                    if (bat.manufacturer && bat.manufacturer !== 'Unknown') info.push(bat.manufacturer);
+                    if (bat.modelName && bat.modelName !== 'Unknown') info.push(bat.modelName);
+                    if (bat.technology && bat.technology !== 'Unknown') info.push(bat.technology);
+                    this._batHardware.text = info.length > 0 ? info.join(' ') : 'Unknown Battery';
                 }
                 if (this._batState) {
                     const s = bat.state === 'charging' ? 'Charging'
@@ -775,7 +818,7 @@ export default class ResourcePulseExtension extends Extension {
                     this._batState.val.text = s;
                 }
                 if (this._batHealth) this._batHealth.val.text =
-                    `${Math.round(bat.health)}%  (${bat.cycleCount} cycles)`;
+                    `${Math.round(bat.health)} %  (${bat.cycleCount} cycles)`;
             }
         }
 
@@ -795,7 +838,7 @@ export default class ResourcePulseExtension extends Extension {
                 const draw = pwr.systemPower !== null ? pwr.systemPower : (pwr.packagePower || 0);
                 if (this._pwrSparkline) {
                     this._pwrSparkline.addSample(draw);
-                    this._pwrSparkline.setScaleLabel(`Draw: ${draw.toFixed(1)}W`);
+                    this._pwrSparkline.setScaleLabel(`Draw: ${draw.toFixed(1)} W`);
                 }
                 if (this._pwrSystem)  this._pwrSystem.val.text  = pwr.systemPower  !== null ? `${pwr.systemPower.toFixed(1)} W`  : '--';
                 if (this._pwrPackage) this._pwrPackage.val.text = pwr.packagePower !== null ? `${pwr.packagePower.toFixed(1)} W` : '--';
@@ -806,16 +849,22 @@ export default class ResourcePulseExtension extends Extension {
         if (data.dsk) {
             const dsk = data.dsk;
             const maxPct = dsk.mounts.length > 0 ? Math.max(...dsk.mounts.map(m => m.percent)) : 0;
-            if (this._summaryCards?.disk) this._summaryCards.disk.valueLabel.text = `${Math.round(maxPct)}%`;
+            if (this._summaryCards?.disk) this._summaryCards.disk.valueLabel.text = `${Math.round(maxPct)} %`;
             const readMB  = dsk.readRate  / (1024 * 1024);
             const writeMB = dsk.writeRate / (1024 * 1024);
             if (this._dskSparkline) {
                 this._dskSparkline.addSample(writeMB);
                 this._dskSparkline.setScaleLabel(`W: ${writeMB.toFixed(1)} MB/s`);
             }
+            if (this._dskHardware) {
+                const info = [];
+                if (dsk.hardwareModel && dsk.hardwareModel !== 'Unknown Disk') info.push(dsk.hardwareModel);
+                if (dsk.diskType && dsk.diskType !== 'Unknown') info.push(dsk.diskType);
+                this._dskHardware.text = info.length > 0 ? info.join(' ') : 'Unknown Disk';
+            }
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
-            if (this._dskUsage) this._dskUsage.val.text = dsk.mounts.map(m => `${m.mount} ${Math.round(m.percent)}%`).join('  ') || '--';
+            if (this._dskUsage) this._dskUsage.val.text = dsk.mounts.map(m => `${m.mount} ${Math.round(m.percent)} %`).join('  ') || '--';
         }
 
         // ── Network ──
@@ -825,6 +874,12 @@ export default class ResourcePulseExtension extends Extension {
             if (this._netSparkline) {
                 this._netSparkline.addSample(net.total.rxRate / 1024);
                 this._netSparkline.setScaleLabel(`DL: ${formatSpeed(net.total.rxRate)}`);
+            }
+            if (this._netHardware) {
+                const info = [];
+                if (net.total.hardwareMAC && net.total.hardwareMAC !== 'Unknown') info.push(`MAC: ${net.total.hardwareMAC}`);
+                if (net.total.hardwareSpeed && net.total.hardwareSpeed !== 'Unknown') info.push(net.total.hardwareSpeed);
+                this._netHardware.text = info.length > 0 ? info.join('  ') : 'Unknown';
             }
             if (this._netRx) this._netRx.val.text = formatSpeed(net.total.rxRate);
             if (this._netTx) this._netTx.val.text = formatSpeed(net.total.txRate);
@@ -852,37 +907,44 @@ export default class ResourcePulseExtension extends Extension {
             const sc = this._summaryCards?.gpu;
             if (sc) {
                 sc.box.visible = gpu.present;
-                if (gpu.present) sc.valueLabel.text = `${Math.round(gpu.percent)}%`;
+                if (gpu.present) sc.valueLabel.text = `${Math.round(gpu.percent)} %`;
             }
             if (gpu.present) {
                 if (this._gpuSparkline) {
                     this._gpuSparkline.addSample(gpu.percent);
-                    this._gpuSparkline.setScaleLabel(`Cur: ${Math.round(gpu.percent)}%`);
+                    this._gpuSparkline.setScaleLabel(`Cur: ${Math.round(gpu.percent)} %`);
                 }
-                if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
-                if (this._gpuMem)   this._gpuMem.val.text   = `${Math.round(gpu.memPercent)}% (${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)})`;
+                if (this._gpuHardware) this._gpuHardware.text = gpu.hardwareModel || 'Unknown GPU';
+                if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)} %`;
+                if (this._gpuMem)   this._gpuMem.val.text   = `${Math.round(gpu.memPercent)} % (${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)})`;
                 if (this._gpuTemp)  this._gpuTemp.val.text  = formatTemp(gpu.temp, tempUnit);
             }
         }
 
         // ── Top Processes (CPU tab) ──
         if (this._menuOpen && data.processes && data.processes.length > 0 && this._procList) {
-            this._procList.destroy_all_children();
-            data.processes.forEach(proc => {
-                const item = new St.BoxLayout({ style_class: 'resource-pulse-process-item' });
-                item.add_child(new St.Label({
-                    text: proc.comm,
-                    style_class: 'resource-pulse-process-name',
-                    x_expand: true,
-                    y_align: Clutter.ActorAlign.CENTER
-                }));
-                item.add_child(new St.Label({
-                    text: `${Math.round(proc.cpu)}% CPU   ${Math.round(proc.mem)}% MEM`,
-                    style_class: 'resource-pulse-process-stat',
-                    x_align: Clutter.ActorAlign.END,
-                    y_align: Clutter.ActorAlign.CENTER
-                }));
-                this._procList.add_child(item);
+            if (this._procWidgets.length !== data.processes.length) {
+                this._procList.destroy_all_children();
+                this._procWidgets = [];
+                for (let i = 0; i < data.processes.length; i++) {
+                    const item = new St.BoxLayout({ style_class: 'resource-pulse-process-item', vertical: true });
+                    const row1 = new St.BoxLayout();
+                    const nameLbl = new St.Label({ style_class: 'resource-pulse-process-name', x_expand: true });
+                    const statLbl = new St.Label({ style_class: 'resource-pulse-process-stat' });
+                    row1.add_child(nameLbl);
+                    row1.add_child(statLbl);
+                    const pbar = new ProgressBar(4, 0.208, 0.518, 0.894); // CPU Blue
+                    item.add_child(row1);
+                    item.add_child(pbar);
+                    this._procList.add_child(item);
+                    this._procWidgets.push({ nameLbl, statLbl, pbar });
+                }
+            }
+            data.processes.forEach((proc, i) => {
+                const w = this._procWidgets[i];
+                w.nameLbl.text = proc.comm;
+                w.statLbl.text = `${Math.round(proc.cpu)} %`;
+                w.pbar.setPercent(proc.cpu);
             });
         }
     }
