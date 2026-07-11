@@ -25,108 +25,263 @@
 .resource-pulse-popup {
     background-color: #1e1e1e !important;
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 12px !important;
+    border-radius: 14px !important;
     padding: 0 !important;
     margin: 0 !important;
 }
 
 .resource-pulse-menu-section {
     background-color: #1e1e1e;
-    border-radius: 12px;
+    border-radius: 14px;
     padding: 16px;
-    min-width: 420px;
+    min-width: 440px;
     max-width: 480px;
 }
 
-/* ── Primary Cards (CPU, Mem, Bat) ────────────────────────────────────────── */
+/* ── Headers ──────────────────────────────────────────────────────────────── */
 
-.resource-pulse-primary-list {
+.resource-pulse-overview-header {
+    margin-bottom: 12px;
+    spacing: 8px;
+}
+
+.resource-pulse-overview-title {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.resource-pulse-icon-button {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 50%;
+    padding: 6px;
+    color: #ffffff;
+    transition-duration: 100ms;
+}
+.resource-pulse-icon-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+.resource-pulse-icon-button:active {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ── Primary Row (CPU, Mem, Bat) ──────────────────────────────────────────── */
+
+.resource-pulse-primary-row {
     spacing: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
 }
 
 .resource-pulse-primary-card {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
-    padding: 12px 16px;
+    padding: 12px;
+    width: 128px;
     transition-duration: 120ms;
 }
 .resource-pulse-primary-card:hover {
     border-color: rgba(255, 255, 255, 0.14);
 }
 
-.resource-pulse-primary-header {
-    spacing: 8px;
+.resource-pulse-card-header {
+    spacing: 6px;
     margin-bottom: 2px;
 }
-.resource-pulse-primary-title {
-    font-size: 1.0em;
+
+.resource-pulse-card-title {
+    font-size: 0.9em;
     color: #a0a0a8;
     font-weight: 600;
 }
-.resource-pulse-primary-value {
-    font-size: 2.2em;
+
+.resource-pulse-card-value {
+    font-size: 1.8em;
     font-weight: bold;
     color: #ffffff;
-    text-align: right;
+    margin-bottom: 4px;
 }
 
-/* ── Secondary Grid (Disk, Net, etc.) ─────────────────────────────────────── */
+.resource-pulse-card-status {
+    font-size: 0.75em;
+    color: #8c8c94;
+    margin-top: 4px;
+}
+
+/* ── Secondary Grid (Disk, Net, Thermal, Power) ───────────────────────────── */
 
 .resource-pulse-secondary-grid {
     spacing-rows: 12px;
     spacing-columns: 12px;
+    margin-bottom: 12px;
 }
 
 .resource-pulse-secondary-card {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
     padding: 12px;
-    min-width: 130px;
+    min-width: 190px;
     transition-duration: 120ms;
 }
 .resource-pulse-secondary-card:hover {
     border-color: rgba(255, 255, 255, 0.14);
 }
 
+.resource-pulse-secondary-header {
+    spacing: 6px;
+    margin-bottom: 4px;
+}
+
 .resource-pulse-secondary-title {
-    font-size: 0.9em;
+    font-size: 0.85em;
     color: #a0a0a8;
     font-weight: 500;
-    margin-top: 4px;
 }
+
 .resource-pulse-secondary-value {
-    font-size: 1.4em;
+    font-size: 1.5em;
     font-weight: bold;
     color: #ffffff;
-    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.resource-pulse-secondary-subtext {
+    font-size: 0.75em;
+    color: #8c8c94;
+    margin-bottom: 6px;
+    line-height: 1.2;
+}
+
+/* ── Hardware Card (Overview Bottom) ──────────────────────────────────────── */
+
+.resource-pulse-hw-card {
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+}
+
+.resource-pulse-hw-top {
+    spacing: 12px;
+    margin-bottom: 14px;
+}
+
+.resource-pulse-chip {
+    border-radius: 8px;
+    padding: 6px;
+    min-width: 50px;
+    max-width: 50px;
+    height: 50px;
+    align-items: center;
+    justify-content: center;
+}
+
+.resource-pulse-chip-l1 {
+    font-size: 0.65em;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: bold;
+}
+.resource-pulse-chip-l2 {
+    font-size: 0.75em;
+    color: #ffffff;
+    font-weight: 800;
+    margin-top: -2px;
+}
+.resource-pulse-chip-l3 {
+    font-size: 1.2em;
+    color: #ffffff;
+    font-weight: 900;
+    font-style: italic;
+    margin-top: -2px;
+}
+
+.resource-pulse-hw-desc {
+    spacing: 2px;
+}
+
+.resource-pulse-hw-name {
+    font-size: 1.05em;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.resource-pulse-hw-stats {
+    font-size: 0.8em;
+    color: #a0a0a8;
+}
+
+.resource-pulse-hw-stats-row {
+    spacing: 8px;
+}
+
+.resource-pulse-hw-stat-col {
+    background-color: rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    padding: 8px 10px;
+    spacing: 2px;
+}
+
+.resource-pulse-hw-stat-title {
+    font-size: 0.75em;
+    color: #8c8c94;
+    font-weight: bold;
+}
+
+.resource-pulse-hw-stat-value {
+    font-size: 0.9em;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* ── Footer / SysMon Button ───────────────────────────────────────────────── */
+
+.resource-pulse-sysmon-button {
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 10px 14px;
+    transition-duration: 100ms;
+}
+.resource-pulse-sysmon-button:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+.resource-pulse-sysmon-button:active {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.resource-pulse-sysmon-label {
+    font-size: 0.95em;
+    font-weight: bold;
+    color: #ffffff;
+    margin-left: 10px;
 }
 
 /* ── Tints for Cards ──────────────────────────────────────────────────────── */
 
-.tint-cpu { background-color: rgba(53, 132, 228, 0.06); border-color: rgba(53, 132, 228, 0.15); }
-.tint-cpu:hover { background-color: rgba(53, 132, 228, 0.10); }
+.tint-cpu { background-color: rgba(53, 132, 228, 0.04); border-color: rgba(53, 132, 228, 0.12); }
+.tint-cpu:hover { background-color: rgba(53, 132, 228, 0.08); }
 
-.tint-memory { background-color: rgba(145, 65, 172, 0.06); border-color: rgba(145, 65, 172, 0.15); }
-.tint-memory:hover { background-color: rgba(145, 65, 172, 0.10); }
+.tint-memory { background-color: rgba(145, 65, 172, 0.04); border-color: rgba(145, 65, 172, 0.12); }
+.tint-memory:hover { background-color: rgba(145, 65, 172, 0.08); }
 
-.tint-battery { background-color: rgba(46, 194, 126, 0.06); border-color: rgba(46, 194, 126, 0.15); }
-.tint-battery:hover { background-color: rgba(46, 194, 126, 0.10); }
+.tint-battery { background-color: rgba(46, 194, 126, 0.04); border-color: rgba(46, 194, 126, 0.12); }
+.tint-battery:hover { background-color: rgba(46, 194, 126, 0.08); }
 
-.tint-power { background-color: rgba(255, 120, 0, 0.06); border-color: rgba(255, 120, 0, 0.15); }
-.tint-power:hover { background-color: rgba(255, 120, 0, 0.10); }
+.tint-power { background-color: rgba(246, 211, 45, 0.04); border-color: rgba(246, 211, 45, 0.12); }
+.tint-power:hover { background-color: rgba(246, 211, 45, 0.08); }
 
-.tint-disk { background-color: rgba(246, 211, 45, 0.06); border-color: rgba(246, 211, 45, 0.15); }
-.tint-disk:hover { background-color: rgba(246, 211, 45, 0.10); }
+.tint-disk { background-color: rgba(255, 120, 0, 0.04); border-color: rgba(255, 120, 0, 0.12); }
+.tint-disk:hover { background-color: rgba(255, 120, 0, 0.08); }
 
-.tint-network { background-color: rgba(224, 27, 36, 0.06); border-color: rgba(224, 27, 36, 0.15); }
-.tint-network:hover { background-color: rgba(224, 27, 36, 0.10); }
+.tint-network { background-color: rgba(224, 27, 36, 0.04); border-color: rgba(224, 27, 36, 0.12); }
+.tint-network:hover { background-color: rgba(224, 27, 36, 0.08); }
 
-.tint-thermal { background-color: rgba(255, 120, 0, 0.06); border-color: rgba(255, 120, 0, 0.15); }
-.tint-thermal:hover { background-color: rgba(255, 120, 0, 0.10); }
+.tint-thermal { background-color: rgba(255, 120, 0, 0.04); border-color: rgba(255, 120, 0, 0.12); }
+.tint-thermal:hover { background-color: rgba(255, 120, 0, 0.08); }
 
-.tint-gpu { background-color: rgba(51, 209, 122, 0.06); border-color: rgba(51, 209, 122, 0.15); }
-.tint-gpu:hover { background-color: rgba(51, 209, 122, 0.10); }
+.tint-gpu { background-color: rgba(51, 209, 122, 0.04); border-color: rgba(51, 209, 122, 0.12); }
+.tint-gpu:hover { background-color: rgba(51, 209, 122, 0.08); }
 
 /* ── Progress Bars ────────────────────────────────────────────────────────── */
 
@@ -144,45 +299,74 @@
 /* ── Details Page ─────────────────────────────────────────────────────────── */
 
 .resource-pulse-detail-area {
-    /* Main wrapper for details */
+    spacing: 12px;
 }
 
-.resource-pulse-back-button {
-    background-color: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    padding: 6px 12px;
-    font-weight: bold;
-    color: #ddd;
-    margin-bottom: 12px;
-    transition-duration: 100ms;
-}
-.resource-pulse-back-button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: #fff;
+.resource-pulse-detail-header {
+    spacing: 12px;
+    margin-bottom: 8px;
 }
 
-.resource-pulse-hardware-header {
-    font-size: 1.1em;
+.resource-pulse-detail-header-title-box {
+    spacing: 8px;
+}
+
+.resource-pulse-detail-header-title {
+    font-size: 1.25em;
     font-weight: bold;
     color: #ffffff;
-    margin-bottom: 2px;
 }
-.resource-pulse-hardware-sub {
+
+.resource-pulse-card {
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    spacing: 8px;
+}
+
+.resource-pulse-cpu-details-value {
+    font-size: 1.6em;
+    font-weight: bold;
+    color: #3584e4; /* Blue to match photo */
+}
+
+.resource-pulse-cores-row {
+    spacing: 16px;
+    x_expand: true;
+}
+
+.resource-pulse-stats-row {
+    spacing: 8px;
+    margin-bottom: 12px;
+}
+
+.resource-pulse-pill-button {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 4px 10px;
     font-size: 0.85em;
-    color: #a0a0a8;
-    margin-bottom: 16px;
+    font-weight: bold;
+    color: #cccccc;
+}
+.resource-pulse-pill-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
 }
 
 .resource-pulse-detail-row {
     margin-bottom: 10px;
 }
+
 .resource-pulse-detail-label {
     color: #a0a0a8;
-    font-size: 0.95em;
+    font-size: 0.9em;
 }
+
 .resource-pulse-detail-value {
     color: #ffffff;
-    font-size: 0.95em;
+    font-size: 0.9em;
     font-weight: 600;
 }
 
@@ -191,39 +375,40 @@
 .resource-pulse-sparkline {
     border-radius: 8px;
     background-color: rgba(0, 0, 0, 0.2);
-    margin-bottom: 16px;
 }
 
-/* ── Process List & Core Bars ─────────────────────────────────────────────── */
-
-.resource-pulse-sub-section-title {
-    font-size: 0.95em;
-    font-weight: bold;
-    color: #a0a0a8;
-    margin-top: 16px;
-    margin-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    padding-bottom: 4px;
-}
+/* ── Process List ─────────────────────────────────────────────────────────── */
 
 .resource-pulse-process-item {
-    padding: 6px 4px;
-    border-radius: 6px;
+    padding: 6px 0;
     margin-bottom: 2px;
 }
-.resource-pulse-process-item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+
+.resource-pulse-process-icon-box {
+    background-color: rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+    padding: 6px;
+    min-width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+}
+
+.resource-pulse-proc-icon {
+    icon-size: 14px;
+    color: #ffffff;
 }
 
 .resource-pulse-process-name {
     font-size: 0.9em;
-    color: #ddd;
-    font-weight: 500;
+    color: #ffffff;
+    font-weight: 600;
 }
+
 .resource-pulse-process-stat {
-    font-size: 0.85em;
+    font-size: 0.9em;
     font-weight: bold;
-    color: rgba(255, 255, 255, 0.9);
+    color: #ffffff;
 }
 
 /* ── System Icon Size ─────────────────────────────────────────────────────── */
@@ -237,8 +422,8 @@
 .icon-cpu { color: #3584e4; }
 .icon-memory { color: #9141ac; }
 .icon-battery { color: #2ec27e; }
-.icon-power { color: #ff7800; }
-.icon-disk { color: #f6d32d; }
+.icon-power { color: #f6d32d; }
+.icon-disk { color: #ff7800; }
 .icon-network { color: #e01b24; }
 .icon-thermal { color: #ff7800; }
 .icon-gpu { color: #33d17a; }
