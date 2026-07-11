@@ -512,6 +512,7 @@ export default class ResourcePulseExtension extends Extension {
         const cpuVal = new St.Label({ text: '-- %', style_class: 'resource-pulse-card-value' });
         cpuCard.add_child(cpuVal);
         const cpuSpark = new Sparkline(110, 35, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1 });
+        cpuSpark.x_expand = true;
         cpuCard.add_child(cpuSpark);
         const cpuBar = new ProgressBar(4, 0.208, 0.518, 0.894);
         cpuCard.add_child(cpuBar);
@@ -532,6 +533,7 @@ export default class ResourcePulseExtension extends Extension {
         const memVal = new St.Label({ text: '-- %', style_class: 'resource-pulse-card-value' });
         memCard.add_child(memVal);
         const memSpark = new Sparkline(110, 35, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1 });
+        memSpark.x_expand = true;
         memCard.add_child(memSpark);
         const memBar = new ProgressBar(4, 0.569, 0.255, 0.675);
         memCard.add_child(memBar);

@@ -90,20 +90,20 @@
 
 .resource-pulse-card-title {
     font-size: 0.9em;
-    color: #a0a0a8;
+    color: #a0a0a8 !important;
     font-weight: 600;
 }
 
 .resource-pulse-card-value {
     font-size: 1.8em;
     font-weight: bold;
-    color: #ffffff;
+    color: #ffffff !important;
     margin-bottom: 4px;
 }
 
 .resource-pulse-card-status {
     font-size: 0.75em;
-    color: #8c8c94;
+    color: #8c8c94 !important;
     margin-top: 4px;
 }
 
@@ -133,20 +133,20 @@
 
 .resource-pulse-secondary-title {
     font-size: 0.85em;
-    color: #a0a0a8;
+    color: #a0a0a8 !important;
     font-weight: 500;
 }
 
 .resource-pulse-secondary-value {
     font-size: 1.5em;
     font-weight: bold;
-    color: #ffffff;
+    color: #ffffff !important;
     margin-bottom: 2px;
 }
 
 .resource-pulse-secondary-subtext {
     font-size: 0.75em;
-    color: #8c8c94;
+    color: #8c8c94 !important;
     margin-bottom: 6px;
     line-height: 1.2;
 }
@@ -259,14 +259,14 @@
 
 /* ── Tints for Cards ──────────────────────────────────────────────────────── */
 
-.tint-cpu { background-color: rgba(53, 132, 228, 0.04); border-color: rgba(53, 132, 228, 0.12); }
-.tint-cpu:hover { background-color: rgba(53, 132, 228, 0.08); }
+.tint-cpu { background-color: #242424 !important; border: 1px solid rgba(53, 132, 228, 0.3) !important; }
+.tint-cpu:hover { background-color: #2c2c2c !important; border-color: rgba(53, 132, 228, 0.5) !important; }
 
-.tint-memory { background-color: rgba(145, 65, 172, 0.04); border-color: rgba(145, 65, 172, 0.12); }
-.tint-memory:hover { background-color: rgba(145, 65, 172, 0.08); }
+.tint-memory { background-color: #242424 !important; border: 1px solid rgba(145, 65, 172, 0.3) !important; }
+.tint-memory:hover { background-color: #2c2c2c !important; border-color: rgba(145, 65, 172, 0.5) !important; }
 
-.tint-battery { background-color: rgba(46, 194, 126, 0.04); border-color: rgba(46, 194, 126, 0.12); }
-.tint-battery:hover { background-color: rgba(46, 194, 126, 0.08); }
+.tint-battery { background-color: #242424 !important; border: 1px solid rgba(46, 194, 126, 0.3) !important; }
+.tint-battery:hover { background-color: #2c2c2c !important; border-color: rgba(46, 194, 126, 0.5) !important; }
 
 .tint-power { background-color: rgba(246, 211, 45, 0.04); border-color: rgba(246, 211, 45, 0.12); }
 .tint-power:hover { background-color: rgba(246, 211, 45, 0.08); }
@@ -419,11 +419,11 @@
 
 /* ── Icon Colors ──────────────────────────────────────────────────────────── */
 
-.icon-cpu { color: #3584e4; }
-.icon-memory { color: #9141ac; }
-.icon-battery { color: #2ec27e; }
-.icon-power { color: #f6d32d; }
-.icon-disk { color: #ff7800; }
-.icon-network { color: #e01b24; }
-.icon-thermal { color: #ff7800; }
-.icon-gpu { color: #33d17a; }
+.icon-cpu { color: #3584e4 !important; }
+.icon-memory { color: #9141ac !important; }
+.icon-battery { color: #2ec27e !important; }
+.icon-power { color: #f6d32d !important; }
+.icon-disk { color: #ff7800 !important; }
+.icon-network { color: #e01b24 !important; }
+.icon-thermal { color: #ff7800 !important; }
+.icon-gpu { color: #33d17a !important; }
