@@ -28,6 +28,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
     ├── network.js
     ├── thermal.js
     └── gpu.js
+├── icons/                # Symbolic SVG icons
 ```
 
 ## Installation & Deployment
@@ -59,6 +60,6 @@ gnome-extensions enable resource-pulse@yourdomain.example
 
 To bundle the extension for upload or sharing:
 ```bash
-gnome-extensions pack --extra-source=lib
+gnome-extensions pack --extra-source=lib --extra-source=icons
 ```
 This generates `resource-pulse@yourdomain.example.shell-extension.zip`.
