@@ -482,36 +482,40 @@ export default class ResourcePulseExtension extends Extension {
         this._overviewPage = new St.BoxLayout({ vertical: true });
 
         // Header container (System Overview, Refresh, Menu)
-        const headerBox = new St.BoxLayout({ style_class: 'resource-pulse-overview-header', y_align: Clutter.ActorAlign.CENTER });
-        const titleLbl = new St.Label({ text: 'System Overview', style_class: 'resource-pulse-overview-title', x_expand: true });
+        const headerBox = new St.BoxLayout({ style: 'margin-bottom: 12px;', y_align: Clutter.ActorAlign.CENTER });
+        const titleLbl = new St.Label({ text: 'System Overview', style: 'font-size: 1.3em; font-weight: bold; color: #ffffff;', x_expand: true });
         headerBox.add_child(titleLbl);
 
-        const refreshBtn = new St.Button({ style_class: 'resource-pulse-icon-button', reactive: true });
-        refreshBtn.add_child(new St.Icon({ icon_name: 'view-refresh-symbolic', style_class: 'system-status-icon' }));
+        const refreshBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        refreshBtn.add_child(new St.Icon({ icon_name: 'view-refresh-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
         refreshBtn.connect('clicked', () => this._poll());
 
-        const menuBtn = new St.Button({ style_class: 'resource-pulse-icon-button', reactive: true });
-        menuBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'system-status-icon' }));
+        const menuBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px; margin-left: 6px;', reactive: true });
+        menuBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
 
         headerBox.add_child(refreshBtn);
         headerBox.add_child(menuBtn);
         this._overviewPage.add_child(headerBox);
 
         // Horizontal Row for CPU, Memory, Battery
-        this._primaryRow = new St.BoxLayout({ style_class: 'resource-pulse-primary-row' });
+        this._primaryRow = new St.BoxLayout({ style: 'spacing: 12px; margin-bottom: 12px;' });
         this._overviewPage.add_child(this._primaryRow);
 
         this._summaryCards = {};
 
         // 1. CPU Card
-        const cpuCard = new St.BoxLayout({ style_class: 'resource-pulse-primary-card tint-cpu', vertical: true, reactive: true, can_focus: true });
-        const cpuHead = new St.BoxLayout({ style_class: 'resource-pulse-card-header' });
-        cpuHead.add_child(new St.Icon({ icon_name: this._getIconName('cpu'), style_class: 'system-status-icon icon-cpu' }));
-        cpuHead.add_child(new St.Label({ text: 'CPU', style_class: 'resource-pulse-card-title' }));
+        const cpuCard = new St.BoxLayout({
+            style: 'background-color: #1f2937; border: 1px solid rgba(53, 132, 228, 0.4); border-radius: 12px; padding: 12px;',
+            vertical: true, reactive: true, can_focus: true
+        });
+        const cpuHead = new St.BoxLayout({ style: 'spacing: 6px;' });
+        const cpuIcon = new St.Icon({ icon_name: this._getIconName('cpu'), style: 'icon-size: 16px; color: #3584e4;' });
+        cpuHead.add_child(cpuIcon);
+        cpuHead.add_child(new St.Label({ text: 'CPU', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;' }));
         cpuCard.add_child(cpuHead);
-        const cpuVal = new St.Label({ text: '-- %', style_class: 'resource-pulse-card-value' });
+        const cpuVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
         cpuCard.add_child(cpuVal);
-        const cpuSpark = new Sparkline(110, 35, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1 });
+        const cpuSpark = new Sparkline(110, 38, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
         cpuSpark.x_expand = true;
         cpuCard.add_child(cpuSpark);
         const cpuBar = new ProgressBar(4, 0.208, 0.518, 0.894);
@@ -525,14 +529,18 @@ export default class ResourcePulseExtension extends Extension {
         this._summaryCards['cpu'] = { box: cpuCard, valueLabel: cpuVal, pbar: cpuBar, spark: cpuSpark };
 
         // 2. Memory Card
-        const memCard = new St.BoxLayout({ style_class: 'resource-pulse-primary-card tint-memory', vertical: true, reactive: true, can_focus: true });
-        const memHead = new St.BoxLayout({ style_class: 'resource-pulse-card-header' });
-        memHead.add_child(new St.Icon({ icon_name: this._getIconName('memory'), style_class: 'system-status-icon icon-memory' }));
-        memHead.add_child(new St.Label({ text: 'Memory', style_class: 'resource-pulse-card-title' }));
+        const memCard = new St.BoxLayout({
+            style: 'background-color: #1e1a2e; border: 1px solid rgba(145, 65, 172, 0.4); border-radius: 12px; padding: 12px;',
+            vertical: true, reactive: true, can_focus: true
+        });
+        const memHead = new St.BoxLayout({ style: 'spacing: 6px;' });
+        const memIcon = new St.Icon({ icon_name: this._getIconName('memory'), style: 'icon-size: 16px; color: #9141ac;' });
+        memHead.add_child(memIcon);
+        memHead.add_child(new St.Label({ text: 'Memory', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;' }));
         memCard.add_child(memHead);
-        const memVal = new St.Label({ text: '-- %', style_class: 'resource-pulse-card-value' });
+        const memVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
         memCard.add_child(memVal);
-        const memSpark = new Sparkline(110, 35, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1 });
+        const memSpark = new Sparkline(110, 38, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
         memSpark.x_expand = true;
         memCard.add_child(memSpark);
         const memBar = new ProgressBar(4, 0.569, 0.255, 0.675);
@@ -546,18 +554,22 @@ export default class ResourcePulseExtension extends Extension {
         this._summaryCards['memory'] = { box: memCard, valueLabel: memVal, pbar: memBar, spark: memSpark };
 
         // 3. Battery Card
-        const batCard = new St.BoxLayout({ style_class: 'resource-pulse-primary-card tint-battery', vertical: true, reactive: true, can_focus: true });
-        const batHead = new St.BoxLayout({ style_class: 'resource-pulse-card-header' });
-        batHead.add_child(new St.Icon({ icon_name: this._getIconName('battery'), style_class: 'system-status-icon icon-battery' }));
-        const batTitle = new St.Label({ text: 'Battery', style_class: 'resource-pulse-card-title', x_expand: true });
+        const batCard = new St.BoxLayout({
+            style: 'background-color: #192820; border: 1px solid rgba(46, 194, 126, 0.4); border-radius: 12px; padding: 12px;',
+            vertical: true, reactive: true, can_focus: true
+        });
+        const batHead = new St.BoxLayout({ style: 'spacing: 6px;' });
+        const batIcon = new St.Icon({ icon_name: this._getIconName('battery'), style: 'icon-size: 16px; color: #2ec27e;' });
+        batHead.add_child(batIcon);
+        const batTitle = new St.Label({ text: 'Battery', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true });
         batHead.add_child(batTitle);
-        batHead.add_child(new St.Icon({ icon_name: 'battery-good-symbolic', style_class: 'system-status-icon', opacity: 150 }));
+        batHead.add_child(new St.Icon({ icon_name: 'battery-good-symbolic', style: 'icon-size: 14px; color: rgba(255,255,255,0.4);' }));
         batCard.add_child(batHead);
-        const batVal = new St.Label({ text: '-- %', style_class: 'resource-pulse-card-value' });
+        const batVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
         batCard.add_child(batVal);
         const batBar = new ProgressBar(6, 0.18, 0.76, 0.494);
         batCard.add_child(batBar);
-        const batStatus = new St.Label({ text: 'Discharging', style_class: 'resource-pulse-card-status' });
+        const batStatus = new St.Label({ text: 'Discharging', style: 'font-size: 0.75em; color: #8c8c94; margin-top: 2px;' });
         batCard.add_child(batStatus);
         batCard.connect('button-press-event', () => {
             this._activeTab = 'battery';
@@ -580,17 +592,31 @@ export default class ResourcePulseExtension extends Extension {
         ];
 
         secondaryMetrics.forEach((m, idx) => {
-            const card = new St.BoxLayout({ style_class: `resource-pulse-secondary-card ${m.tint}`, vertical: true, reactive: true, can_focus: true });
-            
-            const head = new St.BoxLayout({ style_class: 'resource-pulse-secondary-header' });
-            head.add_child(new St.Icon({ icon_name: this._getIconName(m.key), style_class: `system-status-icon icon-${m.key}` }));
-            head.add_child(new St.Label({ text: m.label, style_class: 'resource-pulse-secondary-title' }));
+            // Dark tinted backgrounds per metric type
+            const bgMap = {
+                disk:    { bg: '#22200a', border: 'rgba(246,211,45,0.35)' },
+                network: { bg: '#22100f', border: 'rgba(224,27,36,0.35)' },
+                thermal: { bg: '#221608', border: 'rgba(255,120,0,0.35)' },
+                power:   { bg: '#22200a', border: 'rgba(246,211,45,0.35)' }
+            };
+            const colors = bgMap[m.key] || { bg: '#222', border: 'rgba(255,255,255,0.15)' };
+            const card = new St.BoxLayout({
+                style: `background-color: ${colors.bg}; border: 1px solid ${colors.border}; border-radius: 12px; padding: 12px;`,
+                vertical: true, reactive: true, can_focus: true
+            });
+
+            const iconColorMap = {
+                disk: '#f6d32d', network: '#e01b24', thermal: '#ff7800', power: '#f6d32d'
+            };
+            const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;' });
+            head.add_child(new St.Icon({ icon_name: this._getIconName(m.key), style: `icon-size: 16px; color: ${iconColorMap[m.key] || '#fff'};` }));
+            head.add_child(new St.Label({ text: m.label, style: 'font-size: 0.85em; font-weight: 600; color: #a0a0b8;' }));
             card.add_child(head);
 
-            const val = new St.Label({ text: '--', style_class: 'resource-pulse-secondary-value' });
+            const val = new St.Label({ text: '--', style: 'font-size: 1.5em; font-weight: bold; color: #ffffff; margin-bottom: 2px;' });
             card.add_child(val);
 
-            const subtext = new St.Label({ text: '', style_class: 'resource-pulse-secondary-subtext', visible: false });
+            const subtext = new St.Label({ text: '', style: 'font-size: 0.75em; color: #8c8c94; margin-bottom: 4px;', visible: false });
             card.add_child(subtext);
 
             const pbar = new ProgressBar(4, m.r, m.g, m.b);
@@ -607,44 +633,44 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         // Hardware Info Card
-        this._hwCard = new St.BoxLayout({ style_class: 'resource-pulse-hw-card', vertical: true });
-        
-        const hwTop = new St.BoxLayout({ style_class: 'resource-pulse-hw-top', y_align: Clutter.ActorAlign.CENTER });
-        
+        this._hwCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; margin-top: 10px;', vertical: true });
+
+        const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
+
         // Dynamic Chip badge
-        this._chipBox = new St.BoxLayout({ style_class: 'resource-pulse-chip', vertical: true });
-        this._chipLabel1 = new St.Label({ text: 'intel', style_class: 'resource-pulse-chip-l1' });
-        this._chipLabel2 = new St.Label({ text: 'CORE', style_class: 'resource-pulse-chip-l2' });
-        this._chipLabel3 = new St.Label({ text: 'i5', style_class: 'resource-pulse-chip-l3' });
+        this._chipBox = new St.BoxLayout({ style: 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;', vertical: true });
+        this._chipLabel1 = new St.Label({ text: 'intel', style: 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;' });
+        this._chipLabel2 = new St.Label({ text: 'CORE', style: 'font-size: 0.9em; color: #ffffff; font-weight: bold; letter-spacing: 1px;' });
+        this._chipLabel3 = new St.Label({ text: 'i5', style: 'font-size: 1.1em; color: #5bc3ff; font-weight: bold;' });
         this._chipBox.add_child(this._chipLabel1);
         this._chipBox.add_child(this._chipLabel2);
         this._chipBox.add_child(this._chipLabel3);
         hwTop.add_child(this._chipBox);
 
-        const hwDesc = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-hw-desc' });
-        this._hwName = new St.Label({ text: 'Intel Processor', style_class: 'resource-pulse-hw-name' });
-        this._hwStats = new St.Label({ text: 'Cores & Threads', style_class: 'resource-pulse-hw-stats' });
+        const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
+        this._hwName = new St.Label({ text: 'Intel Processor', style: 'font-size: 1.05em; font-weight: bold; color: #ffffff;' });
+        this._hwStats = new St.Label({ text: 'Cores & Threads', style: 'font-size: 0.8em; color: #a0a0b8;' });
         hwDesc.add_child(this._hwName);
         hwDesc.add_child(this._hwStats);
         hwTop.add_child(hwDesc);
         this._hwCard.add_child(hwTop);
 
         // Hardware Sub Stats (Uptime, Load Average, OS)
-        const hwStatsRow = new St.BoxLayout({ style_class: 'resource-pulse-hw-stats-row', x_expand: true });
-        
-        const uptimeBox = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-hw-stat-col' });
-        uptimeBox.add_child(new St.Label({ text: 'Uptime', style_class: 'resource-pulse-hw-stat-title' }));
-        this._hwUptimeVal = new St.Label({ text: '--', style_class: 'resource-pulse-hw-stat-value' });
+        const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
+
+        const uptimeBox = new St.BoxLayout({ vertical: true });
+        uptimeBox.add_child(new St.Label({ text: 'Uptime', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._hwUptimeVal = new St.Label({ text: '--', style: 'font-size: 1.0em; font-weight: bold; color: #ffffff;' });
         uptimeBox.add_child(this._hwUptimeVal);
-        
-        const loadBox = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-hw-stat-col', x_expand: true });
-        loadBox.add_child(new St.Label({ text: 'Load Average', style_class: 'resource-pulse-hw-stat-title' }));
-        this._hwLoadVal = new St.Label({ text: '--', style_class: 'resource-pulse-hw-stat-value' });
+
+        const loadBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        loadBox.add_child(new St.Label({ text: 'Load Average', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._hwLoadVal = new St.Label({ text: '--', style: 'font-size: 1.0em; font-weight: bold; color: #ffffff;' });
         loadBox.add_child(this._hwLoadVal);
 
-        const osBox = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-hw-stat-col' });
-        osBox.add_child(new St.Label({ text: 'OS', style_class: 'resource-pulse-hw-stat-title' }));
-        this._hwOsVal = new St.Label({ text: `GNOME ${Config.PACKAGE_VERSION.split('.')[0]}`, style_class: 'resource-pulse-hw-stat-value' });
+        const osBox = new St.BoxLayout({ vertical: true });
+        osBox.add_child(new St.Label({ text: 'OS', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._hwOsVal = new St.Label({ text: `GNOME ${Config.PACKAGE_VERSION.split('.')[0]}`, style: 'font-size: 1.0em; font-weight: bold; color: #ffffff;' });
         osBox.add_child(this._hwOsVal);
 
         hwStatsRow.add_child(uptimeBox);
@@ -655,11 +681,11 @@ export default class ResourcePulseExtension extends Extension {
         this._overviewPage.add_child(this._hwCard);
 
         // Footer button: Open System Monitor
-        const sysMonBtn = new St.Button({ style_class: 'resource-pulse-sysmon-button', reactive: true, x_expand: true });
+        const sysMonBtn = new St.Button({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 14px; margin-top: 10px;', reactive: true, x_expand: true });
         const btnBox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER });
-        const btnIcon = new St.Icon({ icon_name: 'utilities-system-monitor-symbolic', style_class: 'system-status-icon' });
-        const btnLabel = new St.Label({ text: 'Open System Monitor', style_class: 'resource-pulse-sysmon-label', x_expand: true });
-        const btnArrow = new St.Icon({ icon_name: 'go-next-symbolic', style_class: 'system-status-icon' });
+        const btnIcon = new St.Icon({ icon_name: 'utilities-system-monitor-symbolic', style: 'icon-size: 16px; color: #a0a0b8;' });
+        const btnLabel = new St.Label({ text: 'Open System Monitor', style: 'font-size: 0.9em; color: #a0a0b8; margin-left: 8px;', x_expand: true });
+        const btnArrow = new St.Icon({ icon_name: 'go-next-symbolic', style: 'icon-size: 14px; color: rgba(255,255,255,0.3);' });
         btnBox.add_child(btnIcon);
         btnBox.add_child(btnLabel);
         btnBox.add_child(btnArrow);
@@ -682,27 +708,27 @@ export default class ResourcePulseExtension extends Extension {
     _buildDetails() {
         this._detailArea = new St.BoxLayout({
             vertical: true,
-            style_class: 'resource-pulse-detail-area'
+            style: 'padding: 16px; min-width: 440px; max-width: 480px;'
         });
 
         // Top bar for CPU detail header (matches Right Panel header)
-        this._detailHeader = new St.BoxLayout({ style_class: 'resource-pulse-detail-header', y_align: Clutter.ActorAlign.CENTER });
-        
-        const backBtn = new St.Button({ style_class: 'resource-pulse-icon-button', reactive: true });
-        backBtn.add_child(new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'system-status-icon' }));
+        this._detailHeader = new St.BoxLayout({ style: 'margin-bottom: 14px; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+
+        const backBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        backBtn.add_child(new St.Icon({ icon_name: 'go-previous-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
         backBtn.connect('clicked', () => {
             this._activeTab = 'overview';
             this._updateTabVisibility();
         });
-        
-        this._detailHeaderTitleBox = new St.BoxLayout({ style_class: 'resource-pulse-detail-header-title-box', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
-        this._detailHeaderIcon = new St.Icon({ icon_name: 'utilities-system-monitor-symbolic', style_class: 'system-status-icon icon-cpu' });
-        this._detailHeaderTitle = new St.Label({ text: 'CPU', style_class: 'resource-pulse-detail-header-title' });
+
+        this._detailHeaderTitleBox = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        this._detailHeaderIcon = new St.Icon({ icon_name: 'utilities-system-monitor-symbolic', style: 'icon-size: 18px; color: #3584e4;' });
+        this._detailHeaderTitle = new St.Label({ text: 'CPU', style: 'font-size: 1.1em; font-weight: bold; color: #ffffff;' });
         this._detailHeaderTitleBox.add_child(this._detailHeaderIcon);
         this._detailHeaderTitleBox.add_child(this._detailHeaderTitle);
-        
-        const optBtn = new St.Button({ style_class: 'resource-pulse-icon-button', reactive: true });
-        optBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'system-status-icon' }));
+
+        const optBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        optBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
 
         this._detailHeader.add_child(backBtn);
         this._detailHeader.add_child(this._detailHeaderTitleBox);
@@ -740,9 +766,14 @@ export default class ResourcePulseExtension extends Extension {
             this._detailArea.visible = true;
             
             // Set header title & icon dynamically
+            const iconColorMap = {
+                cpu: '#3584e4', memory: '#9141ac', battery: '#2ec27e',
+                power: '#f6d32d', disk: '#f6d32d', network: '#e01b24',
+                thermal: '#ff7800', gpu: '#33d17a'
+            };
             this._detailHeaderIcon.icon_name = this._getIconName(this._activeTab);
-            this._detailHeaderIcon.style_class = `system-status-icon icon-${this._activeTab}`;
-            this._detailHeaderTitle.text = this._activeTab.toUpperCase();
+            this._detailHeaderIcon.style = `icon-size: 18px; color: ${iconColorMap[this._activeTab] || '#ffffff'};`;
+            this._detailHeaderTitle.text = this._activeTab.charAt(0).toUpperCase() + this._activeTab.slice(1);
 
             for (const [key, section] of Object.entries(this._detailSections || {})) {
                 if (section) section.visible = (key === this._activeTab);
@@ -751,22 +782,22 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _detailRow(labelText, valueText = '--') {
-        const row = new St.BoxLayout({ style_class: 'resource-pulse-detail-row', x_expand: true });
-        const lbl = new St.Label({ text: labelText, style_class: 'resource-pulse-detail-label', x_expand: true });
-        const val = new St.Label({ text: valueText, style_class: 'resource-pulse-detail-value' });
+        const row = new St.BoxLayout({ style: 'padding: 4px 0; spacing: 8px;', x_expand: true });
+        const lbl = new St.Label({ text: labelText, style: 'font-size: 0.85em; color: #a0a0b8;', x_expand: true });
+        const val = new St.Label({ text: valueText, style: 'font-size: 0.85em; color: #ffffff; font-weight: 600;' });
         row.add_child(lbl);
         row.add_child(val);
         return { row, val };
     }
 
     _buildCpuDetails() {
-        const box = new St.BoxLayout({ vertical: true });
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
 
         // CPU Usage Card
-        const usageCard = new St.BoxLayout({ style_class: 'resource-pulse-card', vertical: true });
-        const usageHead = new St.BoxLayout({ style_class: 'resource-pulse-card-header' });
-        usageHead.add_child(new St.Label({ text: 'CPU Usage', style_class: 'resource-pulse-card-title', x_expand: true }));
-        this._cpuDetailsVal = new St.Label({ text: '-- %', style_class: 'resource-pulse-cpu-details-value' });
+        const usageCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        const usageHead = new St.BoxLayout({ style: 'margin-bottom: 4px;' });
+        usageHead.add_child(new St.Label({ text: 'CPU Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+        this._cpuDetailsVal = new St.Label({ text: '--%', style: 'font-size: 1.0em; font-weight: bold; color: #3584e4;' });
         usageHead.add_child(this._cpuDetailsVal);
         usageCard.add_child(usageHead);
 
@@ -786,11 +817,11 @@ export default class ResourcePulseExtension extends Extension {
         box.add_child(usageCard);
 
         // Per-Core Usage Card
-        const coreCard = new St.BoxLayout({ style_class: 'resource-pulse-card', vertical: true });
-        coreCard.add_child(new St.Label({ text: 'Per-Core Usage', style_class: 'resource-pulse-card-title' }));
-        
+        const coreCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        coreCard.add_child(new St.Label({ text: 'Per-Core Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 8px;' }));
+
         // Two-column layout for cores
-        const colsBox = new St.BoxLayout({ style_class: 'resource-pulse-cores-row' });
+        const colsBox = new St.BoxLayout({ style: 'spacing: 16px;' });
         this._cpuCoreCol1 = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing: 4px;' });
         this._cpuCoreCol2 = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing: 4px;' });
         colsBox.add_child(this._cpuCoreCol1);
@@ -799,21 +830,24 @@ export default class ResourcePulseExtension extends Extension {
         box.add_child(coreCard);
 
         // Details Stats row (3 columns)
-        const statsRow = new St.BoxLayout({ style_class: 'resource-pulse-stats-row', x_expand: true });
-        
-        const loadBox = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-hw-stat-col', x_expand: true });
-        loadBox.add_child(new St.Label({ text: 'Load Average', style_class: 'resource-pulse-hw-stat-title' }));
-        this._cpuDetailsLoad = new St.Label({ text: '--', style_class: 'resource-pulse-hw-stat-value' });
+        const statsRow = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true });
+
+        const loadBox = new St.BoxLayout({ vertical: true, x_expand: true, style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px;' });
+        loadBox.add_child(new St.Icon({ icon_name: 'emblem-synchronizing-symbolic', style: 'icon-size: 14px; color: #a0a0b8; margin-bottom: 4px;' }));
+        loadBox.add_child(new St.Label({ text: 'Load Average', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._cpuDetailsLoad = new St.Label({ text: '--', style: 'font-size: 0.95em; font-weight: bold; color: #ffffff;' });
         loadBox.add_child(this._cpuDetailsLoad);
 
-        const freqBox = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-hw-stat-col' });
-        freqBox.add_child(new St.Label({ text: 'Frequency', style_class: 'resource-pulse-hw-stat-title' }));
-        this._cpuDetailsFreq = new St.Label({ text: '--', style_class: 'resource-pulse-hw-stat-value' });
+        const freqBox = new St.BoxLayout({ vertical: true, x_expand: true, style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px;' });
+        freqBox.add_child(new St.Icon({ icon_name: 'emblem-favorite-symbolic', style: 'icon-size: 14px; color: #a0a0b8; margin-bottom: 4px;' }));
+        freqBox.add_child(new St.Label({ text: 'Frequency', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._cpuDetailsFreq = new St.Label({ text: '--', style: 'font-size: 0.95em; font-weight: bold; color: #ffffff;' });
         freqBox.add_child(this._cpuDetailsFreq);
 
-        const uptimeBox = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-hw-stat-col' });
-        uptimeBox.add_child(new St.Label({ text: 'Uptime', style_class: 'resource-pulse-hw-stat-title' }));
-        this._cpuDetailsUptime = new St.Label({ text: '--', style_class: 'resource-pulse-hw-stat-value' });
+        const uptimeBox = new St.BoxLayout({ vertical: true, x_expand: true, style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px;' });
+        uptimeBox.add_child(new St.Icon({ icon_name: 'clock-symbolic', style: 'icon-size: 14px; color: #a0a0b8; margin-bottom: 4px;' }));
+        uptimeBox.add_child(new St.Label({ text: 'Uptime', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._cpuDetailsUptime = new St.Label({ text: '--', style: 'font-size: 0.95em; font-weight: bold; color: #ffffff;' });
         uptimeBox.add_child(this._cpuDetailsUptime);
 
         statsRow.add_child(loadBox);
@@ -822,15 +856,16 @@ export default class ResourcePulseExtension extends Extension {
         box.add_child(statsRow);
 
         // Top CPU Usage Card
-        const procCard = new St.BoxLayout({ style_class: 'resource-pulse-card', vertical: true });
-        const procHead = new St.BoxLayout({ y_align: Clutter.ActorAlign.CENTER });
-        procHead.add_child(new St.Label({ text: 'Top CPU Usage', style_class: 'resource-pulse-card-title', x_expand: true }));
-        
-        const showAllBtn = new St.Button({ style_class: 'resource-pulse-pill-button', label: 'Show All' });
+        const procCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        const procHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
+        procHead.add_child(new St.Label({ text: 'Top CPU Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+
+        const showAllBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.07); border-radius: 20px; padding: 4px 10px;', label: 'Show All' });
+        showAllBtn.child.style = 'font-size: 0.75em; color: #a0a0b8;';
         procHead.add_child(showAllBtn);
         procCard.add_child(procHead);
 
-        this._procList = new St.BoxLayout({ vertical: true });
+        this._procList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
         procCard.add_child(this._procList);
         box.add_child(procCard);
 
@@ -846,17 +881,17 @@ export default class ResourcePulseExtension extends Extension {
             this._coreWidgets = [];
             
             cores.forEach((load, i) => {
-                const row = new St.BoxLayout({ style: 'spacing: 8px;', y_align: Clutter.ActorAlign.CENTER, margin_bottom: 4 });
-                const lbl = new St.Label({ text: `Core ${i}`, style_class: 'resource-pulse-detail-label', width: 50 });
-                const pbar = new ProgressBar(6, 0.208, 0.518, 0.894);
+                const row = new St.BoxLayout({ style: 'spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+                const lbl = new St.Label({ text: `Core ${i}`, style: 'font-size: 0.78em; color: #a0a0b8;', width: 50 });
+                const pbar = new ProgressBar(5, 0.208, 0.518, 0.894);
                 pbar.x_expand = true;
-                const val = new St.Label({ text: `${Math.round(load)}%`, style_class: 'resource-pulse-detail-value', width: 35 });
+                const val = new St.Label({ text: `${Math.round(load)}%`, style: 'font-size: 0.78em; color: #ffffff; font-weight: 600;', width: 35 });
                 val.x_align = Clutter.ActorAlign.END;
-                
+
                 row.add_child(lbl);
                 row.add_child(pbar);
                 row.add_child(val);
-                
+
                 if (i % 2 === 0) {
                     this._cpuCoreCol1.add_child(row);
                 } else {
@@ -875,104 +910,132 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildMemoryDetails() {
-        const box = new St.BoxLayout({ vertical: true });
-        box.add_child(new St.Label({ text: 'Current Usage', style_class: 'resource-pulse-sub-section-title' }));
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Memory Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._memSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._memSparkline.x_expand = true;
-        box.add_child(this._memSparkline);
-        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
+        sparkCard.add_child(this._memSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._memUsed = this._detailRow('Used / Total');
-        box.add_child(this._memUsed.row);
+        statsCard.add_child(this._memUsed.row);
         this._memSwap = this._detailRow('Swap');
-        box.add_child(this._memSwap.row);
+        statsCard.add_child(this._memSwap.row);
+        box.add_child(statsCard);
         return box;
     }
 
     _buildBatteryDetails() {
-        const box = new St.BoxLayout({ vertical: true });
-        box.add_child(new St.Label({ text: 'Charge History', style_class: 'resource-pulse-sub-section-title' }));
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Charge History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._batSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batSparkline.x_expand = true;
-        box.add_child(this._batSparkline);
-        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
+        sparkCard.add_child(this._batSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._batState  = this._detailRow('State');
-        box.add_child(this._batState.row);
+        statsCard.add_child(this._batState.row);
         this._batHealth = this._detailRow('Health');
-        box.add_child(this._batHealth.row);
+        statsCard.add_child(this._batHealth.row);
+        box.add_child(statsCard);
         return box;
     }
 
     _buildPowerDetails() {
-        const box = new St.BoxLayout({ vertical: true });
-        box.add_child(new St.Label({ text: 'Draw History', style_class: 'resource-pulse-sub-section-title' }));
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Draw History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._pwrSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._pwrSparkline.x_expand = true;
-        box.add_child(this._pwrSparkline);
-        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
+        sparkCard.add_child(this._pwrSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._pwrSystem  = this._detailRow('System Draw');
-        box.add_child(this._pwrSystem.row);
+        statsCard.add_child(this._pwrSystem.row);
         this._pwrPackage = this._detailRow('CPU Package');
-        box.add_child(this._pwrPackage.row);
+        statsCard.add_child(this._pwrPackage.row);
+        box.add_child(statsCard);
         return box;
     }
 
     _buildDiskDetails() {
-        const box = new St.BoxLayout({ vertical: true });
-        box.add_child(new St.Label({ text: 'Write Activity', style_class: 'resource-pulse-sub-section-title' }));
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Write Activity', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._dskSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskSparkline.x_expand = true;
-        box.add_child(this._dskSparkline);
-        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
+        sparkCard.add_child(this._dskSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._dskRead  = this._detailRow('Read rate');
-        box.add_child(this._dskRead.row);
+        statsCard.add_child(this._dskRead.row);
         this._dskWrite = this._detailRow('Write rate');
-        box.add_child(this._dskWrite.row);
+        statsCard.add_child(this._dskWrite.row);
         this._dskUsage = this._detailRow('Usage');
-        box.add_child(this._dskUsage.row);
+        statsCard.add_child(this._dskUsage.row);
+        box.add_child(statsCard);
         return box;
     }
 
     _buildNetworkDetails() {
-        const box = new St.BoxLayout({ vertical: true });
-        box.add_child(new St.Label({ text: 'Download Activity', style_class: 'resource-pulse-sub-section-title' }));
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Download Activity', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._netSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._netSparkline.x_expand = true;
-        box.add_child(this._netSparkline);
-        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
+        sparkCard.add_child(this._netSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._netRx = this._detailRow('Download');
-        box.add_child(this._netRx.row);
+        statsCard.add_child(this._netRx.row);
         this._netTx = this._detailRow('Upload');
-        box.add_child(this._netTx.row);
+        statsCard.add_child(this._netTx.row);
+        box.add_child(statsCard);
         return box;
     }
 
     _buildThermalDetails() {
-        const box = new St.BoxLayout({ vertical: true });
-        box.add_child(new St.Label({ text: 'Temperature History', style_class: 'resource-pulse-sub-section-title' }));
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Temperature History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._thmSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [1.0, 0.47, 0.0, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._thmSparkline.x_expand = true;
-        box.add_child(this._thmSparkline);
-        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
+        sparkCard.add_child(this._thmSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._thmPackage = this._detailRow('Package temp');
-        box.add_child(this._thmPackage.row);
+        statsCard.add_child(this._thmPackage.row);
         this._thmFan = this._detailRow('Fan speed');
-        box.add_child(this._thmFan.row);
+        statsCard.add_child(this._thmFan.row);
+        box.add_child(statsCard);
         return box;
     }
 
     _buildGpuDetails() {
-        const box = new St.BoxLayout({ vertical: true });
-        box.add_child(new St.Label({ text: 'Current Usage', style_class: 'resource-pulse-sub-section-title' }));
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'GPU Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._gpuSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._gpuSparkline.x_expand = true;
-        box.add_child(this._gpuSparkline);
-        box.add_child(new St.Label({ text: 'Stats', style_class: 'resource-pulse-sub-section-title' }));
+        sparkCard.add_child(this._gpuSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._gpuUsage = this._detailRow('Usage');
-        box.add_child(this._gpuUsage.row);
+        statsCard.add_child(this._gpuUsage.row);
         this._gpuMem   = this._detailRow('VRAM');
-        box.add_child(this._gpuMem.row);
+        statsCard.add_child(this._gpuMem.row);
         this._gpuTemp  = this._detailRow('Temperature');
-        box.add_child(this._gpuTemp.row);
+        statsCard.add_child(this._gpuTemp.row);
+        box.add_child(statsCard);
         return box;
     }
 
@@ -1011,23 +1074,29 @@ export default class ResourcePulseExtension extends Extension {
                 const model = (cpu.hardwareModel || '').toLowerCase();
                 const isAmd = model.includes('amd') || model.includes('ryzen');
                 if (isAmd) {
-                    this._chipBox.style = 'background-color: #d22630;'; // AMD Red
+                    this._chipBox.style = 'background-color: #d22630; border-radius: 6px; padding: 6px 10px;';
                     this._chipLabel1.text = 'AMD';
+                    this._chipLabel1.style = 'font-size: 0.65em; color: #f9b8bb; font-weight: 300;';
                     this._chipLabel2.text = 'RYZEN';
+                    this._chipLabel2.style = 'font-size: 0.9em; color: #ffffff; font-weight: bold;';
                     let ver = '7';
                     if (model.includes('3')) ver = '3';
                     else if (model.includes('5')) ver = '5';
                     else if (model.includes('9')) ver = '9';
                     this._chipLabel3.text = ver;
+                    this._chipLabel3.style = 'font-size: 1.1em; color: #ffaaaa; font-weight: bold;';
                 } else {
-                    this._chipBox.style = 'background-color: #004b87;'; // Intel Blue
+                    this._chipBox.style = 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;';
                     this._chipLabel1.text = 'intel';
+                    this._chipLabel1.style = 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;';
                     this._chipLabel2.text = 'CORE';
+                    this._chipLabel2.style = 'font-size: 0.9em; color: #ffffff; font-weight: bold;';
                     let ver = 'i5';
                     if (model.includes('i3')) ver = 'i3';
                     else if (model.includes('i7')) ver = 'i7';
                     else if (model.includes('i9')) ver = 'i9';
                     this._chipLabel3.text = ver;
+                    this._chipLabel3.style = 'font-size: 1.1em; color: #5bc3ff; font-weight: bold;';
                 }
             }
 
@@ -1206,25 +1275,24 @@ export default class ResourcePulseExtension extends Extension {
                 this._procList.destroy_all_children();
                 this._procWidgets = [];
                 for (let i = 0; i < data.processes.length; i++) {
-                    const item = new St.BoxLayout({ style_class: 'resource-pulse-process-item', y_align: Clutter.ActorAlign.CENTER });
-                    
-                    // Simple generic app icon container
-                    const iconBox = new St.BoxLayout({ style_class: 'resource-pulse-process-icon-box' });
-                    const icon = new St.Icon({ icon_name: 'system-run-symbolic', style_class: 'system-status-icon resource-pulse-proc-icon' });
+                    const item = new St.BoxLayout({ style: 'padding: 4px 0; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+
+                    const iconBox = new St.BoxLayout({ style: 'width: 24px; height: 24px; background-color: rgba(255,255,255,0.06); border-radius: 6px;' });
+                    const icon = new St.Icon({ icon_name: 'system-run-symbolic', style: 'icon-size: 14px; color: #a0a0b8;' });
                     iconBox.add_child(icon);
                     item.add_child(iconBox);
 
-                    const detailsCol = new St.BoxLayout({ vertical: true, x_expand: true, style: 'margin-left: 8px;' });
-                    
-                    const nameLbl = new St.Label({ style_class: 'resource-pulse-process-name', text: '' });
+                    const detailsCol = new St.BoxLayout({ vertical: true, x_expand: true });
+
+                    const nameLbl = new St.Label({ style: 'font-size: 0.85em; color: #ffffff; font-weight: 500;', text: '' });
                     detailsCol.add_child(nameLbl);
 
-                    const pbar = new ProgressBar(6, 0.208, 0.518, 0.894); // CPU Blue
+                    const pbar = new ProgressBar(4, 0.208, 0.518, 0.894); // CPU Blue
                     detailsCol.add_child(pbar);
-                    
+
                     item.add_child(detailsCol);
 
-                    const statLbl = new St.Label({ style_class: 'resource-pulse-process-stat', width: 45 });
+                    const statLbl = new St.Label({ style: 'font-size: 0.85em; color: #a0a0b8; font-weight: 600;', width: 40 });
                     statLbl.x_align = Clutter.ActorAlign.END;
                     item.add_child(statLbl);
 
