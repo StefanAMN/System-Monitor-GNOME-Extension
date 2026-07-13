@@ -195,3 +195,37 @@
     margin-left: 0px;
     margin-right: 0px;
 }
+
+/* Tabbed Navigation Layout */
+.resource-pulse-tab-bar {
+    spacing: 6px;
+    margin-bottom: 8px;
+    justify-content: center;
+}
+
+.resource-pulse-tab-button {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px;
+    width: 36px;
+    height: 36px;
+    transition-duration: 150ms;
+}
+
+.resource-pulse-tab-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.resource-pulse-tab-button:active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.resource-pulse-tab-button-active {
+    background-color: rgba(53, 132, 228, 0.25);
+    border: 1px solid rgba(53, 132, 228, 0.6);
+}
+
+.resource-pulse-tab-button-active:hover {
+    background-color: rgba(53, 132, 228, 0.35);
+}
