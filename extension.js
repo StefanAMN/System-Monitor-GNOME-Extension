@@ -584,7 +584,7 @@ export default class ResourcePulseExtension extends Extension {
             { key: 'memory', label: 'Memory' },
             { key: 'battery', label: 'Battery' },
             { key: 'power', label: 'Power' },
-            { key: 'disk', label: 'Disk' },
+            { key: 'disk', label: 'Disk' }, { key: 'network', label: 'Network' }, { key: 'thermal', label: 'Thermal' }, { key: 'gpu', label: 'GPU' },
             { key: 'network', label: 'Net' },
             { key: 'thermal', label: 'Temp' },
             { key: 'gpu', label: 'GPU' }
@@ -667,71 +667,104 @@ export default class ResourcePulseExtension extends Extension {
             x_expand: true
         });
         headerRow.add_child(title);
-
-
-
         this._menuContainer.add_child(headerRow);
 
+        this._buildSummaryGrid();
         this._buildTabBar();
 
-        this._dashboardBox = new St.BoxLayout({
+        this._detailArea = new St.BoxLayout({
             vertical: true,
-            style_class: 'resource-pulse-dashboard'
+            style_class: 'resource-pulse-detail-area'
+        });
+        this._menuContainer.add_child(this._detailArea);
+
+        this._detailSections = {};
+        this._detailSections.cpu = this._buildCpuDetails();
+        this._detailSections.memory = this._buildMemoryDetails();
+        this._detailSections.battery = this._buildBatteryDetails();
+        this._detailSections.power = this._buildPowerDetails();
+        this._detailSections.disk = this._buildDiskDetails();
+        this._detailSections.network = this._buildNetworkDetails();
+        this._detailSections.thermal = this._buildThermalDetails();
+        this._detailSections.gpu = this._buildGpuDetails();
+
+        Object.keys(this._detailSections).forEach(key => {
+            if (this._detailSections[key]) {
+                this._detailArea.add_child(this._detailSections[key]);
+                this._detailSections[key].visible = false;
+            }
         });
 
-        this._cards = {};
-
-        // 1. CPU Card
-        this._cards.cpu = this._createCard('CPU', 'cpu', {
-            hasRing: true,
-            hasSpark: true
-        });
-
-        // 2. Memory Card
-        this._cards.memory = this._createCard('Memory', 'memory', {
-            hasRing: true,
-            hasSpark: true
-        });
-
-        // 3. Battery Card
-        this._cards.battery = this._createCard('Battery', 'battery', {
-            hasBatteryGlyph: true,
-            hasSpark: true
-        });
-
-        // 4. Power Card
-        this._cards.power = this._createCard('Power', 'power', {
-            hasSpark: true
-        });
-
-        // 5. Disk Card
-        this._cards.disk = this._createCard('Disk', 'disk', {
-            hasSpark: true
-        });
-
-        // 6. Network Card
-        this._cards.network = this._createCard('Network', 'network', {
-            hasSpark: true
-        });
-
-        // 7. Thermal Card
-        this._cards.thermal = this._createCard('Thermal', 'thermal', {
-            hasSpark: true
-        });
-
-        // 8. GPU Card
-        this._cards.gpu = this._createCard('GPU', 'gpu', {
-            hasRing: true,
-            hasSpark: true
-        });
-
-        // 9. Processes Card
-        this._cards.processes = this._createProcessesCard();
-
-        this._menuContainer.add_child(this._dashboardBox);
-
-        // Set initial visibility
         this._updateTabVisibility();
+    }
+
+    _buildSummaryGrid() {
+        const gridLayout = new Clutter.GridLayout({
+            column_homogeneous: true,
+            row_homogeneous: true
+        });
+        this._summaryGrid = new St.Widget({
+            layout_manager: gridLayout,
+            style_class: 'resource-pulse-summary-grid'
+        });
+
+        const metrics = [
+            { key: 'cpu', label: 'CPU' },
+            { key: 'memory', label: 'Memory' },
+            { key: 'battery', label: 'Battery' },
+            { key: 'power', label: 'Power' },
+            { key: 'disk', label: 'Disk' }, { key: 'network', label: 'Network' }, { key: 'thermal', label: 'Thermal' }, { key: 'gpu', label: 'GPU' },
+            { key: 'network', label: 'Network' }
+        ];
+
+        this._summaryCards = {};
+
+        metrics.forEach((metric, i) => {
+            const cardBox = new St.BoxLayout({
+                style_class: 'resource-pulse-summary-card',
+                vertical: true,
+                reactive: true,
+                can_focus: true
+            });
+
+            const header = new St.BoxLayout({
+                style_class: 'resource-pulse-summary-header',
+                vertical: false
+            });
+            const icon = new St.Icon({
+                icon_name: this._getIconName(metric.key),
+                style_class: 'system-status-icon',
+                y_align: Clutter.ActorAlign.CENTER
+            });
+            const title = new St.Label({
+                text: metric.label,
+                style_class: 'resource-pulse-summary-title',
+                y_align: Clutter.ActorAlign.CENTER
+            });
+            header.add_child(icon);
+            header.add_child(title);
+            cardBox.add_child(header);
+
+            const value = new St.Label({
+                text: '--',
+                style_class: 'resource-pulse-summary-value'
+            });
+            cardBox.add_child(value);
+
+            cardBox.connect('button-press-event', () => {
+                this._activeTab = metric.key;
+                this._updateTabVisibility();
+                return Clutter.EVENT_STOP;
+            });
+
+            const row = Math.floor(i / 3);
+            const col = i % 3;
+            gridLayout.attach(cardBox, col, row, 1, 1);
+
+            this._summaryCards[metric.key] = { box: cardBox, valueLabel: value, icon: icon };
+        });
+
+        this._menuContainer.add_child(this._summaryGrid);
     }
 
     _buildTabBar() {
@@ -741,34 +774,21 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         this._tabButtons = {};
-
         const tabs = [
-            { key: 'cpu', label: 'CPU & Processes' },
+            { key: 'cpu', label: 'CPU' },
             { key: 'memory', label: 'Memory' },
             { key: 'battery', label: 'Battery' },
             { key: 'power', label: 'Power' },
-            { key: 'disk', label: 'Disk' },
-            { key: 'network', label: 'Network' },
-            { key: 'thermal', label: 'Thermal' },
-            { key: 'gpu', label: 'GPU' }
+            { key: 'disk', label: 'Disk' }, { key: 'network', label: 'Network' }, { key: 'thermal', label: 'Thermal' }, { key: 'gpu', label: 'GPU' }
         ];
 
         tabs.forEach((tab) => {
             const button = new St.Button({
                 style_class: 'resource-pulse-tab-button',
+                label: tab.label,
                 can_focus: true,
-                x_align: Clutter.ActorAlign.CENTER,
                 y_align: Clutter.ActorAlign.CENTER
             });
-
-            const icon = new St.Icon({
-                icon_name: this._getIconName(tab.key),
-                style_class: 'system-status-icon',
-                y_align: Clutter.ActorAlign.CENTER,
-                x_align: Clutter.ActorAlign.CENTER
-            });
-            button.set_child(icon);
-            button.accessible_name = tab.label;
 
             button.connect('clicked', () => {
                 this._activeTab = tab.key;
@@ -783,173 +803,158 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _updateTabVisibility() {
-        if (!this._tabButtons) return;
-
-        // Update button states
-        Object.keys(this._tabButtons).forEach(key => {
-            const btn = this._tabButtons[key];
-            if (key === this._activeTab) {
-                btn.add_style_class_name('resource-pulse-tab-button-active');
-            } else {
-                btn.remove_style_class_name('resource-pulse-tab-button-active');
-            }
-        });
-
-        // Update card visibility
-        Object.keys(this._cards).forEach(key => {
-            const cardObj = this._cards[key];
-            if (!cardObj || !cardObj.card) return;
-
-            let isVisible = false;
-            if (key === this._activeTab) {
-                isVisible = true;
-            } else if (key === 'processes' && this._activeTab === 'cpu') {
-                isVisible = true;
-            }
-
-            cardObj.card.visible = isVisible;
-        });
-    }
-
-    _createCard(titleText, key, options = {}) {
-        const card = new St.BoxLayout({
-            style_class: 'resource-pulse-card',
-            vertical: true
-        });
-
-        const header = new St.BoxLayout({
-            style_class: 'resource-pulse-card-header',
-            vertical: false
-        });
-        const icon = new St.Icon({
-            icon_name: this._getIconName(key),
-            style_class: 'system-status-icon',
-            margin_right: 6,
-            y_align: Clutter.ActorAlign.CENTER
-        });
-        const title = new St.Label({
-            text: titleText,
-            style_class: 'resource-pulse-card-title',
-            y_align: Clutter.ActorAlign.CENTER
-        });
-        const subtitle = new St.Label({
-            text: '',
-            style_class: 'resource-pulse-card-subtitle',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-            x_align: Clutter.ActorAlign.END
-        });
-
-        header.add_child(icon);
-        header.add_child(title);
-        header.add_child(subtitle);
-        card.add_child(header);
-
-        // Content layout (left meter + right sparkline)
-        const contentBox = new St.BoxLayout({
-            vertical: false,
-            x_expand: true,
-            style_class: 'resource-pulse-card-content'
-        });
-
-        let ring = null;
-        let batteryGlyph = null;
-
-        if (options.hasRing) {
-            const cpuWarn = this._settings.get_int('threshold-cpu') || 90;
-            ring = new RingProgress(36, 36, key === 'cpu' ? cpuWarn : 90);
-            ring.y_align = Clutter.ActorAlign.CENTER;
-            contentBox.add_child(ring);
-        }
-
-        if (options.hasBatteryGlyph) {
-            batteryGlyph = new BatteryGlyph();
-            batteryGlyph.y_align = Clutter.ActorAlign.CENTER;
-            contentBox.add_child(batteryGlyph);
-        }
-
-        let sparkline = null;
-        if (options.hasSpark) {
-            sparkline = new Sparkline(160, 32, 100, key === 'power' || key === 'disk' || key === 'network');
-            sparkline.y_align = Clutter.ActorAlign.CENTER;
-            sparkline.x_expand = true;
-            contentBox.add_child(sparkline);
-        }
-
-        card.add_child(contentBox);
-
-        // CPU Core Grid
-        let coreGrid = null;
-        if (key === 'cpu') {
-            const coreLayout = new Clutter.GridLayout({
-                column_homogeneous: true,
-                row_homogeneous: true
+        if (this._tabButtons) {
+            Object.keys(this._tabButtons).forEach(key => {
+                const btn = this._tabButtons[key];
+                if (key === this._activeTab) {
+                    btn.add_style_class_name('resource-pulse-tab-button-active');
+                } else {
+                    btn.remove_style_class_name('resource-pulse-tab-button-active');
+                }
             });
-            coreGrid = new St.Widget({
-                layout_manager: coreLayout,
-                style_class: 'resource-pulse-core-grid',
-                visible: false
+        }
+
+        if (this._summaryCards) {
+            Object.keys(this._summaryCards).forEach(key => {
+                const card = this._summaryCards[key].box;
+                if (key === this._activeTab) {
+                    card.add_style_class_name('resource-pulse-summary-card-active');
+                } else {
+                    card.remove_style_class_name('resource-pulse-summary-card-active');
+                }
             });
-            card.add_child(coreGrid);
         }
 
-        // Details label
-        const details = new St.Label({
-            text: '',
-            style_class: 'resource-pulse-card-details',
-            visible: false
-        });
-        card.add_child(details);
-
-        this._dashboardBox.add_child(card);
-
-        const cardObj = { card, subtitle, details, ring, batteryGlyph, sparkline, coreGrid, expanded: true };
-
-        return cardObj;
+        if (this._detailSections) {
+            Object.keys(this._detailSections).forEach(key => {
+                if (this._detailSections[key]) {
+                    this._detailSections[key].visible = (key === this._activeTab);
+                }
+            });
+        }
     }
 
-    _syncDensityMode() {
-        Object.keys(this._cards).forEach(key => {
-            if (key === 'processes') return;
-            this._cards[key].expanded = true;
-            this._updateCardLayout(key);
-        });
+    _createDetailRow(labelText, valText) {
+        const row = new St.BoxLayout({ style_class: 'resource-pulse-detail-row', x_expand: true });
+        const lbl = new St.Label({ text: labelText, style_class: 'resource-pulse-detail-label', x_expand: true });
+        const val = new St.Label({ text: valText, style_class: 'resource-pulse-detail-value' });
+        row.add_child(lbl);
+        row.add_child(val);
+        return { row, val };
     }
 
-    _updateCardLayout(key) {
-        const cardObj = this._cards[key];
-        if (!cardObj) return;
+    _buildCpuDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'CPU details', style_class: 'resource-pulse-detail-title' }));
+        this._cpuSparkline = new Sparkline(400, 40, 100, false);
+        this._cpuSparkline.x_expand = true;
+        box.add_child(this._cpuSparkline);
+        box.add_child(new St.Label({ text: 'Per core', style_class: 'resource-pulse-core-section-title' }));
+        const coreLayout = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: true });
+        this._cpuCoreGrid = new St.Widget({ layout_manager: coreLayout, style_class: 'resource-pulse-core-grid' });
+        box.add_child(this._cpuCoreGrid);
+        this._cpuLoadAvg = this._createDetailRow('Load average', '--');
+        box.add_child(this._cpuLoadAvg.row);
+        this._cpuUptime = this._createDetailRow('Uptime', '--');
+        box.add_child(this._cpuUptime.row);
+        box.add_child(new St.Label({ text: 'Top Processes', style_class: 'resource-pulse-core-section-title', margin_top: 12 }));
+        this._procList = new St.BoxLayout({ vertical: true });
+        box.add_child(this._procList);
+        return box;
+    }
 
-        const expanded = cardObj.expanded;
+    _buildMemoryDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Memory details', style_class: 'resource-pulse-detail-title' }));
+        this._memSparkline = new Sparkline(400, 40, 100, false);
+        this._memSparkline.x_expand = true;
+        box.add_child(this._memSparkline);
+        this._memUsed = this._createDetailRow('Used / Total', '--');
+        box.add_child(this._memUsed.row);
+        this._memSwap = this._createDetailRow('Swap', '--');
+        box.add_child(this._memSwap.row);
+        return box;
+    }
 
-        if (cardObj.ring) {
-            cardObj.ring.visible = expanded;
-        }
-        if (cardObj.batteryGlyph) {
-            cardObj.batteryGlyph.visible = expanded;
-        }
-        if (cardObj.details) {
-            cardObj.details.visible = expanded;
-        }
-        if (key === 'cpu' && cardObj.coreGrid) {
-            cardObj.coreGrid.visible = expanded;
-        }
-        if (cardObj.sparkline) {
-            const h = expanded ? 32 : 16;
-            cardObj.sparkline.set_height(h);
-            cardObj.sparkline.queue_repaint();
-        }
+    _buildBatteryDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Battery details', style_class: 'resource-pulse-detail-title' }));
+        this._batSparkline = new Sparkline(400, 40, 100, false);
+        this._batSparkline.x_expand = true;
+        box.add_child(this._batSparkline);
+        this._batState = this._createDetailRow('State', '--');
+        box.add_child(this._batState.row);
+        this._batHealth = this._createDetailRow('Health', '--');
+        box.add_child(this._batHealth.row);
+        return box;
+    }
 
-        if (expanded) {
-            cardObj.card.style = 'padding: 8px; margin-bottom: 6px;';
-        } else {
-            cardObj.card.style = 'padding: 4px 6px; margin-bottom: 4px;';
-        }
+    _buildPowerDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Power details', style_class: 'resource-pulse-detail-title' }));
+        this._pwrSparkline = new Sparkline(400, 40, 100, true);
+        this._pwrSparkline.x_expand = true;
+        box.add_child(this._pwrSparkline);
+        this._pwrSystem = this._createDetailRow('System Draw', '--');
+        box.add_child(this._pwrSystem.row);
+        this._pwrPackage = this._createDetailRow('Package', '--');
+        box.add_child(this._pwrPackage.row);
+        return box;
+    }
+
+    _buildDiskDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Disk details', style_class: 'resource-pulse-detail-title' }));
+        this._dskSparkline = new Sparkline(400, 40, 100, true);
+        this._dskSparkline.x_expand = true;
+        box.add_child(this._dskSparkline);
+        this._dskRoot = this._createDetailRow('Root Usage', '--');
+        box.add_child(this._dskRoot.row);
+        return box;
+    }
+
+    _buildNetworkDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Network details', style_class: 'resource-pulse-detail-title' }));
+        this._netSparkline = new Sparkline(400, 40, 100, true);
+        this._netSparkline.x_expand = true;
+        box.add_child(this._netSparkline);
+        this._netRx = this._createDetailRow('Download', '--');
+        box.add_child(this._netRx.row);
+        this._netTx = this._createDetailRow('Upload', '--');
+        box.add_child(this._netTx.row);
+        return box;
+    }
+
+    _buildThermalDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'Thermal details', style_class: 'resource-pulse-detail-title' }));
+        this._thmSparkline = new Sparkline(400, 40, 100, true);
+        this._thmSparkline.x_expand = true;
+        box.add_child(this._thmSparkline);
+        this._thmPackage = this._createDetailRow('Package Temp', '--');
+        box.add_child(this._thmPackage.row);
+        return box;
+    }
+
+    _buildGpuDetails() {
+        const box = new St.BoxLayout({ vertical: true });
+        box.add_child(new St.Label({ text: 'GPU details', style_class: 'resource-pulse-detail-title' }));
+        this._gpuSparkline = new Sparkline(400, 40, 100, false);
+        this._gpuSparkline.x_expand = true;
+        box.add_child(this._gpuSparkline);
+        this._gpuUsage = this._createDetailRow('Usage', '--');
+        box.add_child(this._gpuUsage.row);
+        this._gpuMem = this._createDetailRow('Memory', '--');
+        box.add_child(this._gpuMem.row);
+        this._gpuTemp = this._createDetailRow('Temperature', '--');
+        box.add_child(this._gpuTemp.row);
+        return box;
     }
 
     _updateCpuCoresUI(cores) {
-        if (!this._cards.cpu || !this._cards.cpu.coreGrid) return;
-        const grid = this._cards.cpu.coreGrid;
+        if (!this._cpuCoreGrid) return;
+        const grid = this._cpuCoreGrid;
         const layout = grid.layout_manager;
 
         const getCoreColor = (load) => {
@@ -970,54 +975,36 @@ export default class ResourcePulseExtension extends Extension {
             cores.forEach((load, i) => {
                 const box = new St.BoxLayout({
                     style_class: 'resource-pulse-core-box',
-                    style: `background-color: ${getCoreColor(load)};`
+                    style: `background-color: ${getCoreColor(load)};`,
+                    vertical: true
                 });
-                const label = new St.Label({
-                    text: `${i}`,
+                const lblCore = new St.Label({
+                    text: `Core ${i}`,
                     style_class: 'resource-pulse-core-label',
-                    x_align: Clutter.ActorAlign.CENTER,
-                    y_align: Clutter.ActorAlign.CENTER,
-                    x_expand: true,
-                    y_expand: true
+                    x_align: Clutter.ActorAlign.START
                 });
-                box.add_child(label);
+                const lblVal = new St.Label({
+                    text: `${Math.round(load)}%`,
+                    style_class: 'resource-pulse-core-value',
+                    x_align: Clutter.ActorAlign.START
+                });
+                box.add_child(lblCore);
+                box.add_child(lblVal);
                 
-                const row = Math.floor(i / 8);
-                const col = i % 8;
+                // Max 4 columns to match the design
+                const row = Math.floor(i / 4);
+                const col = i % 4;
                 layout.attach(box, col, row, 1, 1);
-                this._coreWidgets.push(box);
+                this._coreWidgets.push({ box, lblVal });
             });
         } else {
             cores.forEach((load, i) => {
-                const box = this._coreWidgets[i];
-                if (box) {
-                    box.style = `background-color: ${getCoreColor(load)};`;
+                if (this._coreWidgets[i]) {
+                    this._coreWidgets[i].box.style = `background-color: ${getCoreColor(load)};`;
+                    this._coreWidgets[i].lblVal.text = `${Math.round(load)}%`;
                 }
             });
         }
-    }
-
-    _createProcessesCard() {
-        const card = new St.BoxLayout({
-            style_class: 'resource-pulse-card',
-            vertical: true
-        });
-
-        const title = new St.Label({
-            text: 'Top Process Consumers',
-            style_class: 'resource-pulse-card-title',
-            margin_bottom: 4
-        });
-        card.add_child(title);
-
-        const list = new St.BoxLayout({
-            vertical: true
-        });
-        card.add_child(list);
-
-        this._dashboardBox.add_child(card);
-
-        return { card, list };
     }
 
     _updateDashboardUI(data) {
@@ -1025,143 +1012,141 @@ export default class ResourcePulseExtension extends Extension {
         const memUnit = this._settings.get_string('unit-mem') || 'GB';
         const useGiB = memUnit === 'GiB';
 
-        // 1. Update CPU Card
+        // 1. Update CPU
         if (data.cpu) {
             const cpu = data.cpu;
-            this._cards.cpu.subtitle.text = `${Math.round(cpu.total)}%`;
-            this._cards.cpu.ring.setValue(cpu.total);
-            this._cards.cpu.sparkline.addSample(cpu.total);
-            this._cards.cpu.details.text = `Load: ${cpu.loadavg.join(' · ')}  |  Uptime: ${formatUptime(cpu.uptime)}`;
-            
+            if (this._summaryCards && this._summaryCards.cpu) {
+                this._summaryCards.cpu.valueLabel.text = `${Math.round(cpu.total)}%`;
+            }
+            if (this._cpuSparkline) {
+                this._cpuSparkline.addSample(cpu.total);
+            }
+            if (this._cpuLoadAvg) {
+                this._cpuLoadAvg.val.text = cpu.loadavg.join(' · ');
+            }
+            if (this._cpuUptime) {
+                this._cpuUptime.val.text = formatUptime(cpu.uptime);
+            }
             if (cpu.cores) {
                 this._updateCpuCoresUI(cpu.cores);
             }
         }
 
-        // 2. Update Memory Card
+        // 2. Update Memory
         if (data.mem) {
             const mem = data.mem;
-            this._cards.memory.subtitle.text = `${Math.round(mem.percent)}%`;
-            this._cards.memory.ring.setValue(mem.percent);
-            this._cards.memory.sparkline.addSample(mem.percent);
-            this._cards.memory.details.text = `Used: ${formatBytes(mem.used, useGiB)} / ${formatBytes(mem.total, useGiB)}\nSwap: ${Math.round(mem.swapPercent)}% (${formatBytes(mem.swapUsed, useGiB)} / ${formatBytes(mem.swapTotal, useGiB)})`;
-        }
-
-        // 3. Update Battery Card
-        if (data.bat) {
-            const bat = data.bat;
-            if (bat.present) {
-                this._cards.battery.card.visible = true;
-                const stateText = bat.state === 'charging' ? 'Charging' : (bat.state === 'discharging' ? 'Discharging' : 'Full');
-                this._cards.battery.subtitle.text = `${Math.round(bat.percent)}% (${stateText})`;
-                this._cards.battery.batteryGlyph.setPercent(bat.percent, bat.state);
-                this._cards.battery.sparkline.addSample(bat.percent);
-
-                let timeStr = 'Estimating...';
-                if (bat.timeRemaining > 0) {
-                    const hrs = Math.floor(bat.timeRemaining / 3600);
-                    const mins = Math.floor((bat.timeRemaining % 3600) / 60);
-                    timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
-                }
-
-                let energyStr = '';
-                if (bat.energy !== undefined && bat.energy !== null && bat.energy > 0) {
-                    const en = bat.energy.toFixed(1);
-                    const ef = bat.energyFull ? bat.energyFull.toFixed(1) : '--';
-                    const efd = bat.energyFullDesign ? bat.energyFullDesign.toFixed(1) : '--';
-                    energyStr = `  |  Energy: ${en} / ${ef} Wh (design: ${efd} Wh)`;
-                }
-
-                this._cards.battery.details.text = `Time Remaining: ${timeStr}  |  Health: ${Math.round(bat.health)}%  |  Cycles: ${bat.cycleCount}${energyStr}`;
-            } else {
-                this._cards.battery.card.visible = false;
+            if (this._summaryCards && this._summaryCards.memory) {
+                this._summaryCards.memory.valueLabel.text = `${Math.round(mem.percent)}%`;
+            }
+            if (this._memSparkline) {
+                this._memSparkline.addSample(mem.percent);
+            }
+            if (this._memUsed) {
+                this._memUsed.val.text = `${formatBytes(mem.used, useGiB)} / ${formatBytes(mem.total, useGiB)}`;
+            }
+            if (this._memSwap) {
+                this._memSwap.val.text = `${Math.round(mem.swapPercent)}% (${formatBytes(mem.swapUsed, useGiB)} / ${formatBytes(mem.swapTotal, useGiB)})`;
             }
         }
 
-        // 4. Update Power Card
+        // 3. Update Battery
+        if (data.bat) {
+            const bat = data.bat;
+            if (this._summaryCards && this._summaryCards.battery) {
+                this._summaryCards.battery.box.visible = bat.present;
+                if (bat.present) {
+                    this._summaryCards.battery.valueLabel.text = `${Math.round(bat.percent)}%`;
+                }
+            }
+            if (bat.present) {
+                if (this._batSparkline) this._batSparkline.addSample(bat.percent);
+                if (this._batState) {
+                    const stateText = bat.state === 'charging' ? 'Charging' : (bat.state === 'discharging' ? 'Discharging' : 'Full');
+                    this._batState.val.text = stateText;
+                }
+                if (this._batHealth) {
+                    this._batHealth.val.text = `${Math.round(bat.health)}% (Cycles: ${bat.cycleCount})`;
+                }
+            }
+        }
+
+        // 4. Update Power
         if (data.pwr) {
             const pwr = data.pwr;
             const hasDraw = pwr.raplSupported || pwr.systemPower !== null;
-            if (hasDraw) {
-                this._cards.power.card.visible = true;
-                const draw = pwr.systemPower !== null ? pwr.systemPower : (pwr.packagePower || 0);
-                this._cards.power.subtitle.text = `${draw.toFixed(1)} W`;
-                this._cards.power.sparkline.addSample(draw);
-
-                const sysStr = pwr.systemPower !== null ? `System rate: ${pwr.systemPower.toFixed(1)}W` : '';
-                const pkgStr = pwr.packagePower !== null ? `CPU PKG: ${pwr.packagePower.toFixed(1)}W` : '';
-                this._cards.power.details.text = [pkgStr, sysStr].filter(s => s !== '').join('  |  ');
-            } else {
-                this._cards.power.card.visible = false;
+            if (this._summaryCards && this._summaryCards.power) {
+                this._summaryCards.power.box.visible = hasDraw;
+                if (hasDraw) {
+                    const draw = pwr.systemPower !== null ? pwr.systemPower : (pwr.packagePower || 0);
+                    this._summaryCards.power.valueLabel.text = `${draw.toFixed(1)} W`;
+                    if (this._pwrSparkline) this._pwrSparkline.addSample(draw);
+                    if (this._pwrSystem) this._pwrSystem.val.text = pwr.systemPower !== null ? `${pwr.systemPower.toFixed(1)} W` : '--';
+                    if (this._pwrPackage) this._pwrPackage.val.text = pwr.packagePower !== null ? `${pwr.packagePower.toFixed(1)} W` : '--';
+                }
             }
         }
 
-        // 5. Update Disk Card
+        // 5. Update Disk
         if (data.dsk) {
             const dsk = data.dsk;
-            const readMB = dsk.readRate / (1024 * 1024);
-            const writeMB = dsk.writeRate / (1024 * 1024);
-            
-            this._cards.disk.subtitle.text = `R: ${readMB.toFixed(1)} MB/s  |  W: ${writeMB.toFixed(1)} MB/s`;
-            // Add WriteRate to sparkline
-            this._cards.disk.sparkline.addSample(writeMB);
-
-            const spaceLines = dsk.mounts.map(m => {
-                return `${m.mount} : ${Math.round(m.percent)}% (${formatBytes(m.used, useGiB)} / ${formatBytes(m.size, useGiB)})`;
-            });
-            this._cards.disk.details.text = spaceLines.join('\n');
+            if (this._summaryCards && this._summaryCards.disk) {
+                const maxPercent = dsk.mounts.length > 0 ? Math.max(...dsk.mounts.map(m => m.percent)) : 0;
+                this._summaryCards.disk.valueLabel.text = `${Math.round(maxPercent)}%`;
+            }
+            if (this._dskSparkline) {
+                const writeMB = dsk.writeRate / (1024 * 1024);
+                this._dskSparkline.addSample(writeMB);
+            }
+            if (this._dskRoot) {
+                const spaceLines = dsk.mounts.map(m => `${m.mount}: ${Math.round(m.percent)}%`).join(' | ');
+                this._dskRoot.val.text = spaceLines || '--';
+            }
         }
 
-        // 6. Update Network Card
+        // 6. Update Network
         if (data.net) {
             const net = data.net;
-            const rxSpeed = formatSpeed(net.total.rxRate);
-            const txSpeed = formatSpeed(net.total.txRate);
-            this._cards.network.subtitle.text = `Down: ${rxSpeed}  |  Up: ${txSpeed}`;
-            // Add download rate to sparkline
-            this._cards.network.sparkline.addSample(net.total.rxRate / 1024); // in KB/s
-
-            const ifaceLines = [];
-            Object.keys(net.interfaces).slice(0, 3).forEach(iface => {
-                const details = net.interfaces[iface];
-                if (details.rxRate > 0 || details.txRate > 0) {
-                    ifaceLines.push(`${iface}: Down ${formatSpeed(details.rxRate)}, Up ${formatSpeed(details.txRate)}`);
-                }
-            });
-            if (ifaceLines.length === 0) ifaceLines.push('No active interfaces');
-            this._cards.network.details.text = ifaceLines.join('\n');
+            if (this._summaryCards && this._summaryCards.network) {
+                const rxSpeed = formatSpeed(net.total.rxRate);
+                this._summaryCards.network.valueLabel.text = `${rxSpeed}`;
+            }
+            if (this._netSparkline) {
+                this._netSparkline.addSample(net.total.rxRate / 1024); // KB/s
+            }
+            if (this._netRx) this._netRx.val.text = formatSpeed(net.total.rxRate);
+            if (this._netTx) this._netTx.val.text = formatSpeed(net.total.txRate);
         }
 
-        // 7. Update Thermal Card
+        // 7. Update Thermal
         if (data.thm) {
             const thm = data.thm;
-            this._cards.thermal.subtitle.text = formatTemp(thm.temp, tempUnit);
-            this._cards.thermal.sparkline.addSample(thm.temp);
-
-            let fanStr = '';
-            if (thm.fans.length > 0) {
-                fanStr = '  |  Fans: ' + thm.fans.map(f => `${f.rpm} RPM`).join(', ');
+            if (this._summaryCards && this._summaryCards.thermal) {
+                this._summaryCards.thermal.valueLabel.text = formatTemp(thm.temp, tempUnit);
             }
-            this._cards.thermal.details.text = `Cores: ${thm.cores.map(c => formatTemp(c, tempUnit)).slice(0, 6).join(', ')}${fanStr}`;
+            if (this._thmSparkline) this._thmSparkline.addSample(thm.temp);
+            if (this._thmPackage) this._thmPackage.val.text = formatTemp(thm.temp, tempUnit);
         }
 
-        // 8. Update GPU Card
+        // 8. Update GPU
         if (data.gpu) {
             const gpu = data.gpu;
+            if (this._summaryCards && this._summaryCards.gpu) {
+                this._summaryCards.gpu.box.visible = gpu.present;
+                if (gpu.present) {
+                    this._summaryCards.gpu.valueLabel.text = `${Math.round(gpu.percent)}%`;
+                }
+            }
             if (gpu.present) {
-                this._cards.gpu.card.visible = true;
-                this._cards.gpu.subtitle.text = `${Math.round(gpu.percent)}%`;
-                this._cards.gpu.ring.setValue(gpu.percent);
-                this._cards.gpu.sparkline.addSample(gpu.percent);
-                this._cards.gpu.details.text = `Brand: ${gpu.brand}  |  VRAM: ${Math.round(gpu.memPercent)}% (${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)})  |  Temp: ${formatTemp(gpu.temp, tempUnit)}`;
-            } else {
-                this._cards.gpu.card.visible = false;
+                if (this._gpuSparkline) this._gpuSparkline.addSample(gpu.percent);
+                if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
+                if (this._gpuMem) this._gpuMem.val.text = `${Math.round(gpu.memPercent)}% (${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)})`;
+                if (this._gpuTemp) this._gpuTemp.val.text = formatTemp(gpu.temp, tempUnit);
             }
         }
 
-        // 9. Update Top Processes Card
-        if (this._menuOpen && data.processes && data.processes.length > 0) {
-            this._cards.processes.list.destroy_all_children();
+        // 9. Update Top Processes
+        if (this._menuOpen && data.processes && data.processes.length > 0 && this._procList) {
+            this._procList.destroy_all_children();
             data.processes.forEach(proc => {
                 const item = new St.BoxLayout({
                     style_class: 'resource-pulse-process-item'
@@ -1180,8 +1165,9 @@ export default class ResourcePulseExtension extends Extension {
                 });
                 item.add_child(name);
                 item.add_child(stat);
-                this._cards.processes.list.add_child(item);
+                this._procList.add_child(item);
             });
         }
     }
+
 }
