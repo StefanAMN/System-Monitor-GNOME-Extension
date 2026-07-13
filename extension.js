@@ -307,6 +307,14 @@ export default class ResourcePulseExtension extends Extension {
         this._pinnedId = this._settings.connect('changed::pinned-metrics', () => this._rebuildTopBar());
         this._compactId = this._settings.connect('changed::compact-label', () => this._rebuildTopBar());
         this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
+        this._openMenuId = this._settings.connect('changed::action-open-menu', () => {
+            if (this._settings.get_boolean('action-open-menu')) {
+                this._settings.set_boolean('action-open-menu', false);
+                this._activeTab = 'overview';
+                this._updateTabVisibility();
+                this._indicator.menu.open();
+            }
+        });
 
         this._rebuildTopBar();
         this._startPolling();
@@ -316,6 +324,7 @@ export default class ResourcePulseExtension extends Extension {
         if (this._pinnedId) this._settings.disconnect(this._pinnedId);
         if (this._compactId) this._settings.disconnect(this._compactId);
         if (this._pollId) this._settings.disconnect(this._pollId);
+        if (this._openMenuId) this._settings.disconnect(this._openMenuId);
 
         if (this._timeoutId) {
             GLib.source_remove(this._timeoutId);

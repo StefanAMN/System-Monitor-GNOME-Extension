@@ -46,5 +46,10 @@
       <summary>Density Mode</summary>
       <description>Density mode for the dashboard cards ('compact' or 'detailed').</description>
     </key>
+    <key name="action-open-menu" type="b">
+      <default>false</default>
+      <summary>Trigger for opening the menu</summary>
+      <description>Writing true opens the extension menu.</description>
+    </key>
   </schema>
 </schemalist>
