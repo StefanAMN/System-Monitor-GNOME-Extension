@@ -1070,6 +1070,12 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._batState.row);
         this._batHealth = this._detailRow('Health');
         statsCard.add_child(this._batHealth.row);
+        this._batCycles = this._detailRow('Cycle Count');
+        statsCard.add_child(this._batCycles.row);
+        this._batCapacity = this._detailRow('Current / Full');
+        statsCard.add_child(this._batCapacity.row);
+        this._batDesign = this._detailRow('Design Capacity');
+        statsCard.add_child(this._batDesign.row);
         box.add_child(statsCard);
         return box;
     }
@@ -1297,8 +1303,10 @@ export default class ResourcePulseExtension extends Extension {
                         : bat.state === 'discharging' ? 'Discharging' : 'Full';
                     this._batState.val.text = s;
                 }
-                if (this._batHealth) this._batHealth.val.text =
-                    `${Math.round(bat.health)}% (${bat.cycleCount} cycles)`;
+                if (this._batHealth) this._batHealth.val.text = `${bat.health.toFixed(1)}%`;
+                if (this._batCycles) this._batCycles.val.text = `${bat.cycleCount}`;
+                if (this._batCapacity) this._batCapacity.val.text = `${bat.energy.toFixed(1)} Wh / ${bat.energyFull.toFixed(1)} Wh`;
+                if (this._batDesign) this._batDesign.val.text = `${bat.energyFullDesign.toFixed(1)} Wh`;
             }
         }
 
