@@ -369,21 +369,53 @@ export default class ResourcePulseExtension extends Extension {
 
             let processes = [];
             if (this._menuOpen && this._activeTab === 'cpu') {
-                const cmd = "top -b -n 2 -d 0.2 -w 512 | awk '/^top -/ {batch++} batch==2 && $1 ~ /^[0-9]+$/ {cmd=\"\"; for(i=12;i<=NF;i++) cmd=cmd (i==12?\"\":\" \") $i; print $1, $9, $10, cmd}' | grep -Ev ' (top|awk|bash)$' | head -n 5";
+                if (!this._prevProcStats) {
+                    this._prevProcStats = {};
+                    this._prevProcTime = 0;
+                }
+                const cmd = "awk -F '[()]' '{split($1, p, \" \"); pid=p[1]; name=$2; split($3, a, \" \"); ticks=a[12]+a[13]; rss=a[22]; print pid, ticks, rss, name}' /proc/[0-9]*/stat";
                 const stdout = await runSubprocess(['bash', '-c', cmd]);
                 if (stdout) {
+                    const now = GLib.get_monotonic_time();
+                    const dt = this._prevProcTime > 0 ? (now - this._prevProcTime) / 1000000.0 : 0;
+                    this._prevProcTime = now;
+
                     const lines = stdout.trim().split('\n');
+                    let currentStats = {};
+                    let allProcs = [];
+
                     for (const line of lines) {
                         const parts = line.trim().split(/\s+/);
                         if (parts.length >= 4) {
-                            processes.push({
-                                pid: parts[0],
-                                cpu: parseFloat(parts[1]) || 0,
-                                mem: parseFloat(parts[2]) || 0,
-                                comm: parts.slice(3).join(' ')
-                            });
+                            const pid = parts[0];
+                            const ticks = parseInt(parts[1], 10);
+                            const rss = parseInt(parts[2], 10);
+                            const name = parts.slice(3).join(' ');
+
+                            currentStats[pid] = ticks;
+
+                            if (this._prevProcStats[pid] !== undefined && dt > 0) {
+                                const deltaTicks = ticks - this._prevProcStats[pid];
+                                const cpuPct = Math.max(0, deltaTicks / dt);
+                                const memPct = mem.total > 0 ? ((rss * 4096) / mem.total) * 100 : 0;
+                                
+                                // Only show processes using CPU to avoid clutter
+                                if (cpuPct > 0.1 || memPct > 1.0) {
+                                    allProcs.push({
+                                        pid: pid,
+                                        cpu: cpuPct,
+                                        mem: memPct,
+                                        comm: name
+                                    });
+                                }
+                            }
                         }
                     }
+                    this._prevProcStats = currentStats;
+
+                    // Sort by CPU usage, grab top 5
+                    allProcs.sort((a, b) => b.cpu - a.cpu);
+                    processes = allProcs.slice(0, 5);
                 }
             }
 
