@@ -533,11 +533,33 @@ export default class ResourcePulseExtension extends Extension {
         headerBox.add_child(titleLbl);
 
         const refreshBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
-        refreshBtn.add_child(new St.Icon({ icon_name: 'view-refresh-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
-        refreshBtn.connect('clicked', () => this._poll());
+        const refreshIcon = new St.Icon({ icon_name: 'view-refresh-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
+        refreshIcon.set_pivot_point(0.5, 0.5);
+        refreshBtn.add_child(refreshIcon);
+        refreshBtn.connect('clicked', () => {
+            this._poll();
+            refreshIcon.rotation_angle_z = 0;
+            refreshIcon.ease({
+                rotation_angle_z: 360,
+                duration: 500,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+            });
+        });
 
         const menuBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px; margin-left: 6px;', reactive: true });
-        menuBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
+        const menuIcon = new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
+        menuIcon.set_pivot_point(0.5, 0.5);
+        menuBtn.add_child(menuIcon);
+        menuBtn.connect('clicked', () => {
+            menuIcon.rotation_angle_z = 0;
+            menuIcon.ease({
+                rotation_angle_z: 180,
+                duration: 300,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            this.openPreferences();
+            this._indicator.menu.close();
+        });
 
         this._addClickAnimations(refreshBtn);
         headerBox.add_child(refreshBtn);
@@ -763,7 +785,19 @@ export default class ResourcePulseExtension extends Extension {
         this._detailHeaderTitleBox.add_child(this._detailHeaderTitle);
 
         const optBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
-        optBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
+        const optIcon = new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
+        optIcon.set_pivot_point(0.5, 0.5);
+        optBtn.add_child(optIcon);
+        optBtn.connect('clicked', () => {
+            optIcon.rotation_angle_z = 0;
+            optIcon.ease({
+                rotation_angle_z: 180,
+                duration: 300,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            this.openPreferences();
+            this._indicator.menu.close();
+        });
 
         this._addClickAnimations(backBtn);
         this._detailHeader.add_child(backBtn);
