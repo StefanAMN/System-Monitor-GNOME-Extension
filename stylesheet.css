@@ -22,7 +22,17 @@
 
 /* ── Dropdown Menu Container ──────────────────────────────────────────────── */
 
+.resource-pulse-popup {
+    background-color: #1e1e1e !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 12px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
 .resource-pulse-menu-section {
+    background-color: #1e1e1e;
+    border-radius: 12px;
     padding: 12px 14px 14px 14px;
     min-width: 400px;
     max-width: 480px;

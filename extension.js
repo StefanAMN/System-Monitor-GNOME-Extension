@@ -165,6 +165,7 @@ export default class ResourcePulseExtension extends Extension {
             style_class: 'resource-pulse-menu-section'
         });
         this._menuSection.add_child(this._menuContainer);
+        this._indicator.menu.box.add_style_class_name('resource-pulse-popup');
         this._indicator.menu.addMenuItem(this._menuSection);
 
         // Build UI
