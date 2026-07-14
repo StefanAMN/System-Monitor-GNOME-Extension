@@ -256,3 +256,14 @@
 .system-status-icon {
     icon-size: 16px;
 }
+
+/* ── Icon Colors ──────────────────────────────────────────────────────────── */
+
+.icon-cpu { color: #3584e4; }
+.icon-memory { color: #9141ac; }
+.icon-battery { color: #2ec27e; }
+.icon-power { color: #f6d32d; }
+.icon-disk { color: #ff7800; }
+.icon-network { color: #e01b24; }
+.icon-thermal { color: #ed333b; }
+.icon-gpu { color: #26a269; }
