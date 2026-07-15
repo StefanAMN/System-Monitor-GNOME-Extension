@@ -33,222 +33,197 @@
 .resource-pulse-menu-section {
     background-color: #1e1e1e;
     border-radius: 12px;
-    padding: 12px 14px 14px 14px;
-    min-width: 400px;
+    padding: 16px;
+    min-width: 420px;
     max-width: 480px;
 }
 
-/* ── Pin Grid Section ─────────────────────────────────────────────────────── */
+/* ── Primary Cards (CPU, Mem, Bat) ────────────────────────────────────────── */
 
-.resource-pulse-section-title {
-    font-size: 0.78em;
-    font-weight: bold;
-    color: #888;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 6px;
-    margin-top: 2px;
+.resource-pulse-primary-list {
+    spacing: 12px;
+    margin-bottom: 16px;
 }
 
-.resource-pulse-picker-row {
-    spacing: 4px;
-    margin-bottom: 10px;
-}
-
-.resource-pulse-grid-button {
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 4px;
-    width: 32px;
-    height: 32px;
-    transition-duration: 100ms;
-}
-
-.resource-pulse-grid-button:hover {
-    background-color: rgba(255, 255, 255, 0.09);
-    border-color: rgba(255, 255, 255, 0.15);
-}
-
-.resource-pulse-grid-button-active {
-    background-color: rgba(53, 132, 228, 0.20);
-    border-color: #3584e4;
-}
-
-.resource-pulse-grid-button-active:hover {
-    background-color: rgba(53, 132, 228, 0.30);
-}
-
-/* ── Summary Grid ─────────────────────────────────────────────────────────── */
-
-.resource-pulse-summary-grid {
-    margin-bottom: 10px;
-    spacing-rows: 8px;
-    spacing-columns: 8px;
-}
-
-.resource-pulse-summary-card {
-    background-color: #2b2b2c;
+.resource-pulse-primary-card {
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
-    padding: 10px 12px;
-    min-width: 95px;
+    padding: 12px 16px;
     transition-duration: 120ms;
 }
-
-.resource-pulse-summary-card:hover {
+.resource-pulse-primary-card:hover {
     border-color: rgba(255, 255, 255, 0.14);
-    background-color: #313132;
 }
 
-.resource-pulse-summary-card-active {
-    border: 1.5px solid #3584e4;
-    background-color: rgba(53, 132, 228, 0.06);
+.resource-pulse-primary-header {
+    spacing: 8px;
+    margin-bottom: 2px;
+}
+.resource-pulse-primary-title {
+    font-size: 1.0em;
+    color: #a0a0a8;
+    font-weight: 600;
+}
+.resource-pulse-primary-value {
+    font-size: 2.2em;
+    font-weight: bold;
+    color: #ffffff;
+    text-align: right;
 }
 
-.resource-pulse-summary-header {
-    spacing: 6px;
-    margin-bottom: 6px;
+/* ── Secondary Grid (Disk, Net, etc.) ─────────────────────────────────────── */
+
+.resource-pulse-secondary-grid {
+    spacing-rows: 12px;
+    spacing-columns: 12px;
 }
 
-.resource-pulse-summary-title {
-    font-size: 0.85em;
+.resource-pulse-secondary-card {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 130px;
+    transition-duration: 120ms;
+}
+.resource-pulse-secondary-card:hover {
+    border-color: rgba(255, 255, 255, 0.14);
+}
+
+.resource-pulse-secondary-title {
+    font-size: 0.9em;
     color: #a0a0a8;
     font-weight: 500;
     margin-top: 4px;
 }
-
-.resource-pulse-summary-value {
-    font-size: 1.45em;
+.resource-pulse-secondary-value {
+    font-size: 1.4em;
     font-weight: bold;
     color: #ffffff;
     margin-top: 2px;
 }
 
-/* ── Tab Bar ──────────────────────────────────────────────────────────────── */
+/* ── Tints for Cards ──────────────────────────────────────────────────────── */
 
-.resource-pulse-tab-bar {
-    spacing: 5px;
-    margin-bottom: 14px;
+.tint-cpu { background-color: rgba(53, 132, 228, 0.06); border-color: rgba(53, 132, 228, 0.15); }
+.tint-cpu:hover { background-color: rgba(53, 132, 228, 0.10); }
+
+.tint-memory { background-color: rgba(145, 65, 172, 0.06); border-color: rgba(145, 65, 172, 0.15); }
+.tint-memory:hover { background-color: rgba(145, 65, 172, 0.10); }
+
+.tint-battery { background-color: rgba(46, 194, 126, 0.06); border-color: rgba(46, 194, 126, 0.15); }
+.tint-battery:hover { background-color: rgba(46, 194, 126, 0.10); }
+
+.tint-power { background-color: rgba(255, 120, 0, 0.06); border-color: rgba(255, 120, 0, 0.15); }
+.tint-power:hover { background-color: rgba(255, 120, 0, 0.10); }
+
+.tint-disk { background-color: rgba(246, 211, 45, 0.06); border-color: rgba(246, 211, 45, 0.15); }
+.tint-disk:hover { background-color: rgba(246, 211, 45, 0.10); }
+
+.tint-network { background-color: rgba(224, 27, 36, 0.06); border-color: rgba(224, 27, 36, 0.15); }
+.tint-network:hover { background-color: rgba(224, 27, 36, 0.10); }
+
+.tint-thermal { background-color: rgba(255, 120, 0, 0.06); border-color: rgba(255, 120, 0, 0.15); }
+.tint-thermal:hover { background-color: rgba(255, 120, 0, 0.10); }
+
+.tint-gpu { background-color: rgba(51, 209, 122, 0.06); border-color: rgba(51, 209, 122, 0.15); }
+.tint-gpu:hover { background-color: rgba(51, 209, 122, 0.10); }
+
+/* ── Progress Bars ────────────────────────────────────────────────────────── */
+
+.resource-pulse-progress-track {
+    background-color: rgba(0, 0, 0, 0.4);
+    border-radius: 4px;
+    height: 6px;
+    margin-top: 6px;
 }
 
-.resource-pulse-tab-button {
-    background-color: transparent;
-    border: 1px solid #3a3a3c;
-    border-radius: 8px;
-    padding: 5px 13px;
-    color: #888;
-    font-size: 0.85em;
-    font-weight: 600;
-    transition-duration: 120ms;
+.resource-pulse-progress-fill {
+    border-radius: 4px;
 }
 
-.resource-pulse-tab-button:hover {
-    background-color: rgba(255, 255, 255, 0.06);
-    color: #ccc;
-}
-
-.resource-pulse-tab-button-active {
-    background-color: rgba(53, 132, 228, 0.14);
-    border-color: #3584e4;
-    color: #3584e4;
-}
-
-.resource-pulse-tab-button-active:hover {
-    background-color: rgba(53, 132, 228, 0.22);
-}
-
-/* ── Detail Area ──────────────────────────────────────────────────────────── */
+/* ── Details Page ─────────────────────────────────────────────────────────── */
 
 .resource-pulse-detail-area {
-    /* wrapper; individual sections provide their own padding */
+    /* Main wrapper for details */
 }
 
-.resource-pulse-detail-section {
-    /* no extra wrapper styling needed; children handle it */
+.resource-pulse-back-button {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-weight: bold;
+    color: #ddd;
+    margin-bottom: 12px;
+    transition-duration: 100ms;
+}
+.resource-pulse-back-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #fff;
 }
 
-.resource-pulse-detail-title {
-    font-size: 1.0em;
+.resource-pulse-hardware-header {
+    font-size: 1.1em;
     font-weight: bold;
     color: #ffffff;
-    margin-bottom: 10px;
+    margin-bottom: 2px;
+}
+.resource-pulse-hardware-sub {
+    font-size: 0.85em;
+    color: #a0a0a8;
+    margin-bottom: 16px;
 }
 
 .resource-pulse-detail-row {
-    margin-bottom: 7px;
+    margin-bottom: 10px;
 }
-
 .resource-pulse-detail-label {
     color: #a0a0a8;
-    font-size: 0.9em;
+    font-size: 0.95em;
 }
-
 .resource-pulse-detail-value {
     color: #ffffff;
-    font-size: 0.9em;
+    font-size: 0.95em;
     font-weight: 600;
 }
 
 /* ── Sparkline ────────────────────────────────────────────────────────────── */
 
 .resource-pulse-sparkline {
-    border-radius: 6px;
-    background-color: rgba(53, 132, 228, 0.04);
-    margin-bottom: 12px;
-}
-
-/* ── CPU Core Grid ────────────────────────────────────────────────────────── */
-
-.resource-pulse-core-section-title {
-    font-size: 0.85em;
-    font-weight: 600;
-    color: #a0a0a8;
-    margin-top: 6px;
-    margin-bottom: 8px;
-}
-
-.resource-pulse-core-grid {
-    spacing-rows: 6px;
-    spacing-columns: 6px;
-    margin-bottom: 14px;
-}
-
-.resource-pulse-core-box {
     border-radius: 8px;
-    padding: 8px 10px;
-    min-width: 78px;
+    background-color: rgba(0, 0, 0, 0.2);
+    margin-bottom: 16px;
 }
 
-.resource-pulse-core-label {
-    font-size: 0.78em;
-    color: rgba(255, 255, 255, 0.5);
-    margin-bottom: 2px;
-}
+/* ── Process List & Core Bars ─────────────────────────────────────────────── */
 
-.resource-pulse-core-value {
-    font-size: 1.05em;
+.resource-pulse-sub-section-title {
+    font-size: 0.95em;
     font-weight: bold;
-    color: #ffffff;
+    color: #a0a0a8;
+    margin-top: 16px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 4px;
 }
-
-/* ── Process List ─────────────────────────────────────────────────────────── */
 
 .resource-pulse-process-item {
-    padding: 4px 2px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 6px 4px;
+    border-radius: 6px;
+    margin-bottom: 2px;
+}
+.resource-pulse-process-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 .resource-pulse-process-name {
-    font-size: 0.88em;
+    font-size: 0.9em;
     color: #ddd;
     font-weight: 500;
 }
-
 .resource-pulse-process-stat {
-    font-size: 0.82em;
+    font-size: 0.85em;
     font-weight: bold;
-    color: rgba(53, 132, 228, 0.9);
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* ── System Icon Size ─────────────────────────────────────────────────────── */
@@ -262,8 +237,8 @@
 .icon-cpu { color: #3584e4; }
 .icon-memory { color: #9141ac; }
 .icon-battery { color: #2ec27e; }
-.icon-power { color: #f6d32d; }
-.icon-disk { color: #ff7800; }
+.icon-power { color: #ff7800; }
+.icon-disk { color: #f6d32d; }
 .icon-network { color: #e01b24; }
-.icon-thermal { color: #ed333b; }
-.icon-gpu { color: #26a269; }
+.icon-thermal { color: #ff7800; }
+.icon-gpu { color: #33d17a; }
