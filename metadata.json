@@ -3,6 +3,11 @@
   "name": "Resource Pulse",
   "description": "Monitors system resources (CPU, Memory, Battery, Disk, Network, Thermal, GPU) in a customizable top bar and panel dropdown dashboard.",
   "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
     "50"
   ],
   "url": "https://github.com/StefanAMN/Monte-Carlo-Simulations",
