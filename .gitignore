@@ -1,3 +1,13 @@
 schemas/gschemas.compiled
 *.zip
 .DS_Store
+
+# Editor / IDE files
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temporary / test files
+scratch/
+tests/
