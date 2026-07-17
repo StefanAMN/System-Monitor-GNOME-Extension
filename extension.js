@@ -992,12 +992,17 @@ export default class ResourcePulseExtension extends Extension {
         sparkCard.add_child(this._thmSparkline);
         box.add_child(sparkCard);
         const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
-        this._thmPackage = this._detailRow('Package temp');
-        statsCard.add_child(this._thmPackage.row);
-        this._thmFan = this._detailRow('Fan speed');
-        statsCard.add_child(this._thmFan.row);
+        statsCard.add_child(new St.Label({ text: 'Components', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
+        this._thmSensorsBox = new St.BoxLayout({ vertical: true });
+        statsCard.add_child(this._thmSensorsBox);
         box.add_child(statsCard);
+
+        this._thmFansCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        this._thmFansCard.add_child(new St.Label({ text: 'Fans', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
+        this._thmFansBox = new St.BoxLayout({ vertical: true });
+        this._thmFansCard.add_child(this._thmFansBox);
+        box.add_child(this._thmFansCard);
+        
         return box;
     }
 
@@ -1222,18 +1227,36 @@ export default class ResourcePulseExtension extends Extension {
             const thm = data.thm;
             const sc = this._summaryCards?.thermal;
             if (sc) {
-                sc.valueLabel.text = formatTemp(thm.temp, tempUnit);
-                sc.pbar.setPercent(Math.min(100, (thm.temp / 100) * 100)); // normalized to 100C
+                sc.valueLabel.text = formatTemp(thm.packageTemp, tempUnit);
+                sc.pbar.setPercent(Math.min(100, (thm.packageTemp / 100) * 100)); // normalized to 100C
             }
             if (this._thmSparkline) {
-                this._thmSparkline.addSample(thm.temp);
-                this._thmSparkline.setScaleLabel(`Temp: ${formatTemp(thm.temp, tempUnit)}`);
+                this._thmSparkline.addSample(thm.packageTemp);
+                this._thmSparkline.setScaleLabel(`Temp: ${formatTemp(thm.packageTemp, tempUnit)}`);
             }
-            if (this._thmPackage)   this._thmPackage.val.text = formatTemp(thm.temp, tempUnit);
-            if (this._thmFan) {
-                this._thmFan.val.text = thm.fans && thm.fans.length > 0
-                    ? thm.fans.map(f => `${f.rpm} RPM`).join(', ')
-                    : 'N/A';
+            if (this._thmSensorsBox) {
+                this._thmSensorsBox.destroy_all_children();
+                if (thm.sensors && thm.sensors.length > 0) {
+                    thm.sensors.forEach(sensor => {
+                        const row = this._detailRow(sensor.label, formatTemp(sensor.temp, tempUnit));
+                        this._thmSensorsBox.add_child(row.row);
+                    });
+                } else {
+                    const row = this._detailRow('No sensors found', '--');
+                    this._thmSensorsBox.add_child(row.row);
+                }
+            }
+            if (this._thmFansCard && this._thmFansBox) {
+                this._thmFansBox.destroy_all_children();
+                if (thm.fans && thm.fans.length > 0) {
+                    this._thmFansCard.visible = true;
+                    thm.fans.forEach(fan => {
+                        const row = this._detailRow(fan.label, `${fan.rpm} RPM`);
+                        this._thmFansBox.add_child(row.row);
+                    });
+                } else {
+                    this._thmFansCard.visible = false;
+                }
             }
         }
 
