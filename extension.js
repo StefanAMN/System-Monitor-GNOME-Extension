@@ -680,25 +680,7 @@ export default class ResourcePulseExtension extends Extension {
 
         this._overviewPage.add_child(this._hwCard);
 
-        // Footer button: Open System Monitor
-        const sysMonBtn = new St.Button({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 14px; margin-top: 10px;', reactive: true, x_expand: true });
-        const btnBox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER });
-        const btnIcon = new St.Icon({ icon_name: 'utilities-system-monitor-symbolic', style: 'icon-size: 16px; color: #a0a0b8;' });
-        const btnLabel = new St.Label({ text: 'Open System Monitor', style: 'font-size: 0.9em; color: #a0a0b8; margin-left: 8px;', x_expand: true });
-        const btnArrow = new St.Icon({ icon_name: 'go-next-symbolic', style: 'icon-size: 14px; color: rgba(255,255,255,0.3);' });
-        btnBox.add_child(btnIcon);
-        btnBox.add_child(btnLabel);
-        btnBox.add_child(btnArrow);
-        sysMonBtn.add_child(btnBox);
-        sysMonBtn.connect('clicked', () => {
-            try {
-                Gio.AppInfo.create_from_commandline('gnome-system-monitor', null, Gio.AppInfoCreateFlags.NONE);
-                this._indicator.menu.close();
-            } catch (e) {
-                console.error(`Could not open System Monitor: ${e.message}`);
-            }
-        });
-        this._overviewPage.add_child(sysMonBtn);
+
 
         this._menuContainer.add_child(this._overviewPage);
     }
