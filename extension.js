@@ -478,6 +478,52 @@ export default class ResourcePulseExtension extends Extension {
 
     // ── Overview Page ─────────────────────────────────────────────────────────
 
+
+    _addClickAnimations(actor) {
+        if (!actor) return;
+        actor.set_pivot_point(0.5, 0.5);
+
+        actor.connect('enter-event', () => {
+            actor.ease({
+                scale_x: 1.03,
+                scale_y: 1.03,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        actor.connect('leave-event', () => {
+            actor.ease({
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        actor.connect('button-press-event', () => {
+            actor.ease({
+                scale_x: 0.95,
+                scale_y: 0.95,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        actor.connect('button-release-event', () => {
+            actor.ease({
+                scale_x: 1.03,
+                scale_y: 1.03,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
     _buildOverview() {
         this._overviewPage = new St.BoxLayout({ vertical: true });
 
@@ -493,7 +539,9 @@ export default class ResourcePulseExtension extends Extension {
         const menuBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px; margin-left: 6px;', reactive: true });
         menuBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
 
+        this._addClickAnimations(refreshBtn);
         headerBox.add_child(refreshBtn);
+        this._addClickAnimations(menuBtn);
         headerBox.add_child(menuBtn);
         this._overviewPage.add_child(headerBox);
 
@@ -525,6 +573,7 @@ export default class ResourcePulseExtension extends Extension {
             this._updateTabVisibility();
             return Clutter.EVENT_STOP;
         });
+        this._addClickAnimations(cpuCard);
         this._primaryRow.add_child(cpuCard);
         this._summaryCards['cpu'] = { box: cpuCard, valueLabel: cpuVal, pbar: cpuBar, spark: cpuSpark };
 
@@ -550,6 +599,7 @@ export default class ResourcePulseExtension extends Extension {
             this._updateTabVisibility();
             return Clutter.EVENT_STOP;
         });
+        this._addClickAnimations(memCard);
         this._primaryRow.add_child(memCard);
         this._summaryCards['memory'] = { box: memCard, valueLabel: memVal, pbar: memBar, spark: memSpark };
 
@@ -576,6 +626,7 @@ export default class ResourcePulseExtension extends Extension {
             this._updateTabVisibility();
             return Clutter.EVENT_STOP;
         });
+        this._addClickAnimations(batCard);
         this._primaryRow.add_child(batCard);
         this._summaryCards['battery'] = { box: batCard, valueLabel: batVal, pbar: batBar, statusLbl: batStatus };
 
@@ -628,6 +679,7 @@ export default class ResourcePulseExtension extends Extension {
                 return Clutter.EVENT_STOP;
             });
 
+            this._addClickAnimations(card);
             grid.attach(card, idx % 2, Math.floor(idx / 2), 1, 1);
             this._summaryCards[m.key] = { box: card, valueLabel: val, subLabel: subtext, pbar };
         });
@@ -678,6 +730,7 @@ export default class ResourcePulseExtension extends Extension {
         hwStatsRow.add_child(osBox);
         this._hwCard.add_child(hwStatsRow);
 
+        this._addClickAnimations(this._hwCard);
         this._overviewPage.add_child(this._hwCard);
 
 
@@ -712,8 +765,10 @@ export default class ResourcePulseExtension extends Extension {
         const optBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
         optBtn.add_child(new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
 
+        this._addClickAnimations(backBtn);
         this._detailHeader.add_child(backBtn);
         this._detailHeader.add_child(this._detailHeaderTitleBox);
+        this._addClickAnimations(optBtn);
         this._detailHeader.add_child(optBtn);
 
         this._detailArea.add_child(this._detailHeader);
@@ -741,11 +796,27 @@ export default class ResourcePulseExtension extends Extension {
 
     _updateTabVisibility() {
         if (this._activeTab === 'overview') {
-            this._overviewPage.visible = true;
+            if (!this._overviewPage.visible) {
+                this._overviewPage.opacity = 0;
+                this._overviewPage.visible = true;
+                this._overviewPage.ease({
+                    opacity: 255,
+                    duration: 400,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+            }
             this._detailArea.visible = false;
         } else {
             this._overviewPage.visible = false;
-            this._detailArea.visible = true;
+            if (!this._detailArea.visible) {
+                this._detailArea.opacity = 0;
+                this._detailArea.visible = true;
+                this._detailArea.ease({
+                    opacity: 255,
+                    duration: 400,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+            }
             
             // Set header title & icon dynamically
             const iconColorMap = {
