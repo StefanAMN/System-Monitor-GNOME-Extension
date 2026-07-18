@@ -94,7 +94,7 @@ const Sparkline = GObject.registerClass({
             gridRows: 4,
             paddingLeft: 0,
             paddingRight: 0,
-            paddingTop: 0,
+            paddingTop: options.showGrid ? 12 : 2,
             paddingBottom: 0
         }, options);
         this.connect('repaint', this._draw.bind(this));
