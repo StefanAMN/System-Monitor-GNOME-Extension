@@ -63,9 +63,9 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
             { key: 'memory', label: 'Memory Usage' },
             { key: 'battery', label: 'Battery Status' },
             { key: 'power', label: 'Power Draw' },
-            { key: 'disk', label: 'Disk Space & I/O' },
+            { key: 'disk', label: 'Disk Space and I/O' },
             { key: 'network', label: 'Network Throughput' },
-            { key: 'thermal', label: 'Thermal Sensors & Fans' },
+            { key: 'thermal', label: 'Thermal Sensors and Fans' },
             { key: 'gpu', label: 'GPU Status (NVIDIA/AMD)' }
         ];
 
