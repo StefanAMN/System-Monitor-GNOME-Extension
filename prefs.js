@@ -1,6 +1,7 @@
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
+import GLib from 'gi://GLib';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 export default class ResourcePulsePreferences extends ExtensionPreferences {
@@ -20,26 +21,35 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
             return false; // propagate so window still closes
         });
 
-        // 1.5. Group: Navigation
-        const navGroup = new Adw.PreferencesGroup();
-        page.add(navGroup);
+        // 1.5. Inject a small back button into the top-left HeaderBar
+        function findHeaderBar(w) {
+            if (!w) return null;
+            if (w.constructor.name === 'HeaderBar' || w.constructor.$gtype?.name === 'AdwHeaderBar') return w;
+            let child = w.get_first_child();
+            while (child) {
+                let res = findHeaderBar(child);
+                if (res) return res;
+                child = child.get_next_sibling();
+            }
+            return null;
+        }
 
-        const goBackRow = new Adw.ActionRow({
-            title: 'Return to Dashboard',
-            subtitle: 'Close settings and open the extension overview'
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            const headerBar = findHeaderBar(window);
+            if (headerBar) {
+                const backBtn = new Gtk.Button({
+                    icon_name: 'go-previous-symbolic',
+                    css_classes: ['flat'],
+                    valign: Gtk.Align.CENTER
+                });
+                backBtn.connect('clicked', () => {
+                    settings.set_boolean('action-open-menu', true);
+                    window.close();
+                });
+                headerBar.pack_start(backBtn);
+            }
+            return GLib.SOURCE_REMOVE;
         });
-        const goBackButton = new Gtk.Button({
-            label: 'Go Back',
-            valign: Gtk.Align.CENTER,
-            has_frame: true
-        });
-        goBackButton.connect('clicked', () => {
-            settings.set_boolean('action-open-menu', true);
-            window.close();
-        });
-        goBackRow.add_suffix(goBackButton);
-        goBackRow.activatable_widget = goBackButton;
-        navGroup.add(goBackRow);
 
         // 2. Group: Pinned Metrics
         const pinGroup = new Adw.PreferencesGroup({
