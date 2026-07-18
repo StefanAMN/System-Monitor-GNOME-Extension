@@ -14,6 +14,33 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
         });
         window.add(page);
 
+        // Intercept window close to trigger the extension to open
+        window.connect('close-request', () => {
+            settings.set_boolean('action-open-menu', true);
+            return false; // propagate so window still closes
+        });
+
+        // 1.5. Group: Navigation
+        const navGroup = new Adw.PreferencesGroup();
+        page.add(navGroup);
+
+        const goBackRow = new Adw.ActionRow({
+            title: 'Return to Dashboard',
+            subtitle: 'Close settings and open the extension overview'
+        });
+        const goBackButton = new Gtk.Button({
+            label: 'Go Back',
+            valign: Gtk.Align.CENTER,
+            has_frame: true
+        });
+        goBackButton.connect('clicked', () => {
+            settings.set_boolean('action-open-menu', true);
+            window.close();
+        });
+        goBackRow.add_suffix(goBackButton);
+        goBackRow.activatable_widget = goBackButton;
+        navGroup.add(goBackRow);
+
         // 2. Group: Pinned Metrics
         const pinGroup = new Adw.PreferencesGroup({
             title: 'Pinned Metrics',
