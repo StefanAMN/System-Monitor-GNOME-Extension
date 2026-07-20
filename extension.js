@@ -369,9 +369,10 @@ export default class ResourcePulseExtension extends Extension {
 
             let processes = [];
             if (this._menuOpen && this._activeTab === 'cpu') {
-                const stdout = await runSubprocess(['ps', '-eo', 'pid,%cpu,%mem,comm', '--sort=-%cpu']);
+                const cmd = "top -b -n 2 -d 0.2 -w 512 | awk '/^top -/ {batch++} batch==2 && $1 ~ /^[0-9]+$/ {cmd=\"\"; for(i=12;i<=NF;i++) cmd=cmd (i==12?\"\":\" \") $i; print $1, $9, $10, cmd}' | grep -Ev ' (top|awk|bash)$' | head -n 5";
+                const stdout = await runSubprocess(['bash', '-c', cmd]);
                 if (stdout) {
-                    const lines = stdout.trim().split('\n').slice(1, 6);
+                    const lines = stdout.trim().split('\n');
                     for (const line of lines) {
                         const parts = line.trim().split(/\s+/);
                         if (parts.length >= 4) {
