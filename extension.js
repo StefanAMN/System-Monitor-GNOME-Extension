@@ -361,11 +361,38 @@ export default class ResourcePulseExtension extends Extension {
 
     async _poll() {
         try {
+            const pinned = this._settings?.get_strv('pinned-metrics') || ['cpu', 'memory'];
+            const isOpen = this._menuOpen;
+
+            const needCpu = isOpen || pinned.includes('cpu');
+            const needMem = isOpen || pinned.includes('memory');
+            const needBat = isOpen || pinned.includes('battery') || pinned.includes('power');
+            const needDsk = isOpen || pinned.includes('disk');
+            const needNet = isOpen || pinned.includes('network');
+            const needThm = isOpen || pinned.includes('thermal');
+            const needGpu = isOpen || pinned.includes('gpu');
+            const needPwr = isOpen || pinned.includes('power');
+
             const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
-                this._cpu.sample(), this._mem.sample(), this._bat.sample(),
-                this._dsk.sample(), this._net.sample(), this._thm.sample(), this._gpu.sample()
+                needCpu ? this._cpu.sample() : Promise.resolve(this._lastCpu || { total: 0, cores: [] }),
+                needMem ? this._mem.sample() : Promise.resolve(this._lastMem || { percent: 0, total: 0, used: 0 }),
+                needBat ? this._bat.sample() : Promise.resolve(this._lastBat || { present: false }),
+                needDsk ? this._dsk.sample() : Promise.resolve(this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 }),
+                needNet ? this._net.sample() : Promise.resolve(this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} }),
+                needThm ? this._thm.sample() : Promise.resolve(this._lastThm || { packageTemp: 0, sensors: [], fans: [] }),
+                needGpu ? this._gpu.sample() : Promise.resolve(this._lastGpu || { present: false, percent: 0 })
             ]);
-            const pwr = await this._pwr.sample(bat);
+
+            if (needCpu) this._lastCpu = cpu;
+            if (needMem) this._lastMem = mem;
+            if (needBat) this._lastBat = bat;
+            if (needDsk) this._lastDsk = dsk;
+            if (needNet) this._lastNet = net;
+            if (needThm) this._lastThm = thm;
+            if (needGpu) this._lastGpu = gpu;
+
+            const pwr = needPwr ? await this._pwr.sample(bat) : (this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null });
+            if (needPwr) this._lastPwr = pwr;
 
             let processes = [];
             if (this._menuOpen && this._activeTab === 'cpu') {
