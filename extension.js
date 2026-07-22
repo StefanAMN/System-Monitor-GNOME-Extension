@@ -1199,19 +1199,42 @@ export default class ResourcePulseExtension extends Extension {
 
     _buildNetworkDetails() {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
-        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        sparkCard.add_child(new St.Label({ text: 'Download Activity', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._netSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
-        this._netSparkline.x_expand = true;
-        sparkCard.add_child(this._netSparkline);
-        box.add_child(sparkCard);
+        
+        // Download Sparkline
+        const rxCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        rxCard.add_child(new St.Label({ text: 'Download Rate', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        this._netRxSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netRxSparkline.x_expand = true;
+        rxCard.add_child(this._netRxSparkline);
+        box.add_child(rxCard);
+
+        // Upload Sparkline
+        const txCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        txCard.add_child(new St.Label({ text: 'Upload Rate', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        this._netTxSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netTxSparkline.x_expand = true;
+        txCard.add_child(this._netTxSparkline);
+        box.add_child(txCard);
+
         const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
-        this._netRx = this._detailRow('Download');
+        statsCard.add_child(new St.Label({ text: 'Stats & Session Totals', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
+        this._netRx = this._detailRow('Current Download');
         statsCard.add_child(this._netRx.row);
-        this._netTx = this._detailRow('Upload');
+        this._netTx = this._detailRow('Current Upload');
         statsCard.add_child(this._netTx.row);
+        this._netSessionRx = this._detailRow('Session Downloaded');
+        statsCard.add_child(this._netSessionRx.row);
+        this._netSessionTx = this._detailRow('Session Uploaded');
+        statsCard.add_child(this._netSessionTx.row);
         box.add_child(statsCard);
+
+        // Per-interface breakdown card
+        const ifaceCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        ifaceCard.add_child(new St.Label({ text: 'Interfaces', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
+        this._netIfaceList = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;' });
+        ifaceCard.add_child(this._netIfaceList);
+        box.add_child(ifaceCard);
+
         return box;
     }
 
@@ -1493,12 +1516,30 @@ export default class ResourcePulseExtension extends Extension {
                 sc.subLabel.visible = true;
                 sc.subLabel.text = `↓ ${formatSpeed(net.total.rxRate)}   ↑ ${formatSpeed(net.total.txRate)}`;
             }
-            if (this._netSparkline) {
-                this._netSparkline.addSample(net.total.rxRate / 1024);
-                this._netSparkline.setScaleLabel(`DL: ${formatSpeed(net.total.rxRate)}`);
+            if (this._netRxSparkline) {
+                this._netRxSparkline.addSample(net.total.rxRate / 1024);
+                this._netRxSparkline.setScaleLabel(`DL: ${formatSpeed(net.total.rxRate)}`);
+            }
+            if (this._netTxSparkline) {
+                this._netTxSparkline.addSample(net.total.txRate / 1024);
+                this._netTxSparkline.setScaleLabel(`UL: ${formatSpeed(net.total.txRate)}`);
             }
             if (this._netRx) this._netRx.val.text = formatSpeed(net.total.rxRate);
             if (this._netTx) this._netTx.val.text = formatSpeed(net.total.txRate);
+            if (this._netSessionRx) this._netSessionRx.val.text = formatBytes(net.sessionRx || 0, useGiB);
+            if (this._netSessionTx) this._netSessionTx.val.text = formatBytes(net.sessionTx || 0, useGiB);
+
+            if (this._netIfaceList && net.interfaces) {
+                this._netIfaceList.destroy_all_children();
+                for (const [ifaceName, ifaceData] of Object.entries(net.interfaces)) {
+                    if (ifaceData.rxRate > 100 || ifaceData.txRate > 100 || /^(wlan|eth|enp|wlp)/.test(ifaceName)) {
+                        const row = new St.BoxLayout({ style: 'padding: 2px 0;' });
+                        row.add_child(new St.Label({ text: ifaceName, style: 'font-size: 0.8em; color: #ffffff; font-weight: 500;', width: 80 }));
+                        row.add_child(new St.Label({ text: `↓ ${formatSpeed(ifaceData.rxRate)}   ↑ ${formatSpeed(ifaceData.txRate)}`, style: 'font-size: 0.8em; color: #a0a0b8;', x_expand: true }));
+                        this._netIfaceList.add_child(row);
+                    }
+                }
+            }
         }
 
         // ── Thermal ──
