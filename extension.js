@@ -736,7 +736,8 @@ export default class ResourcePulseExtension extends Extension {
             { key: 'disk', label: 'Disk', tint: 'tint-disk', r: 0.96, g: 0.83, b: 0.18 },
             { key: 'network', label: 'Network', tint: 'tint-network', r: 0.88, g: 0.11, b: 0.14 },
             { key: 'thermal', label: 'Thermal', tint: 'tint-thermal', r: 1.0, g: 0.47, b: 0.0 },
-            { key: 'power', label: 'Power', tint: 'tint-power', r: 0.96, g: 0.83, b: 0.18 }
+            { key: 'power', label: 'Power', tint: 'tint-power', r: 0.96, g: 0.83, b: 0.18 },
+            { key: 'gpu', label: 'GPU', tint: 'tint-gpu', r: 0.2, g: 0.82, b: 0.48 }
         ];
 
         secondaryMetrics.forEach((m, idx) => {
@@ -745,7 +746,8 @@ export default class ResourcePulseExtension extends Extension {
                 disk:    { bg: '#22200a', border: 'rgba(246,211,45,0.35)' },
                 network: { bg: '#22100f', border: 'rgba(224,27,36,0.35)' },
                 thermal: { bg: '#221608', border: 'rgba(255,120,0,0.35)' },
-                power:   { bg: '#22200a', border: 'rgba(246,211,45,0.35)' }
+                power:   { bg: '#22200a', border: 'rgba(246,211,45,0.35)' },
+                gpu:     { bg: '#0b2014', border: 'rgba(51,209,122,0.35)' }
             };
             const colors = bgMap[m.key] || { bg: '#222', border: 'rgba(255,255,255,0.15)' };
             const card = new St.BoxLayout({
@@ -754,7 +756,7 @@ export default class ResourcePulseExtension extends Extension {
             });
 
             const iconColorMap = {
-                disk: '#f6d32d', network: '#e01b24', thermal: '#ff7800', power: '#f6d32d'
+                disk: '#f6d32d', network: '#e01b24', thermal: '#ff7800', power: '#f6d32d', gpu: '#33d17a'
             };
             const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;' });
             head.add_child(new St.Icon({ icon_name: this._getIconName(m.key), style: `icon-size: 16px; color: ${iconColorMap[m.key] || '#fff'};` }));
@@ -1277,6 +1279,8 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._gpuMem.row);
         this._gpuTemp  = this._detailRow('Temperature');
         statsCard.add_child(this._gpuTemp.row);
+        this._gpuPower = this._detailRow('Power Draw');
+        statsCard.add_child(this._gpuPower.row);
         box.add_child(statsCard);
         return box;
     }
@@ -1583,6 +1587,19 @@ export default class ResourcePulseExtension extends Extension {
         // ── GPU ──
         if (data.gpu) {
             const gpu = data.gpu;
+            const sc = this._summaryCards?.gpu;
+            if (sc) {
+                sc.box.visible = gpu.present;
+                if (gpu.present) {
+                    sc.valueLabel.text = `${Math.round(gpu.percent)}%`;
+                    sc.pbar.setPercent(gpu.percent);
+                    sc.subLabel.visible = true;
+                    sc.subLabel.text = `${gpu.brand || 'GPU'} · ${formatTemp(gpu.temp, tempUnit)}`;
+                }
+            }
+            if (this._tabButtons?.gpu) {
+                this._tabButtons.gpu.visible = gpu.present;
+            }
             if (gpu.present) {
                 if (this._gpuSparkline) {
                     this._gpuSparkline.addSample(gpu.percent);
@@ -1591,6 +1608,7 @@ export default class ResourcePulseExtension extends Extension {
                 if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
                 if (this._gpuMem)   this._gpuMem.val.text   = `${Math.round(gpu.memPercent)}% (${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)})`;
                 if (this._gpuTemp)  this._gpuTemp.val.text  = formatTemp(gpu.temp, tempUnit);
+                if (this._gpuPower) this._gpuPower.val.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
             }
         }
 
