@@ -1171,6 +1171,8 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._pwrPackage.row);
         this._pwrGpu     = this._detailRow('GPU Draw');
         statsCard.add_child(this._pwrGpu.row);
+        this._pwrCharging = this._detailRow('Charging Rate');
+        statsCard.add_child(this._pwrCharging.row);
         this._pwrPeak    = this._detailRow('Session Peak');
         statsCard.add_child(this._pwrPeak.row);
         this._pwrAvg     = this._detailRow('Session Avg');
@@ -1475,12 +1477,19 @@ export default class ResourcePulseExtension extends Extension {
             const draw = pwr.systemPower !== null ? pwr.systemPower : (pwr.packagePower || 0);
             const drawStr = draw > 0 ? `${draw.toFixed(1)} W` : '0.0 W';
 
+            const bat = data.bat;
+            const isCharging = bat && bat.present && bat.state === 'charging' && bat.energyRate > 0;
+
             if (sc) {
                 sc.box.visible = true;
                 sc.valueLabel.text = drawStr;
                 sc.pbar.setPercent(Math.min(100, (draw / 45) * 100)); // normalized to 45W limit
                 sc.subLabel.visible = true;
-                sc.subLabel.text = pwr.systemPower !== null ? 'On Battery' : 'AC Connected';
+                if (isCharging) {
+                    sc.subLabel.text = `Charging (+${bat.energyRate.toFixed(1)} W)`;
+                } else {
+                    sc.subLabel.text = pwr.systemPower !== null ? 'On Battery' : 'AC Connected';
+                }
             }
             if (hasDraw) {
                 if (!this._pwrStats) this._pwrStats = { count: 0, sum: 0, peak: 0 };
@@ -1500,6 +1509,15 @@ export default class ResourcePulseExtension extends Extension {
                 
                 const gpuPwr = data.gpu && data.gpu.present && data.gpu.powerDraw ? data.gpu.powerDraw : null;
                 if (this._pwrGpu) this._pwrGpu.val.text = gpuPwr !== null ? `${gpuPwr.toFixed(1)} W` : '--';
+                if (this._pwrCharging) {
+                    if (isCharging) {
+                        this._pwrCharging.val.text = `+${bat.energyRate.toFixed(1)} W`;
+                    } else if (bat && bat.present && bat.state === 'full') {
+                        this._pwrCharging.val.text = '0.0 W (Full)';
+                    } else {
+                        this._pwrCharging.val.text = '--';
+                    }
+                }
                 if (this._pwrPeak) this._pwrPeak.val.text = `${this._pwrStats.peak.toFixed(1)} W`;
                 if (this._pwrAvg) this._pwrAvg.val.text = `${avgDraw.toFixed(1)} W`;
             }
