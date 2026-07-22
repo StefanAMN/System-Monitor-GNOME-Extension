@@ -1167,6 +1167,12 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._pwrSystem.row);
         this._pwrPackage = this._detailRow('CPU Package');
         statsCard.add_child(this._pwrPackage.row);
+        this._pwrGpu     = this._detailRow('GPU Draw');
+        statsCard.add_child(this._pwrGpu.row);
+        this._pwrPeak    = this._detailRow('Session Peak');
+        statsCard.add_child(this._pwrPeak.row);
+        this._pwrAvg     = this._detailRow('Session Avg');
+        statsCard.add_child(this._pwrAvg.row);
         box.add_child(statsCard);
         return box;
     }
@@ -1431,12 +1437,25 @@ export default class ResourcePulseExtension extends Extension {
                 sc.subLabel.text = pwr.systemPower !== null ? 'On Battery' : 'AC Connected';
             }
             if (hasDraw) {
+                if (!this._pwrStats) this._pwrStats = { count: 0, sum: 0, peak: 0 };
+                if (draw > 0) {
+                    this._pwrStats.count++;
+                    this._pwrStats.sum += draw;
+                    if (draw > this._pwrStats.peak) this._pwrStats.peak = draw;
+                }
+                const avgDraw = this._pwrStats.count > 0 ? (this._pwrStats.sum / this._pwrStats.count) : 0;
+
                 if (this._pwrSparkline) {
                     this._pwrSparkline.addSample(draw);
                     this._pwrSparkline.setScaleLabel(`Draw: ${drawStr}`);
                 }
                 if (this._pwrSystem)  this._pwrSystem.val.text  = pwr.systemPower  !== null ? `${pwr.systemPower.toFixed(1)} W`  : '--';
                 if (this._pwrPackage) this._pwrPackage.val.text = pwr.packagePower !== null ? `${pwr.packagePower.toFixed(1)} W` : '--';
+                
+                const gpuPwr = data.gpu && data.gpu.present && data.gpu.powerDraw ? data.gpu.powerDraw : null;
+                if (this._pwrGpu) this._pwrGpu.val.text = gpuPwr !== null ? `${gpuPwr.toFixed(1)} W` : '--';
+                if (this._pwrPeak) this._pwrPeak.val.text = `${this._pwrStats.peak.toFixed(1)} W`;
+                if (this._pwrAvg) this._pwrAvg.val.text = `${avgDraw.toFixed(1)} W`;
             }
         }
 
