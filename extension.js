@@ -1095,9 +1095,24 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._memUsed = this._detailRow('Used / Total');
         statsCard.add_child(this._memUsed.row);
+        this._memAvail = this._detailRow('Available');
+        statsCard.add_child(this._memAvail.row);
+        this._memBuffersCache = this._detailRow('Buffers / Cache');
+        statsCard.add_child(this._memBuffersCache.row);
         this._memSwap = this._detailRow('Swap');
         statsCard.add_child(this._memSwap.row);
+        this._memSwapActivity = this._detailRow('Swap Activity');
+        statsCard.add_child(this._memSwapActivity.row);
         box.add_child(statsCard);
+
+        const memProcCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        const memProcHead = new St.BoxLayout({ style: 'margin-bottom: 8px;' });
+        memProcHead.add_child(new St.Label({ text: 'Top Memory Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+        memProcCard.add_child(memProcHead);
+        this._memProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
+        memProcCard.add_child(this._memProcList);
+        box.add_child(memProcCard);
+
         return box;
     }
 
@@ -1313,8 +1328,17 @@ export default class ResourcePulseExtension extends Extension {
             }
             if (this._memUsed) this._memUsed.val.text =
                 `${formatBytes(mem.used, useGiB)} / ${formatBytes(mem.total, useGiB)}`;
+            if (this._memAvail) this._memAvail.val.text =
+                `${formatBytes(mem.available, useGiB)}`;
+            if (this._memBuffersCache) this._memBuffersCache.val.text =
+                `${formatBytes(mem.buffers, useGiB)} / ${formatBytes(mem.cached, useGiB)}`;
             if (this._memSwap) this._memSwap.val.text =
                 `${Math.round(mem.swapPercent)}% (${formatBytes(mem.swapUsed, useGiB)} / ${formatBytes(mem.swapTotal, useGiB)})`;
+            if (this._memSwapActivity) {
+                const inStr = mem.swapInRate > 0 ? `${formatBytes(mem.swapInRate, false)}/s` : '0 B/s';
+                const outStr = mem.swapOutRate > 0 ? `${formatBytes(mem.swapOutRate, false)}/s` : '0 B/s';
+                this._memSwapActivity.val.text = (mem.swapInRate > 0 || mem.swapOutRate > 0) ? `In: ${inStr} · Out: ${outStr}` : 'Idle';
+            }
         }
 
         // ── Battery ──
@@ -1475,64 +1499,77 @@ export default class ResourcePulseExtension extends Extension {
             }
         }
 
-        // ── Top Processes (CPU tab) ──
-        if (this._menuOpen && data.processes && data.processes.length > 0 && this._procList) {
-            if (this._procWidgets.length !== data.processes.length) {
-                this._procList.destroy_all_children();
-                this._procWidgets = [];
-                for (let i = 0; i < data.processes.length; i++) {
-                    const item = new St.BoxLayout({ style: 'padding: 4px 0; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+        // ── Top Processes (CPU & Memory tabs) ──
+        if (this._menuOpen && data.processes && data.processes.length > 0) {
+            if (this._activeTab === 'cpu' && this._procList) {
+                this._renderProcessListUI(this._procList, '_procWidgets', data.processes, false);
+            } else if (this._activeTab === 'memory' && this._memProcList) {
+                this._renderProcessListUI(this._memProcList, '_memProcWidgets', data.processes, true);
+            }
+        }
+    }
 
-                    const iconBox = new St.BoxLayout({ style: 'width: 24px; height: 24px; background-color: rgba(255,255,255,0.06); border-radius: 6px;' });
-                    const icon = new St.Icon({ icon_name: 'system-run-symbolic', style: 'icon-size: 14px; color: #a0a0b8;' });
-                    iconBox.add_child(icon);
-                    item.add_child(iconBox);
+    _renderProcessListUI(container, targetWidgetsKey, processes, isMemory = false) {
+        if (!container) return;
+        if (!this[targetWidgetsKey]) this[targetWidgetsKey] = [];
 
-                    const detailsCol = new St.BoxLayout({ vertical: true, x_expand: true });
+        if (this[targetWidgetsKey].length !== processes.length) {
+            container.destroy_all_children();
+            this[targetWidgetsKey] = [];
+            for (let i = 0; i < processes.length; i++) {
+                const item = new St.BoxLayout({ style: 'padding: 4px 0; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
 
-                    const nameLbl = new St.Label({ style: 'font-size: 0.85em; color: #ffffff; font-weight: 500;', text: '' });
-                    detailsCol.add_child(nameLbl);
+                const iconBox = new St.BoxLayout({ style: 'width: 24px; height: 24px; background-color: rgba(255,255,255,0.06); border-radius: 6px;' });
+                const icon = new St.Icon({ icon_name: 'system-run-symbolic', style: 'icon-size: 14px; color: #a0a0b8;' });
+                iconBox.add_child(icon);
+                item.add_child(iconBox);
 
-                    const pbar = new ProgressBar(4, 0.208, 0.518, 0.894); // CPU Blue
-                    detailsCol.add_child(pbar);
+                const detailsCol = new St.BoxLayout({ vertical: true, x_expand: true });
+                const nameLbl = new St.Label({ style: 'font-size: 0.85em; color: #ffffff; font-weight: 500;', text: '' });
+                detailsCol.add_child(nameLbl);
 
-                    item.add_child(detailsCol);
+                const color = isMemory ? [0.569, 0.255, 0.675] : [0.208, 0.518, 0.894];
+                const pbar = new ProgressBar(4, color[0], color[1], color[2]);
+                detailsCol.add_child(pbar);
 
-                    const statLbl = new St.Label({ style: 'font-size: 0.85em; color: #a0a0b8; font-weight: 600;', width: 40 });
-                    statLbl.x_align = Clutter.ActorAlign.END;
-                    item.add_child(statLbl);
+                item.add_child(detailsCol);
 
-                    this._procList.add_child(item);
-                    this._procWidgets.push({ nameLbl, statLbl, pbar, icon });
+                const statLbl = new St.Label({ style: 'font-size: 0.85em; color: #a0a0b8; font-weight: 600;', width: 45 });
+                statLbl.x_align = Clutter.ActorAlign.END;
+                item.add_child(statLbl);
+
+                container.add_child(item);
+                this[targetWidgetsKey].push({ nameLbl, statLbl, pbar, icon });
+            }
+        }
+
+        const iconMap = {
+            'firefox': 'firefox-symbolic',
+            'gnome-shell': 'utilities-terminal-symbolic',
+            'spotify': 'audio-card-symbolic',
+            'chrome': 'google-chrome-symbolic',
+            'code': 'com.visualstudio.code-symbolic',
+            'system': 'system-run-symbolic'
+        };
+
+        processes.forEach((proc, i) => {
+            const w = this[targetWidgetsKey][i];
+            if (!w) return;
+            w.nameLbl.text = proc.comm;
+            const valNum = isMemory ? proc.mem : proc.cpu;
+            w.statLbl.text = `${valNum.toFixed(1)}%`;
+            w.pbar.setPercent(valNum);
+
+            let iconName = 'system-run-symbolic';
+            const commLower = proc.comm.toLowerCase();
+            for (const [key, name] of Object.entries(iconMap)) {
+                if (commLower.includes(key)) {
+                    iconName = name;
+                    break;
                 }
             }
-            
-            const iconMap = {
-                'firefox': 'firefox-symbolic',
-                'gnome-shell': 'utilities-terminal-symbolic',
-                'spotify': 'audio-card-symbolic',
-                'chrome': 'google-chrome-symbolic',
-                'code': 'com.visualstudio.code-symbolic',
-                'system': 'system-run-symbolic'
-            };
-
-            data.processes.forEach((proc, i) => {
-                const w = this._procWidgets[i];
-                w.nameLbl.text = proc.comm;
-                w.statLbl.text = `${Math.round(proc.cpu)}%`;
-                w.pbar.setPercent(proc.cpu);
-                
-                // Try choosing icon
-                let iconName = 'system-run-symbolic';
-                const commLower = proc.comm.toLowerCase();
-                for (const [key, name] of Object.entries(iconMap)) {
-                    if (commLower.includes(key)) {
-                        iconName = name;
-                        break;
-                    }
-                }
-                w.icon.icon_name = iconName;
-            });
-        }
+            w.icon.icon_name = iconName;
+        });
+    }
     }
 }
