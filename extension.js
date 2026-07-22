@@ -1118,16 +1118,29 @@ export default class ResourcePulseExtension extends Extension {
 
     _buildBatteryDetails() {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        
+        // Percent History
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        sparkCard.add_child(new St.Label({ text: 'Charge History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._batSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        sparkCard.add_child(new St.Label({ text: 'Charge Level History (%)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        this._batSparkline = new Sparkline(400, 90, 100, false, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batSparkline.x_expand = true;
         sparkCard.add_child(this._batSparkline);
         box.add_child(sparkCard);
+
+        // Power Rate History (W)
+        const rateCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        rateCard.add_child(new St.Label({ text: 'Charge/Discharge Rate (W)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        this._batRateSparkline = new Sparkline(400, 90, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._batRateSparkline.x_expand = true;
+        rateCard.add_child(this._batRateSparkline);
+        box.add_child(rateCard);
+
         const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._batState  = this._detailRow('State');
         statsCard.add_child(this._batState.row);
+        this._batTimeEst = this._detailRow('Time Estimate');
+        statsCard.add_child(this._batTimeEst.row);
         this._batHealth = this._detailRow('Health');
         statsCard.add_child(this._batHealth.row);
         this._batCycles = this._detailRow('Cycle Count');
@@ -1367,10 +1380,32 @@ export default class ResourcePulseExtension extends Extension {
                     this._batSparkline.addSample(bat.percent);
                     this._batSparkline.setScaleLabel(`Cur: ${Math.round(bat.percent)}%`);
                 }
+                if (this._batRateSparkline) {
+                    const rateW = bat.energyRate || 0;
+                    this._batRateSparkline.addSample(rateW);
+                    this._batRateSparkline.setScaleLabel(`Rate: ${rateW.toFixed(1)} W`);
+                }
                 if (this._batState) {
                     const s = bat.state === 'charging' ? 'Charging'
                         : bat.state === 'discharging' ? 'Discharging' : 'Full';
                     this._batState.val.text = s;
+                }
+                if (this._batTimeEst) {
+                    let estText = '--';
+                    if (bat.state === 'charging' && (bat.timeToFull > 0 || bat.timeRemaining > 0)) {
+                        const t = bat.timeToFull || bat.timeRemaining;
+                        const h = Math.floor(t / 3600);
+                        const m = Math.floor((t % 3600) / 60);
+                        estText = `${h}h ${m}m to full`;
+                    } else if (bat.state === 'discharging' && (bat.timeToEmpty > 0 || bat.timeRemaining > 0)) {
+                        const t = bat.timeToEmpty || bat.timeRemaining;
+                        const h = Math.floor(t / 3600);
+                        const m = Math.floor((t % 3600) / 60);
+                        estText = `${h}h ${m}m remaining`;
+                    } else if (bat.state === 'full') {
+                        estText = 'Fully Charged';
+                    }
+                    this._batTimeEst.val.text = estText;
                 }
                 if (this._batHealth) this._batHealth.val.text = `${bat.health.toFixed(1)}%`;
                 if (this._batCycles) this._batCycles.val.text = `${bat.cycleCount}`;
