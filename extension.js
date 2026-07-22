@@ -225,6 +225,12 @@ const ProgressBar = GObject.registerClass({
         this.r = r; this.g = g; this.b = b;
         this.connect('repaint', this._draw.bind(this));
     }
+    setColor(r, g, b) {
+        if (this.r !== r || this.g !== g || this.b !== b) {
+            this.r = r; this.g = g; this.b = b;
+            this.queue_repaint();
+        }
+    }
     setPercent(pct) {
         pct = Math.max(0, Math.min(100, pct));
         if (this.pct !== pct) {
@@ -1028,7 +1034,7 @@ export default class ResourcePulseExtension extends Extension {
         return box;
     }
 
-    _updateCpuCoresUI(cores) {
+    _updateCpuCoresUI(cores, coreFreqs = []) {
         if (!this._cpuCoreCol1 || !this._cpuCoreCol2) return;
         
         if (!this._coreWidgets || this._coreWidgets.length !== cores.length) {
@@ -1038,14 +1044,17 @@ export default class ResourcePulseExtension extends Extension {
             
             cores.forEach((load, i) => {
                 const row = new St.BoxLayout({ style: 'spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
-                const lbl = new St.Label({ text: `Core ${i}`, style: 'font-size: 0.78em; color: #a0a0b8;', width: 50 });
-                const pbar = new ProgressBar(5, 0.208, 0.518, 0.894);
+                const lbl = new St.Label({ text: `Core ${i}`, style: 'font-size: 0.78em; color: #a0a0b8;', width: 45 });
+                const pbar = new ProgressBar(5, 0.18, 0.76, 0.494);
                 pbar.x_expand = true;
+                const freqLbl = new St.Label({ text: coreFreqs[i] || '', style: 'font-size: 0.72em; color: #8c8c94;', width: 55 });
+                freqLbl.x_align = Clutter.ActorAlign.END;
                 const val = new St.Label({ text: `${Math.round(load)}%`, style: 'font-size: 0.78em; color: #ffffff; font-weight: 600;', width: 35 });
                 val.x_align = Clutter.ActorAlign.END;
 
                 row.add_child(lbl);
                 row.add_child(pbar);
+                row.add_child(freqLbl);
                 row.add_child(val);
 
                 if (i % 2 === 0) {
@@ -1053,14 +1062,23 @@ export default class ResourcePulseExtension extends Extension {
                 } else {
                     this._cpuCoreCol2.add_child(row);
                 }
-                this._coreWidgets.push({ pbar, val });
+                this._coreWidgets.push({ pbar, freqLbl, val });
             });
         }
         
         cores.forEach((load, i) => {
             if (this._coreWidgets[i]) {
-                this._coreWidgets[i].pbar.setPercent(load);
-                this._coreWidgets[i].val.text = `${Math.round(load)}%`;
+                const w = this._coreWidgets[i];
+                w.pbar.setPercent(load);
+                if (load > 75) {
+                    w.pbar.setColor(0.88, 0.11, 0.14); // Red
+                } else if (load > 40) {
+                    w.pbar.setColor(0.96, 0.83, 0.18); // Amber
+                } else {
+                    w.pbar.setColor(0.18, 0.76, 0.494); // Green
+                }
+                if (coreFreqs[i]) w.freqLbl.text = coreFreqs[i];
+                w.val.text = `${Math.round(load)}%`;
             }
         });
     }
@@ -1276,7 +1294,7 @@ export default class ResourcePulseExtension extends Extension {
             if (this._cpuDetailsFreq) this._cpuDetailsFreq.text = cpu.frequency;
             if (this._cpuDetailsUptime) this._cpuDetailsUptime.text = formatUptime(cpu.uptime);
 
-            if (cpu.cores) this._updateCpuCoresUI(cpu.cores);
+            if (cpu.cores) this._updateCpuCoresUI(cpu.cores, cpu.coreFreqs);
         }
 
         // ── Memory ──
