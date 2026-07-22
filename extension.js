@@ -1128,8 +1128,8 @@ export default class ResourcePulseExtension extends Extension {
     _buildDiskDetails() {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        sparkCard.add_child(new St.Label({ text: 'Write Activity', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._dskSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        sparkCard.add_child(new St.Label({ text: 'Disk I/O Activity', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        this._dskSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskSparkline.x_expand = true;
         sparkCard.add_child(this._dskSparkline);
         box.add_child(sparkCard);
@@ -1139,7 +1139,7 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._dskRead.row);
         this._dskWrite = this._detailRow('Write rate');
         statsCard.add_child(this._dskWrite.row);
-        this._dskUsage = this._detailRow('Usage');
+        this._dskUsage = this._detailRow('Active Utilization');
         statsCard.add_child(this._dskUsage.row);
         box.add_child(statsCard);
         return box;
@@ -1366,24 +1366,25 @@ export default class ResourcePulseExtension extends Extension {
         // ── Disk ──
         if (data.dsk) {
             const dsk = data.dsk;
-            const maxPct = dsk.mounts.length > 0 ? Math.max(...dsk.mounts.map(m => m.percent)) : 0;
+            const diskPct = dsk.diskPercent || 0;
             const readMB  = dsk.readRate  / (1024 * 1024);
             const writeMB = dsk.writeRate / (1024 * 1024);
+            const totalMB = readMB + writeMB;
 
             const sc = this._summaryCards?.disk;
             if (sc) {
-                sc.valueLabel.text = `${Math.round(maxPct)}%`;
-                sc.pbar.setPercent(maxPct);
+                sc.valueLabel.text = `${Math.round(diskPct)}%`;
+                sc.pbar.setPercent(diskPct);
                 sc.subLabel.visible = true;
-                sc.subLabel.text = `Read: ${readMB.toFixed(1)} MB/s\nWrite: ${writeMB.toFixed(1)} MB/s`;
+                sc.subLabel.text = `Read: ${readMB.toFixed(1)} MB/s · Write: ${writeMB.toFixed(1)} MB/s`;
             }
             if (this._dskSparkline) {
-                this._dskSparkline.addSample(writeMB);
-                this._dskSparkline.setScaleLabel(`W: ${writeMB.toFixed(1)} MB/s`);
+                this._dskSparkline.addSample(diskPct);
+                this._dskSparkline.setScaleLabel(`Active: ${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`);
             }
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
-            if (this._dskUsage) this._dskUsage.val.text = dsk.mounts.map(m => `${m.mount} ${Math.round(m.percent)}%`).join('  ') || '--';
+            if (this._dskUsage) this._dskUsage.val.text = `${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`;
         }
 
         // ── Network ──
