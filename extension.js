@@ -1181,12 +1181,23 @@ export default class ResourcePulseExtension extends Extension {
 
     _buildDiskDetails() {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
-        const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        sparkCard.add_child(new St.Label({ text: 'Disk I/O Activity', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._dskSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
-        this._dskSparkline.x_expand = true;
-        sparkCard.add_child(this._dskSparkline);
-        box.add_child(sparkCard);
+        
+        // Read Rate Sparkline
+        const readCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        readCard.add_child(new St.Label({ text: 'Read Rate (MB/s)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        this._dskReadSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskReadSparkline.x_expand = true;
+        readCard.add_child(this._dskReadSparkline);
+        box.add_child(readCard);
+
+        // Write Rate Sparkline
+        const writeCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        writeCard.add_child(new St.Label({ text: 'Write Rate (MB/s)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        this._dskWriteSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskWriteSparkline.x_expand = true;
+        writeCard.add_child(this._dskWriteSparkline);
+        box.add_child(writeCard);
+
         const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
         this._dskRead  = this._detailRow('Read rate');
@@ -1196,6 +1207,14 @@ export default class ResourcePulseExtension extends Extension {
         this._dskUsage = this._detailRow('Active Utilization');
         statsCard.add_child(this._dskUsage.row);
         box.add_child(statsCard);
+
+        // Filesystem Mounts Card
+        const mountsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        mountsCard.add_child(new St.Label({ text: 'Filesystem Mounts', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
+        this._dskMountsBox = new St.BoxLayout({ vertical: true, style: 'spacing: 8px;' });
+        mountsCard.add_child(this._dskMountsBox);
+        box.add_child(mountsCard);
+
         return box;
     }
 
@@ -1501,13 +1520,34 @@ export default class ResourcePulseExtension extends Extension {
                 sc.subLabel.visible = true;
                 sc.subLabel.text = `Read: ${readMB.toFixed(1)} MB/s · Write: ${writeMB.toFixed(1)} MB/s`;
             }
-            if (this._dskSparkline) {
-                this._dskSparkline.addSample(diskPct);
-                this._dskSparkline.setScaleLabel(`Active: ${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`);
+            if (this._dskReadSparkline) {
+                this._dskReadSparkline.addSample(readMB);
+                this._dskReadSparkline.setScaleLabel(`Read: ${readMB.toFixed(1)} MB/s`);
+            }
+            if (this._dskWriteSparkline) {
+                this._dskWriteSparkline.addSample(writeMB);
+                this._dskWriteSparkline.setScaleLabel(`Write: ${writeMB.toFixed(1)} MB/s`);
             }
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
             if (this._dskUsage) this._dskUsage.val.text = `${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`;
+
+            if (this._dskMountsBox && dsk.mounts) {
+                this._dskMountsBox.destroy_all_children();
+                dsk.mounts.forEach(m => {
+                    const row = new St.BoxLayout({ vertical: true, style: 'spacing: 2px;' });
+                    const headRow = new St.BoxLayout();
+                    headRow.add_child(new St.Label({ text: m.mount, style: 'font-size: 0.8em; color: #ffffff; font-weight: 500;', x_expand: true }));
+                    headRow.add_child(new St.Label({ text: `${formatBytes(m.used, useGiB)} / ${formatBytes(m.size, useGiB)} (${Math.round(m.percent)}%)`, style: 'font-size: 0.8em; color: #a0a0b8;' }));
+                    row.add_child(headRow);
+
+                    const pbar = new ProgressBar(4, 0.96, 0.83, 0.18);
+                    pbar.setPercent(m.percent);
+                    row.add_child(pbar);
+
+                    this._dskMountsBox.add_child(row);
+                });
+            }
         }
 
         // ── Network ──
