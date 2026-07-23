@@ -1724,5 +1724,4 @@ export default class ResourcePulseExtension extends Extension {
             w.icon.icon_name = iconName;
         });
     }
-    }
 }
