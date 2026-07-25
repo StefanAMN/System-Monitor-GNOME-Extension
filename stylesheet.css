@@ -427,3 +427,32 @@
 .icon-network { color: #e01b24 !important; }
 .icon-thermal { color: #ff7800 !important; }
 .icon-gpu { color: #33d17a !important; }
+
+/* ── System Monitor Quick Launch ─────────────────────────────────────────── */
+
+.resource-pulse-sysmon-button {
+    background-color: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-top: 6px;
+    transition-duration: 150ms;
+}
+
+.resource-pulse-sysmon-button:hover,
+.resource-pulse-sysmon-button:focus {
+    background-color: #282828;
+    border-color: rgba(53, 132, 228, 0.4);
+}
+
+.resource-pulse-sysmon-label {
+    font-size: 0.9em;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.resource-pulse-process-item:hover,
+.resource-pulse-process-item:focus {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+

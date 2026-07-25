@@ -98,18 +98,21 @@ const Sparkline = GObject.registerClass({
             paddingBottom: 0
         }, options);
         this.connect('repaint', this._draw.bind(this));
+        this.connect('notify::mapped', () => {
+            if (this.is_mapped()) this.queue_repaint();
+        });
     }
 
     addSample(val) {
         this.history.push(val);
         if (this.history.length > 60) this.history.shift();
-        this.queue_repaint();
+        if (this.is_mapped()) this.queue_repaint();
     }
 
     setScaleLabel(label) {
         if (this.scaleLabel !== label) {
             this.scaleLabel = label;
-            this.queue_repaint();
+            if (this.is_mapped()) this.queue_repaint();
         }
     }
 
@@ -224,18 +227,21 @@ const ProgressBar = GObject.registerClass({
         this.pct = 0;
         this.r = r; this.g = g; this.b = b;
         this.connect('repaint', this._draw.bind(this));
+        this.connect('notify::mapped', () => {
+            if (this.is_mapped()) this.queue_repaint();
+        });
     }
     setColor(r, g, b) {
         if (this.r !== r || this.g !== g || this.b !== b) {
             this.r = r; this.g = g; this.b = b;
-            this.queue_repaint();
+            if (this.is_mapped()) this.queue_repaint();
         }
     }
     setPercent(pct) {
         pct = Math.max(0, Math.min(100, pct));
         if (this.pct !== pct) {
             this.pct = pct;
-            this.queue_repaint();
+            if (this.is_mapped()) this.queue_repaint();
         }
     }
     _draw(area) {
@@ -276,6 +282,10 @@ export default class ResourcePulseExtension extends Extension {
         this._thm = new ThermalSampler();
         this._gpu = new GpuSampler();
 
+        // Tooltip state
+        this._tooltip = null;
+        this._tooltipTexts = {};
+
         // Panel indicator
         this._indicator = new PanelMenu.Button(0.0, 'Resource Pulse', false);
         this._indicatorBox = new St.BoxLayout({ style_class: 'resource-pulse-indicator-box' });
@@ -286,8 +296,38 @@ export default class ResourcePulseExtension extends Extension {
         this._menuSection = new PopupMenu.PopupBaseMenuItem({ reactive: false, activate: false });
         this._menuContainer = new St.BoxLayout({
             vertical: true,
-            style_class: 'resource-pulse-menu-section'
+            style_class: 'resource-pulse-menu-section',
+            reactive: true,
+            can_focus: true
         });
+
+        // Keyboard navigation inside dropdown menu
+        this._menuContainer.connect('key-press-event', (actor, event) => {
+            const symbol = event.get_key_symbol();
+            if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
+                if (this._activeTab !== 'overview') {
+                    this._activeTab = 'overview';
+                    this._updateTabVisibility();
+                    return Clutter.EVENT_STOP;
+                }
+            }
+            if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
+                const tabs = ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu'];
+                if (this._activeTab !== 'overview') {
+                    let idx = tabs.indexOf(this._activeTab);
+                    if (idx !== -1) {
+                        idx = symbol === Clutter.KEY_Right
+                            ? (idx + 1) % tabs.length
+                            : (idx - 1 + tabs.length) % tabs.length;
+                        this._activeTab = tabs[idx];
+                        this._updateTabVisibility();
+                        return Clutter.EVENT_STOP;
+                    }
+                }
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
         this._menuSection.add_child(this._menuContainer);
         this._indicator.menu.box.add_style_class_name('resource-pulse-popup');
         this._indicator.menu.addMenuItem(this._menuSection);
@@ -304,7 +344,10 @@ export default class ResourcePulseExtension extends Extension {
         this._menuOpen = false;
         this._openStateId = this._indicator.menu.connect('open-state-changed', (menu, open) => {
             this._menuOpen = open;
-            if (open) this._poll();
+            if (open) {
+                this._hideTooltip();
+                this._poll();
+            }
         });
 
         Main.panel.addToStatusArea(this.uuid, this._indicator);
@@ -312,6 +355,9 @@ export default class ResourcePulseExtension extends Extension {
         // Settings listeners
         this._pinnedId = this._settings.connect('changed::pinned-metrics', () => this._rebuildTopBar());
         this._compactId = this._settings.connect('changed::compact-label', () => this._rebuildTopBar());
+        this._batFmtId = this._settings.connect('changed::battery-top-format', () => this._poll());
+        this._netFmtId = this._settings.connect('changed::network-top-format', () => this._poll());
+        this._tooltipsId = this._settings.connect('changed::show-tooltips', () => this._hideTooltip());
         this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
         this._openMenuId = this._settings.connect('changed::action-open-menu', () => {
             if (this._settings.get_boolean('action-open-menu')) {
@@ -329,6 +375,9 @@ export default class ResourcePulseExtension extends Extension {
     disable() {
         if (this._pinnedId) this._settings.disconnect(this._pinnedId);
         if (this._compactId) this._settings.disconnect(this._compactId);
+        if (this._batFmtId) this._settings.disconnect(this._batFmtId);
+        if (this._netFmtId) this._settings.disconnect(this._netFmtId);
+        if (this._tooltipsId) this._settings.disconnect(this._tooltipsId);
         if (this._pollId) this._settings.disconnect(this._pollId);
         if (this._openMenuId) this._settings.disconnect(this._openMenuId);
 
@@ -338,10 +387,16 @@ export default class ResourcePulseExtension extends Extension {
         }
         if (this._openStateId) this._indicator.menu.disconnect(this._openStateId);
 
+        if (this._tooltip) {
+            this._tooltip.destroy();
+            this._tooltip = null;
+        }
+
         this._indicator.destroy();
         this._indicator = null;
         this._indicatorBox = null;
         this._topBarWidgets = {};
+        this._tooltipTexts = {};
         this._settings = null;
         this._coreWidgets = null;
         this._procWidgets = [];
@@ -353,6 +408,73 @@ export default class ResourcePulseExtension extends Extension {
         this._net = null;
         this._thm = null;
         this._gpu = null;
+    }
+
+    _showTooltip(actor, text) {
+        if (!this._settings || !this._settings.get_boolean('show-tooltips') || (this._indicator && this._indicator.menu.isOpen) || !text) {
+            this._hideTooltip();
+            return;
+        }
+        if (!this._tooltip) {
+            this._tooltip = new St.Label({
+                style: 'background-color: rgba(30, 30, 30, 0.95); border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; padding: 6px 10px; font-size: 0.82em; color: #ffffff; font-weight: 500; line-height: 1.3;',
+                visible: false
+            });
+            Main.layoutManager.uiGroup.add_child(this._tooltip);
+        }
+        this._tooltip.text = text;
+        this._tooltip.visible = true;
+        this._tooltip.opacity = 0;
+
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            if (!this._tooltip || !actor || !actor.get_stage()) return GLib.SOURCE_REMOVE;
+            const [stageX, stageY] = actor.get_transformed_position();
+            const [w, h] = actor.get_transformed_size();
+            const tooltipW = this._tooltip.get_width() || 120;
+
+            let targetX = Math.round(stageX + (w / 2) - (tooltipW / 2));
+            const screenW = global.screen_width || 1920;
+            targetX = Math.max(10, Math.min(screenW - tooltipW - 10, targetX));
+            const targetY = Math.round(stageY + h + 6);
+
+            this._tooltip.set_position(targetX, targetY);
+            this._tooltip.ease({
+                opacity: 255,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _hideTooltip() {
+        if (this._tooltip && this._tooltip.visible) {
+            this._tooltip.ease({
+                opacity: 0,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    if (this._tooltip) this._tooltip.visible = false;
+                }
+            });
+        }
+    }
+
+    _launchSystemMonitor() {
+        try {
+            const apps = ['gnome-system-monitor', 'resources', 'mission-center'];
+            for (const appName of apps) {
+                const app = Shell.AppSystem.get_default().lookup_app(`${appName}.desktop`);
+                if (app) {
+                    app.activate();
+                    return;
+                }
+            }
+            const context = global.create_app_launch_context(0, -1);
+            Gio.AppInfo.create_from_commandline('gnome-system-monitor', null, Gio.AppInfoCreateFlags.NONE).launch([], context);
+        } catch (e) {
+            console.error(`Failed to launch System Monitor: ${e.message}`);
+        }
     }
 
     _startPolling() {
@@ -370,6 +492,9 @@ export default class ResourcePulseExtension extends Extension {
             const pinned = this._settings?.get_strv('pinned-metrics') || ['cpu', 'memory'];
             const isOpen = this._menuOpen;
 
+            const isCpuTab = isOpen && this._activeTab === 'cpu';
+            const isMemTab = isOpen && this._activeTab === 'memory';
+
             const needCpu = isOpen || pinned.includes('cpu');
             const needMem = isOpen || pinned.includes('memory');
             const needBat = isOpen || pinned.includes('battery') || pinned.includes('power');
@@ -380,7 +505,7 @@ export default class ResourcePulseExtension extends Extension {
             const needPwr = isOpen || pinned.includes('power');
 
             const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
-                needCpu ? this._cpu.sample() : Promise.resolve(this._lastCpu || { total: 0, cores: [] }),
+                needCpu ? this._cpu.sample(isCpuTab) : Promise.resolve(this._lastCpu || { total: 0, cores: [] }),
                 needMem ? this._mem.sample() : Promise.resolve(this._lastMem || { percent: 0, total: 0, used: 0 }),
                 needBat ? this._bat.sample() : Promise.resolve(this._lastBat || { present: false }),
                 needDsk ? this._dsk.sample() : Promise.resolve(this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 }),
@@ -401,7 +526,7 @@ export default class ResourcePulseExtension extends Extension {
             if (needPwr) this._lastPwr = pwr;
 
             let processes = [];
-            if (this._menuOpen && this._activeTab === 'cpu') {
+            if (isOpen && (isCpuTab || isMemTab)) {
                 if (!this._prevProcStats) {
                     this._prevProcStats = {};
                     this._prevProcTime = 0;
@@ -427,27 +552,31 @@ export default class ResourcePulseExtension extends Extension {
 
                             currentStats[pid] = ticks;
 
+                            const memPct = mem.total > 0 ? ((rss * 4096) / mem.total) * 100 : 0;
+                            let cpuPct = 0;
                             if (this._prevProcStats[pid] !== undefined && dt > 0) {
                                 const deltaTicks = ticks - this._prevProcStats[pid];
-                                const cpuPct = Math.max(0, deltaTicks / dt);
-                                const memPct = mem.total > 0 ? ((rss * 4096) / mem.total) * 100 : 0;
-                                
-                                // Only show processes using CPU to avoid clutter
+                                cpuPct = Math.max(0, deltaTicks / dt);
+                            }
+
+                            if (isMemTab) {
+                                if (memPct > 0.1 || cpuPct > 0.5) {
+                                    allProcs.push({ pid, cpu: cpuPct, mem: memPct, comm: name });
+                                }
+                            } else {
                                 if (cpuPct > 0.1 || memPct > 1.0) {
-                                    allProcs.push({
-                                        pid: pid,
-                                        cpu: cpuPct,
-                                        mem: memPct,
-                                        comm: name
-                                    });
+                                    allProcs.push({ pid, cpu: cpuPct, mem: memPct, comm: name });
                                 }
                             }
                         }
                     }
                     this._prevProcStats = currentStats;
 
-                    // Sort by CPU usage, grab top 5
-                    allProcs.sort((a, b) => b.cpu - a.cpu);
+                    if (isMemTab) {
+                        allProcs.sort((a, b) => b.mem - a.mem);
+                    } else {
+                        allProcs.sort((a, b) => b.cpu - a.cpu);
+                    }
                     processes = allProcs.slice(0, 5);
                 }
             }
@@ -490,7 +619,7 @@ export default class ResourcePulseExtension extends Extension {
                 }));
             }
 
-            const box = new St.BoxLayout();
+            const box = new St.BoxLayout({ reactive: true, track_hover: true });
             const icon = new St.Icon({
                 icon_name: this._getIconName(key),
                 style_class: 'system-status-icon',
@@ -508,17 +637,76 @@ export default class ResourcePulseExtension extends Extension {
                 box.add_child(label);
             }
 
+            box.connect('enter-event', () => {
+                if (this._tooltipTexts[key]) {
+                    this._showTooltip(box, this._tooltipTexts[key]);
+                }
+            });
+            box.connect('leave-event', () => {
+                this._hideTooltip();
+            });
+
             this._indicatorBox.add_child(box);
-            this._topBarWidgets[key] = { label, icon };
+            this._topBarWidgets[key] = { box, label, icon };
         });
     }
 
     _updateTopBarUI(data) {
         const tempUnit = this._settings.get_string('unit-temp') || 'C';
+        const useGiB = this._settings.get_string('unit-mem') === 'GiB';
         const cpuWarn = this._settings.get_int('threshold-cpu') || 90;
         const memWarn = this._settings.get_int('threshold-mem') || 90;
         const tempWarn = this._settings.get_int('threshold-temp') || 80;
+        const batFmt = this._settings.get_string('battery-top-format') || 'percent';
+        const netFmt = this._settings.get_string('network-top-format') || 'download';
 
+        // 1. Compute rich tooltips
+        if (data.cpu) {
+            const loadStr = data.cpu.loadavg ? data.cpu.loadavg.map(v => v.toFixed(2)).join(', ') : '--';
+            this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || 'CPU'}\nLoad: ${loadStr}\nFreq: ${data.cpu.frequency || '--'}`;
+        }
+        if (data.mem) {
+            const usedStr = formatBytes(data.mem.used, useGiB);
+            const totalStr = formatBytes(data.mem.total, useGiB);
+            const availStr = formatBytes(data.mem.available, useGiB);
+            this._tooltipTexts['memory'] = `Used: ${usedStr} / ${totalStr}\nAvailable: ${availStr}\nSwap: ${Math.round(data.mem.swapPercent || 0)}%`;
+        }
+        if (data.bat && data.bat.present) {
+            const state = data.bat.state === 'charging' ? 'Charging' : data.bat.state === 'discharging' ? 'Discharging' : 'Full';
+            let timeStr = '';
+            if (data.bat.timeRemaining > 0) {
+                const h = Math.floor(data.bat.timeRemaining / 3600);
+                const m = Math.floor((data.bat.timeRemaining % 3600) / 60);
+                timeStr = ` · ${h}h ${m}m ${data.bat.state === 'charging' ? 'to full' : 'left'}`;
+            }
+            this._tooltipTexts['battery'] = `Battery: ${data.bat.percent.toFixed(1)}% (${state}${timeStr})\nHealth: ${data.bat.health.toFixed(1)}% · Rate: ${(data.bat.energyRate || 0).toFixed(1)}W`;
+        }
+        if (data.pwr) {
+            const draw = data.pwr.systemPower !== null ? data.pwr.systemPower : (data.pwr.packagePower || 0);
+            this._tooltipTexts['power'] = `Power Draw: ${draw.toFixed(1)}W\nCPU Package: ${data.pwr.packagePower ? data.pwr.packagePower.toFixed(1) + 'W' : '--'}`;
+        }
+        if (data.dsk && data.dsk.mounts && data.dsk.mounts.length > 0) {
+            const root = data.dsk.mounts[0];
+            this._tooltipTexts['disk'] = `Root: ${Math.round(root.percent)}% (${formatBytes(root.free, useGiB)} free)\nI/O: ↓ ${formatSpeed(data.dsk.readRate || 0)}  ↑ ${formatSpeed(data.dsk.writeRate || 0)}`;
+        }
+        if (data.net && data.net.total) {
+            const sessRx = formatBytes(data.net.sessionRx || 0, useGiB);
+            const sessTx = formatBytes(data.net.sessionTx || 0, useGiB);
+            this._tooltipTexts['network'] = `Download: ${formatSpeed(data.net.total.rxRate)}\nUpload: ${formatSpeed(data.net.total.txRate)}\nSession: ↓ ${sessRx}  ↑ ${sessTx}`;
+        }
+        if (data.thm) {
+            const fanInfo = data.thm.fans && data.thm.fans.length > 0 ? `\nFan: ${data.thm.fans[0].rpm} RPM` : '';
+            this._tooltipTexts['thermal'] = `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
+        }
+        if (data.gpu) {
+            if (data.gpu.present) {
+                this._tooltipTexts['gpu'] = `${data.gpu.brand || 'GPU'}: ${Math.round(data.gpu.percent)}%\nVRAM: ${Math.round(data.gpu.memPercent)}% · Temp: ${formatTemp(data.gpu.temp, tempUnit)}`;
+            } else {
+                this._tooltipTexts['gpu'] = 'GPU: Offline / None';
+            }
+        }
+
+        // 2. Update top bar text & icons
         Object.keys(this._topBarWidgets).forEach(key => {
             const widget = this._topBarWidgets[key];
             if (!widget.label) return;
@@ -527,7 +715,14 @@ export default class ResourcePulseExtension extends Extension {
             if (key === 'cpu' && data.cpu) text = `${Math.round(data.cpu.total)}%`;
             else if (key === 'memory' && data.mem) text = `${Math.round(data.mem.percent)}%`;
             else if (key === 'battery' && data.bat && data.bat.present) {
-                text = `${Math.round(data.bat.percent)}%`;
+                const basePct = `${Math.round(data.bat.percent)}%`;
+                if (batFmt === 'percent-time' && data.bat.timeRemaining > 0) {
+                    const h = Math.floor(data.bat.timeRemaining / 3600);
+                    const m = Math.floor((data.bat.timeRemaining % 3600) / 60);
+                    text = `${basePct} · ${h}h ${m}m`;
+                } else {
+                    text = basePct;
+                }
                 widget.icon.icon_name = data.bat.state === 'charging'
                     ? 'battery-good-charging-symbolic' : 'battery-good-symbolic';
             }
@@ -537,8 +732,16 @@ export default class ResourcePulseExtension extends Extension {
             }
             else if (key === 'disk' && data.dsk && data.dsk.mounts.length > 0)
                 text = `${Math.round(data.dsk.mounts[0].percent)}%`;
-            else if (key === 'network' && data.net) text = formatSpeed(data.net.total.rxRate);
-            else if (key === 'thermal' && data.thm) text = formatTemp(data.thm.temp, tempUnit);
+            else if (key === 'network' && data.net) {
+                if (netFmt === 'both') {
+                    text = `↓${formatSpeed(data.net.total.rxRate)} ↑${formatSpeed(data.net.total.txRate)}`;
+                } else if (netFmt === 'upload') {
+                    text = `↑ ${formatSpeed(data.net.total.txRate)}`;
+                } else {
+                    text = `↓ ${formatSpeed(data.net.total.rxRate)}`;
+                }
+            }
+            else if (key === 'thermal' && data.thm) text = formatTemp(data.thm.packageTemp, tempUnit);
             else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : 'N/A';
 
             widget.label.text = text;
@@ -546,7 +749,7 @@ export default class ResourcePulseExtension extends Extension {
             let warn = false;
             if (key === 'cpu' && data.cpu && data.cpu.total >= cpuWarn) warn = true;
             if (key === 'memory' && data.mem && data.mem.percent >= memWarn) warn = true;
-            if (key === 'thermal' && data.thm && data.thm.temp >= tempWarn) warn = true;
+            if (key === 'thermal' && data.thm && data.thm.packageTemp >= tempWarn) warn = true;
             widget.label.style = warn ? 'color: #e01b24;' : '';
         });
     }
@@ -832,7 +1035,42 @@ export default class ResourcePulseExtension extends Extension {
         this._addClickAnimations(this._hwCard);
         this._overviewPage.add_child(this._hwCard);
 
+        // System Monitor Quick Launch Footer
+        const sysMonBtn = new St.Button({
+            style_class: 'resource-pulse-sysmon-button',
+            reactive: true,
+            can_focus: true,
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        const sysMonBox = new St.BoxLayout({ style: 'spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+        const sysMonIcon = new St.Icon({
+            icon_name: 'org.gnome.SystemMonitor-symbolic',
+            fallback_icon_name: 'utilities-system-monitor-symbolic',
+            style: 'icon-size: 16px; color: #3584e4;'
+        });
+        const sysMonLbl = new St.Label({
+            text: 'Open System Monitor',
+            style_class: 'resource-pulse-sysmon-label',
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        const sysMonArrow = new St.Icon({
+            icon_name: 'go-next-symbolic',
+            style: 'icon-size: 14px; color: rgba(255,255,255,0.4);',
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        sysMonBox.add_child(sysMonIcon);
+        sysMonBox.add_child(sysMonLbl);
+        sysMonBox.add_child(sysMonArrow);
+        sysMonBtn.add_child(sysMonBox);
 
+        sysMonBtn.connect('clicked', () => {
+            this._launchSystemMonitor();
+            this._indicator.menu.close();
+        });
+        this._addClickAnimations(sysMonBtn);
+        this._overviewPage.add_child(sysMonBtn);
 
         this._menuContainer.add_child(this._overviewPage);
     }
@@ -1024,8 +1262,13 @@ export default class ResourcePulseExtension extends Extension {
         const procHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
         procHead.add_child(new St.Label({ text: 'Top CPU Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
 
-        const showAllBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.07); border-radius: 20px; padding: 4px 10px;', label: 'Show All' });
+        const showAllBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.07); border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
         showAllBtn.child.style = 'font-size: 0.75em; color: #a0a0b8;';
+        showAllBtn.connect('clicked', () => {
+            this._launchSystemMonitor();
+            this._indicator.menu.close();
+        });
+        this._addClickAnimations(showAllBtn);
         procHead.add_child(showAllBtn);
         procCard.add_child(procHead);
 
@@ -1108,8 +1351,16 @@ export default class ResourcePulseExtension extends Extension {
         box.add_child(statsCard);
 
         const memProcCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        const memProcHead = new St.BoxLayout({ style: 'margin-bottom: 8px;' });
+        const memProcHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
         memProcHead.add_child(new St.Label({ text: 'Top Memory Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+        const memShowAllBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.07); border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
+        memShowAllBtn.child.style = 'font-size: 0.75em; color: #a0a0b8;';
+        memShowAllBtn.connect('clicked', () => {
+            this._launchSystemMonitor();
+            this._indicator.menu.close();
+        });
+        this._addClickAnimations(memShowAllBtn);
+        memProcHead.add_child(memShowAllBtn);
         memProcCard.add_child(memProcHead);
         this._memProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
         memProcCard.add_child(this._memProcList);
@@ -1688,9 +1939,15 @@ export default class ResourcePulseExtension extends Extension {
             container.destroy_all_children();
             this[targetWidgetsKey] = [];
             for (let i = 0; i < processes.length; i++) {
-                const item = new St.BoxLayout({ style: 'padding: 4px 0; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+                const item = new St.BoxLayout({
+                    style: 'padding: 6px 8px; spacing: 8px; border-radius: 8px;',
+                    style_class: 'resource-pulse-process-item',
+                    y_align: Clutter.ActorAlign.CENTER,
+                    reactive: true,
+                    can_focus: true
+                });
 
-                const iconBox = new St.BoxLayout({ style: 'width: 24px; height: 24px; background-color: rgba(255,255,255,0.06); border-radius: 6px;' });
+                const iconBox = new St.BoxLayout({ style: 'width: 24px; height: 24px; background-color: rgba(255,255,255,0.06); border-radius: 6px;', y_align: Clutter.ActorAlign.CENTER });
                 const icon = new St.Icon({ icon_name: 'system-run-symbolic', style: 'icon-size: 14px; color: #a0a0b8;' });
                 iconBox.add_child(icon);
                 item.add_child(iconBox);
@@ -1708,6 +1965,13 @@ export default class ResourcePulseExtension extends Extension {
                 const statLbl = new St.Label({ style: 'font-size: 0.85em; color: #a0a0b8; font-weight: 600;', width: 45 });
                 statLbl.x_align = Clutter.ActorAlign.END;
                 item.add_child(statLbl);
+
+                item.connect('button-press-event', () => {
+                    this._launchSystemMonitor();
+                    this._indicator.menu.close();
+                    return Clutter.EVENT_STOP;
+                });
+                this._addClickAnimations(item);
 
                 container.add_child(item);
                 this[targetWidgetsKey].push({ nameLbl, statLbl, pbar, icon });
