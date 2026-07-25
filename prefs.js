@@ -125,6 +125,39 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
         settings.bind('compact-label', compactRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         generalGroup.add(compactRow);
 
+        // Tooltips
+        const tooltipRow = new Adw.SwitchRow({
+            title: 'Show Hover Tooltips',
+            subtitle: 'Display rich information overlays when hovering over top bar metrics'
+        });
+        settings.bind('show-tooltips', tooltipRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        generalGroup.add(tooltipRow);
+
+        // Battery Top Bar Format
+        const batFmtRow = new Adw.ComboRow({
+            title: 'Battery Top Bar Format',
+            subtitle: 'Choose between percentage only or percentage with estimated time',
+            model: Gtk.StringList.new(['Percentage Only (e.g. 85%)', 'Percentage + Time (e.g. 85% · 2h 15m)']),
+            selected: settings.get_string('battery-top-format') === 'percent-time' ? 1 : 0
+        });
+        batFmtRow.connect('notify::selected', () => {
+            settings.set_string('battery-top-format', batFmtRow.selected === 1 ? 'percent-time' : 'percent');
+        });
+        generalGroup.add(batFmtRow);
+
+        // Network Top Bar Format
+        const netFmtRow = new Adw.ComboRow({
+            title: 'Network Top Bar Format',
+            subtitle: 'Display download rate, upload rate, or both in the top bar',
+            model: Gtk.StringList.new(['Download Only (↓)', 'Upload Only (↑)', 'Both Download & Upload (↓ ↑)']),
+            selected: settings.get_string('network-top-format') === 'both' ? 2 : (settings.get_string('network-top-format') === 'upload' ? 1 : 0)
+        });
+        netFmtRow.connect('notify::selected', () => {
+            const val = netFmtRow.selected === 2 ? 'both' : (netFmtRow.selected === 1 ? 'upload' : 'download');
+            settings.set_string('network-top-format', val);
+        });
+        generalGroup.add(netFmtRow);
+
         // Temperature Unit
         const tempUnitRow = new Adw.ComboRow({
             title: 'Temperature Unit',
