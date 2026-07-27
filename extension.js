@@ -801,25 +801,56 @@ export default class ResourcePulseExtension extends Extension {
     // ── Overview Page ─────────────────────────────────────────────────────────
 
 
-    _addClickAnimations(actor) {
-        if (!actor) return;
-        actor.set_pivot_point(0.5, 0.5);
+    _addCardInteractions(card, normalStyle, hoverStyle) {
+        if (!card) return;
+        card.set_pivot_point(0.5, 0.5);
 
-        actor.connect('enter-event', () => {
-            actor.ease({
-                scale_x: 1.03,
-                scale_y: 1.03,
-                duration: 150,
+        card.connect('enter-event', () => {
+            if (hoverStyle) card.style = hoverStyle;
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('leave-event', () => {
+            if (normalStyle) card.style = normalStyle;
+            card.ease({
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 100,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD
             });
             return Clutter.EVENT_PROPAGATE;
         });
 
+        card.connect('button-press-event', () => {
+            card.ease({
+                scale_x: 0.98,
+                scale_y: 0.98,
+                duration: 80,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('button-release-event', () => {
+            card.ease({
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    _addClickAnimations(actor) {
+        if (!actor) return;
+        actor.set_pivot_point(0.5, 0.5);
+
         actor.connect('leave-event', () => {
             actor.ease({
                 scale_x: 1.0,
                 scale_y: 1.0,
-                duration: 150,
+                duration: 100,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD
             });
             return Clutter.EVENT_PROPAGATE;
@@ -827,9 +858,9 @@ export default class ResourcePulseExtension extends Extension {
 
         actor.connect('button-press-event', () => {
             actor.ease({
-                scale_x: 0.95,
-                scale_y: 0.95,
-                duration: 100,
+                scale_x: 0.92,
+                scale_y: 0.92,
+                duration: 80,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD
             });
             return Clutter.EVENT_PROPAGATE;
@@ -837,9 +868,9 @@ export default class ResourcePulseExtension extends Extension {
 
         actor.connect('button-release-event', () => {
             actor.ease({
-                scale_x: 1.03,
-                scale_y: 1.03,
-                duration: 150,
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 100,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD
             });
             return Clutter.EVENT_PROPAGATE;
@@ -896,8 +927,10 @@ export default class ResourcePulseExtension extends Extension {
         this._summaryCards = {};
 
         // 1. CPU Card
+        const cpuNormal = 'background-color: #1f2937; border: 1px solid rgba(53, 132, 228, 0.4); border-radius: 12px; padding: 12px;';
+        const cpuHover  = 'background-color: #26354a; border: 1px solid rgba(53, 132, 228, 0.9); border-radius: 12px; padding: 12px;';
         const cpuCard = new St.BoxLayout({
-            style: 'background-color: #1f2937; border: 1px solid rgba(53, 132, 228, 0.4); border-radius: 12px; padding: 12px;',
+            style: cpuNormal,
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const cpuHead = new St.BoxLayout({ style: 'spacing: 6px;' });
@@ -917,13 +950,15 @@ export default class ResourcePulseExtension extends Extension {
             this._updateTabVisibility();
             return Clutter.EVENT_STOP;
         });
-        this._addClickAnimations(cpuCard);
+        this._addCardInteractions(cpuCard, cpuNormal, cpuHover);
         this._primaryRow.add_child(cpuCard);
         this._summaryCards['cpu'] = { box: cpuCard, valueLabel: cpuVal, pbar: cpuBar, spark: cpuSpark };
 
         // 2. Memory Card
+        const memNormal = 'background-color: #1e1a2e; border: 1px solid rgba(145, 65, 172, 0.4); border-radius: 12px; padding: 12px;';
+        const memHover  = 'background-color: #292240; border: 1px solid rgba(145, 65, 172, 0.9); border-radius: 12px; padding: 12px;';
         const memCard = new St.BoxLayout({
-            style: 'background-color: #1e1a2e; border: 1px solid rgba(145, 65, 172, 0.4); border-radius: 12px; padding: 12px;',
+            style: memNormal,
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const memHead = new St.BoxLayout({ style: 'spacing: 6px;' });
@@ -943,13 +978,15 @@ export default class ResourcePulseExtension extends Extension {
             this._updateTabVisibility();
             return Clutter.EVENT_STOP;
         });
-        this._addClickAnimations(memCard);
+        this._addCardInteractions(memCard, memNormal, memHover);
         this._primaryRow.add_child(memCard);
         this._summaryCards['memory'] = { box: memCard, valueLabel: memVal, pbar: memBar, spark: memSpark };
 
         // 3. Battery Card
+        const batNormal = 'background-color: #192820; border: 1px solid rgba(46, 194, 126, 0.4); border-radius: 12px; padding: 12px;';
+        const batHover  = 'background-color: #20382b; border: 1px solid rgba(46, 194, 126, 0.9); border-radius: 12px; padding: 12px;';
         const batCard = new St.BoxLayout({
-            style: 'background-color: #192820; border: 1px solid rgba(46, 194, 126, 0.4); border-radius: 12px; padding: 12px;',
+            style: batNormal,
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const batHead = new St.BoxLayout({ style: 'spacing: 6px;' });
@@ -970,7 +1007,7 @@ export default class ResourcePulseExtension extends Extension {
             this._updateTabVisibility();
             return Clutter.EVENT_STOP;
         });
-        this._addClickAnimations(batCard);
+        this._addCardInteractions(batCard, batNormal, batHover);
         this._primaryRow.add_child(batCard);
         this._summaryCards['battery'] = { box: batCard, valueLabel: batVal, pbar: batBar, statusLbl: batStatus };
 
@@ -990,15 +1027,17 @@ export default class ResourcePulseExtension extends Extension {
         secondaryMetrics.forEach((m, idx) => {
             // Dark tinted backgrounds per metric type
             const bgMap = {
-                disk:    { bg: '#22200a', border: 'rgba(246,211,45,0.35)' },
-                network: { bg: '#22100f', border: 'rgba(224,27,36,0.35)' },
-                thermal: { bg: '#221608', border: 'rgba(255,120,0,0.35)' },
-                power:   { bg: '#22200a', border: 'rgba(246,211,45,0.35)' },
-                gpu:     { bg: '#0b2014', border: 'rgba(51,209,122,0.35)' }
+                disk:    { bg: '#22200a', border: 'rgba(246,211,45,0.35)', hoverBg: '#2d2b0e', hoverBorder: 'rgba(246,211,45,0.9)' },
+                network: { bg: '#22100f', border: 'rgba(224,27,36,0.35)',  hoverBg: '#2f1615', hoverBorder: 'rgba(224,27,36,0.9)' },
+                thermal: { bg: '#221608', border: 'rgba(255,120,0,0.35)', hoverBg: '#2f1f0b', hoverBorder: 'rgba(255,120,0,0.9)' },
+                power:   { bg: '#22200a', border: 'rgba(246,211,45,0.35)', hoverBg: '#2d2b0e', hoverBorder: 'rgba(246,211,45,0.9)' },
+                gpu:     { bg: '#0b2014', border: 'rgba(51,209,122,0.35)', hoverBg: '#10301e', hoverBorder: 'rgba(51,209,122,0.9)' }
             };
-            const colors = bgMap[m.key] || { bg: '#222', border: 'rgba(255,255,255,0.15)' };
+            const colors = bgMap[m.key] || { bg: '#222', border: 'rgba(255,255,255,0.15)', hoverBg: '#2a2a2a', hoverBorder: 'rgba(255,255,255,0.5)' };
+            const normalStyle = `background-color: ${colors.bg}; border: 1px solid ${colors.border}; border-radius: 12px; padding: 12px;`;
+            const hoverStyle  = `background-color: ${colors.hoverBg}; border: 1px solid ${colors.hoverBorder}; border-radius: 12px; padding: 12px;`;
             const card = new St.BoxLayout({
-                style: `background-color: ${colors.bg}; border: 1px solid ${colors.border}; border-radius: 12px; padding: 12px;`,
+                style: normalStyle,
                 vertical: true, reactive: true, can_focus: true, x_expand: true
             });
 
@@ -1025,13 +1064,15 @@ export default class ResourcePulseExtension extends Extension {
                 return Clutter.EVENT_STOP;
             });
 
-            this._addClickAnimations(card);
+            this._addCardInteractions(card, normalStyle, hoverStyle);
             grid.attach(card, idx % 2, Math.floor(idx / 2), 1, 1);
             this._summaryCards[m.key] = { box: card, valueLabel: val, subLabel: subtext, pbar };
         });
 
         // Hardware Info Card
-        this._hwCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; margin-top: 10px;', vertical: true });
+        const hwNormal = 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; margin-top: 10px;';
+        const hwHover  = 'background-color: #2a2a2a; border: 1px solid rgba(255,255,255,0.18); border-radius: 12px; padding: 12px; margin-top: 10px;';
+        this._hwCard = new St.BoxLayout({ style: hwNormal, vertical: true, x_expand: true });
 
         const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
 
@@ -1076,7 +1117,7 @@ export default class ResourcePulseExtension extends Extension {
         hwStatsRow.add_child(osBox);
         this._hwCard.add_child(hwStatsRow);
 
-        this._addClickAnimations(this._hwCard);
+        this._addCardInteractions(this._hwCard, hwNormal, hwHover);
         this._overviewPage.add_child(this._hwCard);
 
         // System Monitor Quick Launch Footer
@@ -1583,10 +1624,12 @@ export default class ResourcePulseExtension extends Extension {
     _buildGpuDetails() {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
 
-        // 1. Hardware Info & Model Card
+        const gpuHwNormal = 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;';
+        const gpuHwHover  = 'background-color: #2a2a2a; border: 1px solid rgba(255,255,255,0.18); border-radius: 12px; padding: 12px;';
         this._gpuHwCard = new St.BoxLayout({
-            style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;',
-            vertical: true
+            style: gpuHwNormal,
+            vertical: true,
+            x_expand: true
         });
 
         const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
@@ -1632,7 +1675,7 @@ export default class ResourcePulseExtension extends Extension {
         hwStatsRow.add_child(tempBox);
         hwStatsRow.add_child(powerBox);
         this._gpuHwCard.add_child(hwStatsRow);
-        this._addClickAnimations(this._gpuHwCard);
+        this._addCardInteractions(this._gpuHwCard, gpuHwNormal, gpuHwHover);
         box.add_child(this._gpuHwCard);
 
         // 2. GPU Usage Sparkline Card
