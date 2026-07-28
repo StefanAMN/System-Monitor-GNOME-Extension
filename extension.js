@@ -60,6 +60,69 @@ function formatUptime(seconds) {
 
 // ─── Custom Cairo Widgets ─────────────────────────────────────────────────────
 
+const ResizeGrip = GObject.registerClass({
+    GTypeName: 'ResourcePulseResizeGrip',
+}, class ResizeGrip extends St.DrawingArea {
+    _init(corner = 'se', size = 24) {
+        super._init({ width: size, height: size });
+        this._corner = corner;
+        this._hovered = false;
+        this._active = false;
+        this.connect('repaint', this._draw.bind(this));
+        this.connect('notify::mapped', () => {
+            if (this.is_mapped()) this.queue_repaint();
+        });
+    }
+
+    setHovered(hovered) {
+        if (this._hovered !== hovered) {
+            this._hovered = hovered;
+            if (this.is_mapped()) this.queue_repaint();
+        }
+    }
+
+    setActive(active) {
+        if (this._active !== active) {
+            this._active = active;
+            if (this.is_mapped()) this.queue_repaint();
+        }
+    }
+
+    _draw(area) {
+        const cr = area.get_context();
+        const [w, h] = area.get_surface_size();
+        cr.save();
+
+        if (this._active) {
+            cr.setSourceRGBA(0.208, 0.518, 0.894, 0.95);
+        } else if (this._hovered) {
+            cr.setSourceRGBA(0.208, 0.518, 0.894, 0.7);
+        } else {
+            cr.setSourceRGBA(1.0, 1.0, 1.0, 0.25);
+        }
+
+        cr.setLineWidth(1.5);
+
+        if (this._corner === 'se') {
+            const offsets = [6, 11, 16];
+            for (const off of offsets) {
+                cr.moveTo(w - off, h - 3);
+                cr.lineTo(w - 3, h - off);
+            }
+            cr.stroke();
+        } else if (this._corner === 'sw') {
+            const offsets = [6, 11, 16];
+            for (const off of offsets) {
+                cr.moveTo(off, h - 3);
+                cr.lineTo(3, h - off);
+            }
+            cr.stroke();
+        }
+
+        cr.restore();
+    }
+});
+
 const Sparkline = GObject.registerClass({
     GTypeName: 'ResourcePulseSparkline',
 }, class Sparkline extends St.DrawingArea {
@@ -284,6 +347,12 @@ export default class ResourcePulseExtension extends Extension {
         // Dropdown container
         this._menuSection = new PopupMenu.PopupBaseMenuItem({ reactive: false, activate: false });
         
+        this._popupStack = new Clutter.Actor({
+            layout_manager: new Clutter.BinLayout(),
+            x_expand: true,
+            y_expand: true
+        });
+
         this._scrollView = new St.ScrollView({
             style_class: 'resource-pulse-scroll-view',
             hscrollbar_policy: St.PolicyType.NEVER,
@@ -300,19 +369,31 @@ export default class ResourcePulseExtension extends Extension {
             x_expand: true
         });
 
+        // Dismiss quick menu on container click
+        this._menuContainer.connect('button-press-event', () => {
+            if (this._quickMenuPopover && this._quickMenuPopover.visible) {
+                this._hideQuickMenu();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
         // Keyboard navigation inside dropdown menu
         this._menuContainer.connect('key-press-event', (actor, event) => {
             const symbol = event.get_key_symbol();
             if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
+                if (this._quickMenuPopover && this._quickMenuPopover.visible) {
+                    this._hideQuickMenu();
+                    return Clutter.EVENT_STOP;
+                }
                 if (this._activeTab !== 'overview') {
-                    this._activeTab = 'overview';
+                    this._activeTab = (this._activeTab === 'settings' && this._previousTab) ? this._previousTab : 'overview';
                     this._updateTabVisibility();
                     return Clutter.EVENT_STOP;
                 }
             }
             if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
                 const tabs = ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu'];
-                if (this._activeTab !== 'overview') {
+                if (this._activeTab !== 'overview' && this._activeTab !== 'settings') {
                     let idx = tabs.indexOf(this._activeTab);
                     if (idx !== -1) {
                         idx = symbol === Clutter.KEY_Right
@@ -328,7 +409,15 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         this._scrollView.add_child(this._menuContainer);
-        this._menuSection.add_child(this._scrollView);
+        this._popupStack.add_child(this._scrollView);
+
+        // Build 4 Corner Resize Handles
+        this._buildCornerResizeHandles();
+
+        // Build In-Panel 3-Dots Quick Menu Popover
+        this._buildQuickMenuPopover();
+
+        this._menuSection.add_child(this._popupStack);
         this._indicator.menu.box.add_style_class_name('resource-pulse-popup');
         this._indicator.menu.addMenuItem(this._menuSection);
 
@@ -338,6 +427,7 @@ export default class ResourcePulseExtension extends Extension {
         this._procWidgets = [];
         this._buildOverview();
         this._buildDetails();
+        this._buildSettingsPage();
         this._updateTabVisibility();
         this._updateMenuDimensions();
 
@@ -349,6 +439,12 @@ export default class ResourcePulseExtension extends Extension {
                 this._updateMenuDimensions();
                 this._hideTooltip();
                 this._poll();
+            } else {
+                if (this._quickMenuPopover) this._quickMenuPopover.visible = false;
+                if (this._dragGrab) {
+                    this._dragGrab.dismiss();
+                    this._dragGrab = null;
+                }
             }
         });
 
@@ -404,6 +500,20 @@ export default class ResourcePulseExtension extends Extension {
             this._tooltip.destroy();
             this._tooltip = null;
         }
+
+        if (this._dragGrab) {
+            this._dragGrab.dismiss();
+            this._dragGrab = null;
+        }
+        if (this._quickMenuPopover) {
+            this._quickMenuPopover.destroy();
+            this._quickMenuPopover = null;
+        }
+        if (this._settingsPage) {
+            this._settingsPage.destroy();
+            this._settingsPage = null;
+        }
+        this._resizeHandles = {};
 
         this._indicator.destroy();
         this._indicator = null;
@@ -488,17 +598,763 @@ export default class ResourcePulseExtension extends Extension {
         const screenW = monitor.width || (global.screen_width || 1920);
         const screenH = monitor.height || (global.screen_height || 1080);
 
-        // Extended view proportional to screen width (~28% of screen width)
-        // Scaled fluidly between 380px (for compact/nested sessions) and 600px (for 4K/Ultrawide displays)
-        const targetWidth = Math.min(Math.max(380, Math.round(screenW * 0.28)), 600);
-        // Vertical viewport bound: max 80% of screen height so it is never cut off
-        const maxContentHeight = Math.max(380, Math.round(screenH * 0.80));
+        const savedW = this._settings?.get_int('menu-custom-width') || 0;
+        const savedH = this._settings?.get_int('menu-custom-height') || 0;
 
+        const defaultWidth = Math.min(Math.max(380, Math.round(screenW * 0.28)), 600);
+        const defaultMaxHeight = Math.max(380, Math.round(screenH * 0.80));
+
+        if (savedW > 0 && savedH > 0) {
+            const minW = 360;
+            const maxW = Math.min(Math.round(screenW * 0.90), 1200);
+            const minH = 320;
+            const maxH = Math.min(Math.round(screenH * 0.90), screenH - 60);
+            const w = Math.max(minW, Math.min(maxW, savedW));
+            const h = Math.max(minH, Math.min(maxH, savedH));
+            this._applyDimensions(w, h);
+        } else {
+            this._currentWidth = defaultWidth;
+            this._currentHeight = defaultMaxHeight;
+            if (this._menuContainer) {
+                this._menuContainer.style = `width: ${defaultWidth}px; min-width: ${defaultWidth}px; max-width: ${defaultWidth}px;`;
+            }
+            if (this._scrollView) {
+                this._scrollView.style = `max-height: ${defaultMaxHeight}px;`;
+            }
+            if (this._settingsDimensionsLabel) {
+                this._settingsDimensionsLabel.text = `Auto Dynamic: ${defaultWidth} × ${defaultMaxHeight} px`;
+            }
+        }
+    }
+
+    _applyResizeDelta(corner, deltaX, deltaY, startW, startH) {
+        const monitor = Main.layoutManager.primaryMonitor || Main.layoutManager.currentMonitor || { width: 1920, height: 1080 };
+        const screenW = monitor.width || (global.screen_width || 1920);
+        const screenH = monitor.height || (global.screen_height || 1080);
+        const minW = 360;
+        const maxW = Math.min(Math.round(screenW * 0.90), 1200);
+        const minH = 320;
+        const maxH = Math.min(Math.round(screenH * 0.90), screenH - 60);
+
+        let newW = startW;
+        let newH = startH;
+
+        if (corner === 'se') {
+            newW = startW + deltaX;
+            newH = startH + deltaY;
+        } else if (corner === 'sw') {
+            newW = startW - deltaX;
+            newH = startH + deltaY;
+        } else if (corner === 'ne') {
+            newW = startW + deltaX;
+            newH = startH - deltaY;
+        } else if (corner === 'nw') {
+            newW = startW - deltaX;
+            newH = startH - deltaY;
+        }
+
+        newW = Math.max(minW, Math.min(maxW, Math.round(newW)));
+        newH = Math.max(minH, Math.min(maxH, Math.round(newH)));
+
+        this._applyDimensions(newW, newH);
+    }
+
+    _applyDimensions(w, h) {
+        this._currentWidth = w;
+        this._currentHeight = h;
         if (this._menuContainer) {
-            this._menuContainer.style = `width: ${targetWidth}px; min-width: ${targetWidth}px; max-width: ${targetWidth}px;`;
+            this._menuContainer.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px;`;
         }
         if (this._scrollView) {
-            this._scrollView.style = `max-height: ${maxContentHeight}px;`;
+            this._scrollView.style = `height: ${h}px; max-height: ${h}px;`;
+        }
+        if (this._settingsDimensionsLabel) {
+            this._settingsDimensionsLabel.text = `Custom: ${w} × ${h} px (Drag corners to resize)`;
+        }
+    }
+
+    _saveCustomDimensions() {
+        if (this._settings && this._currentWidth > 0 && this._currentHeight > 0) {
+            this._settings.set_int('menu-custom-width', this._currentWidth);
+            this._settings.set_int('menu-custom-height', this._currentHeight);
+        }
+    }
+
+    _resetMenuDimensions() {
+        if (this._settings) {
+            this._settings.set_int('menu-custom-width', 0);
+            this._settings.set_int('menu-custom-height', 0);
+        }
+        this._updateMenuDimensions();
+    }
+
+    _buildCornerResizeHandles() {
+        this._resizeHandles = {};
+        const corners = [
+            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END,   cursor: Clutter.CursorType.NWSE_RESIZE, size: 24, hasGrip: true },
+            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END,   cursor: Clutter.CursorType.NESW_RESIZE, size: 24, hasGrip: true },
+            { id: 'ne', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.START, cursor: Clutter.CursorType.NESW_RESIZE, size: 20, hasGrip: false },
+            { id: 'nw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.START, cursor: Clutter.CursorType.NWSE_RESIZE, size: 20, hasGrip: false }
+        ];
+
+        corners.forEach(c => {
+            const handle = new St.Widget({
+                style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${c.id}`,
+                reactive: true,
+                can_focus: false,
+                x_align: c.xAlign,
+                y_align: c.yAlign,
+                width: c.size,
+                height: c.size
+            });
+            handle.set_cursor_type(c.cursor);
+
+            let grip = null;
+            if (c.hasGrip) {
+                grip = new ResizeGrip(c.id, c.size);
+                handle.add_child(grip);
+                handle.connect('notify::hover', () => {
+                    grip.setHovered(handle.hover);
+                });
+            }
+
+            let isDragging = false;
+            let startX = 0, startY = 0;
+            let startWidth = 0, startHeight = 0;
+
+            handle.connect('button-press-event', (actor, event) => {
+                if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+                if (event.get_click_count() === 2) {
+                    this._resetMenuDimensions();
+                    return Clutter.EVENT_STOP;
+                }
+                const [x, y] = event.get_coords();
+                startX = x;
+                startY = y;
+                startWidth = this._currentWidth || 420;
+                startHeight = this._currentHeight || (this._scrollView ? this._scrollView.get_height() : 450) || 450;
+                isDragging = true;
+                this._activeResizeCorner = c.id;
+                this._dragGrab = global.stage.grab(handle);
+                if (grip) grip.setActive(true);
+                return Clutter.EVENT_STOP;
+            });
+
+            handle.connect('event', (actor, event) => {
+                if (!isDragging) return Clutter.EVENT_PROPAGATE;
+                const type = event.type();
+                if (type === Clutter.EventType.MOTION) {
+                    const [currX, currY] = event.get_coords();
+                    const deltaX = currX - startX;
+                    const deltaY = currY - startY;
+                    this._applyResizeDelta(c.id, deltaX, deltaY, startWidth, startHeight);
+                    return Clutter.EVENT_STOP;
+                } else if (type === Clutter.EventType.BUTTON_RELEASE) {
+                    if (this._dragGrab) {
+                        this._dragGrab.dismiss();
+                        this._dragGrab = null;
+                    }
+                    isDragging = false;
+                    this._activeResizeCorner = null;
+                    if (grip) grip.setActive(false);
+                    this._saveCustomDimensions();
+                    return Clutter.EVENT_STOP;
+                }
+                return Clutter.EVENT_PROPAGATE;
+            });
+
+            handle.connect('destroy', () => {
+                if (isDragging && this._dragGrab) {
+                    this._dragGrab.dismiss();
+                    this._dragGrab = null;
+                }
+            });
+
+            this._resizeHandles[c.id] = handle;
+            this._popupStack.add_child(handle);
+        });
+    }
+
+    _buildQuickMenuPopover() {
+        this._quickMenuPopover = new St.BoxLayout({
+            vertical: true,
+            style_class: 'resource-pulse-quick-menu',
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.START,
+            reactive: true,
+            visible: false
+        });
+        this._quickMenuPopover.style = 'margin-top: 46px; margin-right: 14px; width: 220px;';
+
+        const items = [
+            {
+                icon: 'preferences-system-symbolic',
+                label: 'Settings & Preferences',
+                action: () => {
+                    this._hideQuickMenu();
+                    this._openSettingsView();
+                }
+            },
+            {
+                icon: 'channel-secure-symbolic',
+                label: 'Fix Power Permissions',
+                action: () => {
+                    this._hideQuickMenu();
+                    this._runPowerFix();
+                }
+            },
+            {
+                icon: 'view-restore-symbolic',
+                label: 'Reset Window Size',
+                action: () => {
+                    this._hideQuickMenu();
+                    this._resetMenuDimensions();
+                }
+            },
+            {
+                icon: 'org.gnome.SystemMonitor-symbolic',
+                label: 'Open System Monitor',
+                action: () => {
+                    this._hideQuickMenu();
+                    this._launchSystemMonitor();
+                    this._indicator.menu.close();
+                }
+            },
+            {
+                icon: 'view-refresh-symbolic',
+                label: 'Refresh All Data',
+                action: () => {
+                    this._hideQuickMenu();
+                    this._poll();
+                }
+            }
+        ];
+
+        items.forEach(item => {
+            const btn = new St.Button({
+                style_class: 'resource-pulse-quick-menu-item',
+                reactive: true,
+                can_focus: true,
+                x_expand: true
+            });
+            const row = new St.BoxLayout({ style: 'spacing: 10px;', y_align: Clutter.ActorAlign.CENTER });
+            row.add_child(new St.Icon({ icon_name: item.icon, style: 'icon-size: 16px; color: #3584e4;' }));
+            row.add_child(new St.Label({ text: item.label, style_class: 'resource-pulse-quick-menu-label', x_expand: true }));
+            btn.add_child(row);
+            btn.connect('clicked', () => item.action());
+            this._addClickAnimations(btn);
+            this._quickMenuPopover.add_child(btn);
+        });
+
+        this._popupStack.add_child(this._quickMenuPopover);
+    }
+
+    _toggleQuickMenu() {
+        if (!this._quickMenuPopover) return;
+        if (this._quickMenuPopover.visible) {
+            this._hideQuickMenu();
+        } else {
+            this._quickMenuPopover.opacity = 0;
+            this._quickMenuPopover.visible = true;
+            this._quickMenuPopover.ease({
+                opacity: 255,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+        }
+    }
+
+    _hideQuickMenu() {
+        if (!this._quickMenuPopover || !this._quickMenuPopover.visible) return;
+        this._quickMenuPopover.ease({
+            opacity: 0,
+            duration: 100,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => {
+                if (this._quickMenuPopover) this._quickMenuPopover.visible = false;
+            }
+        });
+    }
+
+    _openSettingsView() {
+        this._previousTab = this._activeTab === 'settings' ? 'overview' : this._activeTab;
+        this._activeTab = 'settings';
+        this._refreshSettingsUI();
+        this._updateTabVisibility();
+    }
+
+    _buildSettingsPage() {
+        this._settingsPage = new St.BoxLayout({
+            vertical: true,
+            style_class: 'resource-pulse-settings-page',
+            x_expand: true,
+            visible: false
+        });
+
+        // 1. Header
+        const header = new St.BoxLayout({ style: 'spacing: 8px; margin-bottom: 14px;', y_align: Clutter.ActorAlign.CENTER, x_expand: true });
+        const backBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        const backIcon = new St.Icon({ icon_name: 'go-previous-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
+        backBtn.add_child(backIcon);
+        backBtn.connect('clicked', () => {
+            this._activeTab = this._previousTab || 'overview';
+            this._updateTabVisibility();
+        });
+        this._addClickAnimations(backBtn);
+        header.add_child(backBtn);
+
+        const titleBox = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        titleBox.add_child(new St.Icon({ icon_name: 'preferences-system-symbolic', style: 'icon-size: 18px; color: #3584e4;' }));
+        titleBox.add_child(new St.Label({ text: 'Settings & Preferences', style: 'font-size: 1.1em; font-weight: bold; color: #ffffff;' }));
+        header.add_child(titleBox);
+        this._settingsPage.add_child(header);
+
+        // 2. Card: Pinned Top Bar Metrics
+        const pinCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
+        pinCard.add_child(new St.Label({ text: 'PINNED TOP BAR METRICS', style_class: 'resource-pulse-settings-card-title' }));
+        pinCard.add_child(new St.Label({ text: 'Choose which metrics display in the GNOME top bar', style: 'font-size: 0.75em; color: #8c8c94; margin-bottom: 10px;' }));
+
+        this._pinButtons = {};
+        const availableMetrics = [
+            { key: 'cpu', label: 'CPU Usage' },
+            { key: 'memory', label: 'Memory' },
+            { key: 'battery', label: 'Battery' },
+            { key: 'power', label: 'Power Draw' },
+            { key: 'disk', label: 'Disk Space' },
+            { key: 'network', label: 'Network' },
+            { key: 'thermal', label: 'Thermal' },
+            { key: 'gpu', label: 'GPU' }
+        ];
+
+        const pinGrid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
+        const pinGridWidget = new St.Widget({ layout_manager: pinGrid, x_expand: true });
+
+        availableMetrics.forEach((m, idx) => {
+            const btn = new St.Button({
+                style_class: 'resource-pulse-toggle-btn',
+                reactive: true,
+                can_focus: true,
+                x_expand: true,
+                margin_right: 4,
+                margin_bottom: 6
+            });
+            const bBox = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
+            const bIcon = new St.Icon({ icon_name: this._getIconName(m.key), style: 'icon-size: 14px;' });
+            const bLbl = new St.Label({ text: m.label, style: 'font-size: 0.85em;' });
+            bBox.add_child(bIcon);
+            bBox.add_child(bLbl);
+            btn.add_child(bBox);
+
+            btn.connect('clicked', () => {
+                let current = this._settings.get_strv('pinned-metrics');
+                if (current.includes(m.key)) {
+                    current = current.filter(k => k !== m.key);
+                } else {
+                    current.push(m.key);
+                }
+                this._settings.set_strv('pinned-metrics', current);
+                this._updatePinButtonState(m.key, current.includes(m.key));
+            });
+            this._addClickAnimations(btn);
+
+            pinGrid.attach(btn, idx % 2, Math.floor(idx / 2), 1, 1);
+            this._pinButtons[m.key] = btn;
+        });
+
+        pinCard.add_child(pinGridWidget);
+        this._settingsPage.add_child(pinCard);
+
+        // 3. Card: General Settings
+        const genCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
+        genCard.add_child(new St.Label({ text: 'GENERAL OPTIONS', style_class: 'resource-pulse-settings-card-title' }));
+
+        // 3.1 Poll Interval Row
+        const pollRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const pollInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        pollInfo.add_child(new St.Label({ text: 'Update Interval', style_class: 'resource-pulse-setting-label' }));
+        pollInfo.add_child(new St.Label({ text: 'Frequency of data sampling (1 to 10 seconds)', style_class: 'resource-pulse-setting-desc' }));
+        pollRow.add_child(pollInfo);
+
+        const pollControls = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
+        const pollDecBtn = new St.Button({ label: '−', style_class: 'resource-pulse-stepper-btn', reactive: true });
+        this._pollValLabel = new St.Label({ text: '2s', style: 'font-size: 0.9em; font-weight: bold; min-width: 32px; text-align: center;' });
+        const pollIncBtn = new St.Button({ label: '+', style_class: 'resource-pulse-stepper-btn', reactive: true });
+        
+        pollDecBtn.connect('clicked', () => {
+            const cur = this._settings.get_int('poll-interval') || 2;
+            if (cur > 1) {
+                this._settings.set_int('poll-interval', cur - 1);
+                this._pollValLabel.text = `${cur - 1}s`;
+            }
+        });
+        pollIncBtn.connect('clicked', () => {
+            const cur = this._settings.get_int('poll-interval') || 2;
+            if (cur < 10) {
+                this._settings.set_int('poll-interval', cur + 1);
+                this._pollValLabel.text = `${cur + 1}s`;
+            }
+        });
+        pollControls.add_child(pollDecBtn);
+        pollControls.add_child(this._pollValLabel);
+        pollControls.add_child(pollIncBtn);
+        pollRow.add_child(pollControls);
+        genCard.add_child(pollRow);
+
+        // 3.2 Compact Mode Row
+        const compactRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const compactInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        compactInfo.add_child(new St.Label({ text: 'Compact Top Bar Mode', style_class: 'resource-pulse-setting-label' }));
+        compactInfo.add_child(new St.Label({ text: 'Show icons only, hiding text labels', style_class: 'resource-pulse-setting-desc' }));
+        compactRow.add_child(compactInfo);
+
+        this._compactBtn = new St.Button({ style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._compactBtn.connect('clicked', () => {
+            const val = !this._settings.get_boolean('compact-label');
+            this._settings.set_boolean('compact-label', val);
+            this._updateToggleBtn(this._compactBtn, val);
+        });
+        compactRow.add_child(this._compactBtn);
+        genCard.add_child(compactRow);
+
+        // 3.3 Hover Tooltips Row
+        const tooltipRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const tooltipInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        tooltipInfo.add_child(new St.Label({ text: 'Hover Tooltips', style_class: 'resource-pulse-setting-label' }));
+        tooltipInfo.add_child(new St.Label({ text: 'Show rich overlays on top bar hover', style_class: 'resource-pulse-setting-desc' }));
+        tooltipRow.add_child(tooltipInfo);
+
+        this._tooltipBtn = new St.Button({ style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._tooltipBtn.connect('clicked', () => {
+            const val = !this._settings.get_boolean('show-tooltips');
+            this._settings.set_boolean('show-tooltips', val);
+            this._updateToggleBtn(this._tooltipBtn, val);
+        });
+        tooltipRow.add_child(this._tooltipBtn);
+        genCard.add_child(tooltipRow);
+
+        // 3.4 Temperature Unit Row
+        const tempRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const tempInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        tempInfo.add_child(new St.Label({ text: 'Temperature Unit', style_class: 'resource-pulse-setting-label' }));
+        tempRow.add_child(tempInfo);
+
+        const tempBox = new St.BoxLayout({ style: 'spacing: 4px;' });
+        this._tempCBtn = new St.Button({ label: '°C', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._tempFBtn = new St.Button({ label: '°F', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._tempCBtn.connect('clicked', () => {
+            this._settings.set_string('unit-temp', 'C');
+            this._refreshSettingsUI();
+        });
+        this._tempFBtn.connect('clicked', () => {
+            this._settings.set_string('unit-temp', 'F');
+            this._refreshSettingsUI();
+        });
+        tempBox.add_child(this._tempCBtn);
+        tempBox.add_child(this._tempFBtn);
+        tempRow.add_child(tempBox);
+        genCard.add_child(tempRow);
+
+        // 3.5 Memory Unit Row
+        const memRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const memInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        memInfo.add_child(new St.Label({ text: 'Memory Unit', style_class: 'resource-pulse-setting-label' }));
+        memRow.add_child(memInfo);
+
+        const memBox = new St.BoxLayout({ style: 'spacing: 4px;' });
+        this._memGbBtn = new St.Button({ label: 'GB', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._memGibBtn = new St.Button({ label: 'GiB', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._memGbBtn.connect('clicked', () => {
+            this._settings.set_string('unit-mem', 'GB');
+            this._refreshSettingsUI();
+        });
+        this._memGibBtn.connect('clicked', () => {
+            this._settings.set_string('unit-mem', 'GiB');
+            this._refreshSettingsUI();
+        });
+        memBox.add_child(this._memGbBtn);
+        memBox.add_child(this._memGibBtn);
+        memRow.add_child(memBox);
+        genCard.add_child(memRow);
+
+        // 3.6 Battery Format Row
+        const batRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const batInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        batInfo.add_child(new St.Label({ text: 'Battery Top Bar Format', style_class: 'resource-pulse-setting-label' }));
+        batRow.add_child(batInfo);
+
+        const batBox = new St.BoxLayout({ style: 'spacing: 4px;' });
+        this._batPctBtn = new St.Button({ label: '% Only', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._batTimeBtn = new St.Button({ label: '% + Time', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._batPctBtn.connect('clicked', () => {
+            this._settings.set_string('battery-top-format', 'percent');
+            this._refreshSettingsUI();
+        });
+        this._batTimeBtn.connect('clicked', () => {
+            this._settings.set_string('battery-top-format', 'percent-time');
+            this._refreshSettingsUI();
+        });
+        batBox.add_child(this._batPctBtn);
+        batBox.add_child(this._batTimeBtn);
+        batRow.add_child(batBox);
+        genCard.add_child(batRow);
+
+        // 3.7 Network Format Row
+        const netRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const netInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        netInfo.add_child(new St.Label({ text: 'Network Top Bar Format', style_class: 'resource-pulse-setting-label' }));
+        netRow.add_child(netInfo);
+
+        const netBox = new St.BoxLayout({ style: 'spacing: 4px;' });
+        this._netDownBtn = new St.Button({ label: '↓ Down', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._netUpBtn = new St.Button({ label: '↑ Up', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._netBothBtn = new St.Button({ label: '↓↑ Both', style_class: 'resource-pulse-toggle-btn', reactive: true });
+        this._netDownBtn.connect('clicked', () => {
+            this._settings.set_string('network-top-format', 'download');
+            this._refreshSettingsUI();
+        });
+        this._netUpBtn.connect('clicked', () => {
+            this._settings.set_string('network-top-format', 'upload');
+            this._refreshSettingsUI();
+        });
+        this._netBothBtn.connect('clicked', () => {
+            this._settings.set_string('network-top-format', 'both');
+            this._refreshSettingsUI();
+        });
+        netBox.add_child(this._netDownBtn);
+        netBox.add_child(this._netUpBtn);
+        netBox.add_child(this._netBothBtn);
+        netRow.add_child(netBox);
+        genCard.add_child(netRow);
+
+        this._settingsPage.add_child(genCard);
+
+        // 4. Card: Warning Thresholds
+        const alertCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
+        alertCard.add_child(new St.Label({ text: 'ALERT THRESHOLDS', style_class: 'resource-pulse-settings-card-title' }));
+        alertCard.add_child(new St.Label({ text: 'Values exceeding threshold will display in warning colors', style: 'font-size: 0.75em; color: #8c8c94; margin-bottom: 8px;' }));
+
+        // 4.1 CPU Threshold
+        const cpuThreshRow = this._buildStepperRow('CPU Alert Threshold', 50, 100, 5, 'threshold-cpu', '%');
+        this._cpuThreshLbl = cpuThreshRow.valLbl;
+        alertCard.add_child(cpuThreshRow.row);
+
+        // 4.2 Mem Threshold
+        const memThreshRow = this._buildStepperRow('Memory Alert Threshold', 50, 100, 5, 'threshold-mem', '%');
+        this._memThreshLbl = memThreshRow.valLbl;
+        alertCard.add_child(memThreshRow.row);
+
+        // 4.3 Temp Threshold
+        const tempThreshRow = this._buildStepperRow('Temperature Alert Threshold', 40, 100, 5, 'threshold-temp', '°C');
+        this._tempThreshLbl = tempThreshRow.valLbl;
+        alertCard.add_child(tempThreshRow.row);
+
+        this._settingsPage.add_child(alertCard);
+
+        // 5. Card: Permissions & System Troubleshooting
+        const permCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
+        permCard.add_child(new St.Label({ text: 'PERMISSIONS & TROUBLESHOOTING', style_class: 'resource-pulse-settings-card-title' }));
+
+        const permRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const permInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        permInfo.add_child(new St.Label({ text: 'Enable CPU Power Monitoring', style_class: 'resource-pulse-setting-label' }));
+        permInfo.add_child(new St.Label({ text: 'Fixes 0W reading by granting read permission to RAPL sensors (Requires Admin)', style_class: 'resource-pulse-setting-desc' }));
+        this._settingsPowerFixStatus = new St.Label({ text: '', style_class: 'resource-pulse-status-label', visible: false });
+        this._settingsPowerFixStatus.style = 'margin-top: 4px;';
+        permInfo.add_child(this._settingsPowerFixStatus);
+        permRow.add_child(permInfo);
+
+        this._powerFixBtn = new St.Button({ label: 'Fix Permissions', style_class: 'resource-pulse-action-btn', reactive: true });
+        this._powerFixBtn.connect('clicked', () => {
+            this._runPowerFix(this._settingsPowerFixStatus, this._powerFixBtn);
+        });
+        permRow.add_child(this._powerFixBtn);
+        permCard.add_child(permRow);
+        this._settingsPage.add_child(permCard);
+
+        // 6. Card: Window Sizing & Reset
+        const sizeCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
+        sizeCard.add_child(new St.Label({ text: 'PANEL RESIZING', style_class: 'resource-pulse-settings-card-title' }));
+
+        const sizeRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const sizeInfo = new St.BoxLayout({ vertical: true, x_expand: true });
+        sizeInfo.add_child(new St.Label({ text: 'Window Dimensions', style_class: 'resource-pulse-setting-label' }));
+        this._settingsDimensionsLabel = new St.Label({ text: 'Drag any corner to resize the panel', style_class: 'resource-pulse-setting-desc' });
+        sizeInfo.add_child(this._settingsDimensionsLabel);
+        sizeRow.add_child(sizeInfo);
+
+        const resetSizeBtn = new St.Button({ label: 'Reset Size', style_class: 'resource-pulse-action-btn', reactive: true });
+        resetSizeBtn.connect('clicked', () => {
+            this._resetMenuDimensions();
+        });
+        sizeRow.add_child(resetSizeBtn);
+        sizeCard.add_child(sizeRow);
+        this._settingsPage.add_child(sizeCard);
+
+        this._menuContainer.add_child(this._settingsPage);
+    }
+
+    _buildStepperRow(labelText, min, max, step, settingKey, unitSuffix) {
+        const row = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
+        const info = new St.BoxLayout({ vertical: true, x_expand: true });
+        info.add_child(new St.Label({ text: labelText, style_class: 'resource-pulse-setting-label' }));
+        row.add_child(info);
+
+        const controls = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
+        const decBtn = new St.Button({ label: '−', style_class: 'resource-pulse-stepper-btn', reactive: true });
+        const val = this._settings.get_int(settingKey) || min;
+        const valLbl = new St.Label({ text: `${val}${unitSuffix}`, style: 'font-size: 0.9em; font-weight: bold; min-width: 44px; text-align: center;' });
+        const incBtn = new St.Button({ label: '+', style_class: 'resource-pulse-stepper-btn', reactive: true });
+
+        decBtn.connect('clicked', () => {
+            const cur = this._settings.get_int(settingKey) || min;
+            if (cur > min) {
+                const next = cur - step;
+                this._settings.set_int(settingKey, next);
+                valLbl.text = `${next}${unitSuffix}`;
+            }
+        });
+        incBtn.connect('clicked', () => {
+            const cur = this._settings.get_int(settingKey) || min;
+            if (cur < max) {
+                const next = cur + step;
+                this._settings.set_int(settingKey, next);
+                valLbl.text = `${next}${unitSuffix}`;
+            }
+        });
+
+        controls.add_child(decBtn);
+        controls.add_child(valLbl);
+        controls.add_child(incBtn);
+        row.add_child(controls);
+        return { row, valLbl };
+    }
+
+    _updateToggleBtn(btn, active) {
+        if (!btn) return;
+        btn.label = active ? 'ON' : 'OFF';
+        if (active) {
+            btn.add_style_class_name('active');
+        } else {
+            btn.remove_style_class_name('active');
+        }
+    }
+
+    _updatePinButtonState(key, isPinned) {
+        const btn = this._pinButtons?.[key];
+        if (!btn) return;
+        if (isPinned) {
+            btn.add_style_class_name('active');
+        } else {
+            btn.remove_style_class_name('active');
+        }
+    }
+
+    _updateChipActive(btn, active) {
+        if (!btn) return;
+        if (active) {
+            btn.add_style_class_name('active');
+        } else {
+            btn.remove_style_class_name('active');
+        }
+    }
+
+    _refreshSettingsUI() {
+        if (!this._settings || !this._settingsPage) return;
+
+        // Pinned
+        const pinned = this._settings.get_strv('pinned-metrics');
+        for (const [key, btn] of Object.entries(this._pinButtons || {})) {
+            this._updatePinButtonState(key, pinned.includes(key));
+        }
+
+        // Poll interval
+        if (this._pollValLabel) {
+            this._pollValLabel.text = `${this._settings.get_int('poll-interval') || 2}s`;
+        }
+
+        // Compact & tooltips
+        this._updateToggleBtn(this._compactBtn, this._settings.get_boolean('compact-label'));
+        this._updateToggleBtn(this._tooltipBtn, this._settings.get_boolean('show-tooltips'));
+
+        // Temp unit
+        const tempUnit = this._settings.get_string('unit-temp') || 'C';
+        this._updateChipActive(this._tempCBtn, tempUnit === 'C');
+        this._updateChipActive(this._tempFBtn, tempUnit === 'F');
+
+        // Mem unit
+        const memUnit = this._settings.get_string('unit-mem') || 'GB';
+        this._updateChipActive(this._memGbBtn, memUnit === 'GB');
+        this._updateChipActive(this._memGibBtn, memUnit === 'GiB');
+
+        // Battery format
+        const batFmt = this._settings.get_string('battery-top-format') || 'percent';
+        this._updateChipActive(this._batPctBtn, batFmt === 'percent');
+        this._updateChipActive(this._batTimeBtn, batFmt === 'percent-time');
+
+        // Network format
+        const netFmt = this._settings.get_string('network-top-format') || 'download';
+        this._updateChipActive(this._netDownBtn, netFmt === 'download');
+        this._updateChipActive(this._netUpBtn, netFmt === 'upload');
+        this._updateChipActive(this._netBothBtn, netFmt === 'both');
+
+        // Thresholds
+        if (this._cpuThreshLbl) this._cpuThreshLbl.text = `${this._settings.get_int('threshold-cpu')}%`;
+        if (this._memThreshLbl) this._memThreshLbl.text = `${this._settings.get_int('threshold-mem')}%`;
+        if (this._tempThreshLbl) this._tempThreshLbl.text = `${this._settings.get_int('threshold-temp')}°C`;
+
+        // Dimensions
+        const customW = this._settings.get_int('menu-custom-width') || 0;
+        const customH = this._settings.get_int('menu-custom-height') || 0;
+        if (this._settingsDimensionsLabel) {
+            if (customW > 0 && customH > 0) {
+                this._settingsDimensionsLabel.text = `Custom Size: ${customW} × ${customH} px (Drag corners to resize)`;
+            } else {
+                this._settingsDimensionsLabel.text = `Auto Dynamic: ${this._currentWidth || 420} × ${this._currentHeight || 500} px`;
+            }
+        }
+    }
+
+    _runPowerFix(statusLabel = null, button = null) {
+        if (button) button.reactive = false;
+        if (statusLabel) {
+            statusLabel.text = 'Requesting administrator permission...';
+            statusLabel.style = 'color: #3584e4;';
+            statusLabel.visible = true;
+        }
+        try {
+            const script = `
+echo 'SUBSYSTEM=="powercap", ACTION=="add", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj"' | tee /etc/udev/rules.d/99-powercap-read.rules
+udevadm control --reload-rules
+udevadm trigger
+chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
+`;
+            const proc = Gio.Subprocess.new(['pkexec', 'bash', '-c', script], Gio.SubprocessFlags.NONE);
+            proc.wait_async(null, (obj, res) => {
+                try {
+                    obj.wait_finish(res);
+                    if (statusLabel) {
+                        statusLabel.text = '✓ RAPL permissions successfully updated!';
+                        statusLabel.style = 'color: #2ec27e;';
+                        statusLabel.visible = true;
+                    }
+                    if (button) button.reactive = true;
+                    this._poll();
+                } catch (e) {
+                    if (statusLabel) {
+                        statusLabel.text = `Failed: ${e.message}`;
+                        statusLabel.style = 'color: #e01b24;';
+                        statusLabel.visible = true;
+                    }
+                    if (button) button.reactive = true;
+                }
+            });
+        } catch (e) {
+            if (statusLabel) {
+                statusLabel.text = `Error: ${e.message}`;
+                statusLabel.style = 'color: #e01b24;';
+                statusLabel.visible = true;
+            }
+            if (button) button.reactive = true;
         }
     }
 
@@ -878,8 +1734,7 @@ export default class ResourcePulseExtension extends Extension {
                 duration: 300,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD
             });
-            this.openPreferences();
-            this._indicator.menu.close();
+            this._toggleQuickMenu();
         });
 
         this._addClickAnimations(refreshBtn);
@@ -1164,8 +2019,7 @@ export default class ResourcePulseExtension extends Extension {
                 duration: 300,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD
             });
-            this.openPreferences();
-            this._indicator.menu.close();
+            this._toggleQuickMenu();
         });
 
         this._addClickAnimations(backBtn);
@@ -1209,8 +2063,22 @@ export default class ResourcePulseExtension extends Extension {
                 });
             }
             this._detailArea.visible = false;
+            if (this._settingsPage) this._settingsPage.visible = false;
+        } else if (this._activeTab === 'settings') {
+            this._overviewPage.visible = false;
+            this._detailArea.visible = false;
+            if (this._settingsPage) {
+                this._settingsPage.opacity = 0;
+                this._settingsPage.visible = true;
+                this._settingsPage.ease({
+                    opacity: 255,
+                    duration: 400,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+            }
         } else {
             this._overviewPage.visible = false;
+            if (this._settingsPage) this._settingsPage.visible = false;
             if (!this._detailArea.visible) {
                 this._detailArea.opacity = 0;
                 this._detailArea.visible = true;
