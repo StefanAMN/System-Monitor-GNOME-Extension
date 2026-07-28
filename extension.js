@@ -60,25 +60,27 @@ function formatUptime(seconds) {
 
 // ─── Custom Cairo Widgets ─────────────────────────────────────────────────────
 
-const ResizeGrip = GObject.registerClass({
-    GTypeName: 'ResourcePulseResizeGrip',
-}, class ResizeGrip extends St.DrawingArea {
-    _init(corner = 'se', size = 24) {
-        super._init({ width: size, height: size });
+const ResizeHandle = GObject.registerClass({
+    GTypeName: 'ResourcePulseResizeHandle',
+}, class ResizeHandle extends St.DrawingArea {
+    _init(corner = 'se', size = 24, cursor = Clutter.CursorType.DEFAULT, hasGrip = false) {
+        super._init({
+            style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${corner}`,
+            reactive: true,
+            can_focus: false,
+            width: size,
+            height: size
+        });
+        this.set_cursor_type(cursor);
         this._corner = corner;
+        this._hasGrip = hasGrip;
         this._hovered = false;
         this._active = false;
-        this.connect('repaint', this._draw.bind(this));
-        this.connect('notify::mapped', () => {
+        this.connect('notify::hover', () => {
+            this._hovered = this.hover;
             if (this.is_mapped()) this.queue_repaint();
         });
-    }
-
-    setHovered(hovered) {
-        if (this._hovered !== hovered) {
-            this._hovered = hovered;
-            if (this.is_mapped()) this.queue_repaint();
-        }
+        this.connect('repaint', this._draw.bind(this));
     }
 
     setActive(active) {
@@ -89,6 +91,7 @@ const ResizeGrip = GObject.registerClass({
     }
 
     _draw(area) {
+        if (!this._hasGrip) return;
         const cr = area.get_context();
         const [w, h] = area.get_surface_size();
         cr.save();
@@ -469,6 +472,7 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         this._rebuildTopBar();
+        // Initial poll
         this._startPolling();
     }
 
@@ -718,25 +722,11 @@ export default class ResourcePulseExtension extends Extension {
         ];
 
         corners.forEach(c => {
-            const handle = new St.Widget({
-                style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${c.id}`,
-                reactive: true,
-                can_focus: false,
-                x_align: c.xAlign,
-                y_align: c.yAlign,
-                width: c.size,
-                height: c.size
-            });
-            handle.set_cursor_type(c.cursor);
-
-            let grip = null;
-            if (c.hasGrip) {
-                grip = new ResizeGrip(c.id, c.size);
-                handle.add_child(grip);
-                handle.connect('notify::hover', () => {
-                    grip.setHovered(handle.hover);
-                });
-            }
+            const handle = new ResizeHandle(c.id, c.size, c.cursor, c.hasGrip);
+            handle.x_align = c.xAlign;
+            handle.y_align = c.yAlign;
+            handle.x_expand = true;
+            handle.y_expand = true;
 
             let isDragging = false;
             let startX = 0, startY = 0;
@@ -756,7 +746,7 @@ export default class ResourcePulseExtension extends Extension {
                 isDragging = true;
                 this._activeResizeCorner = c.id;
                 this._dragGrab = global.stage.grab(handle);
-                if (grip) grip.setActive(true);
+                handle.setActive(true);
                 return Clutter.EVENT_STOP;
             });
 
@@ -776,7 +766,7 @@ export default class ResourcePulseExtension extends Extension {
                     }
                     isDragging = false;
                     this._activeResizeCorner = null;
-                    if (grip) grip.setActive(false);
+                    handle.setActive(false);
                     this._saveCustomDimensions();
                     return Clutter.EVENT_STOP;
                 }
