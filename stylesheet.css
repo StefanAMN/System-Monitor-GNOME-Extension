@@ -440,14 +440,15 @@
 
 .resource-pulse-resize-handle {
     background-color: transparent;
+    transition-duration: 150ms;
 }
 
 .resource-pulse-resize-handle:hover {
-    background-color: rgba(53, 132, 228, 0.08);
+    background-color: rgba(53, 132, 228, 0.12);
 }
 
 .resource-pulse-resize-handle:active {
-    background-color: rgba(53, 132, 228, 0.18);
+    background-color: rgba(53, 132, 228, 0.25);
 }
 
 .resource-pulse-resize-handle-se {
@@ -456,14 +457,6 @@
 
 .resource-pulse-resize-handle-sw {
     border-bottom-left-radius: 14px;
-}
-
-.resource-pulse-resize-handle-ne {
-    border-top-right-radius: 14px;
-}
-
-.resource-pulse-resize-handle-nw {
-    border-top-left-radius: 14px;
 }
 
 /* ── In-Panel 3-Dots Quick Menu Popover ───────────────────────────────────── */
