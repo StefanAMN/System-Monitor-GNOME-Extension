@@ -67,6 +67,7 @@ const ResizeHandle = GObject.registerClass({
         super._init({
             style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${corner}`,
             reactive: true,
+            track_hover: true,
             can_focus: false,
             width: size,
             height: size
@@ -662,10 +663,12 @@ export default class ResourcePulseExtension extends Extension {
             if (this._popupStack) {
                 this._popupStack.width = defaultWidth;
                 this._popupStack.height = -1;
+                this._popupStack.style = `width: ${defaultWidth}px;`;
             }
             if (this._menuSection) {
                 this._menuSection.width = defaultWidth;
                 this._menuSection.height = -1;
+                this._menuSection.style = `width: ${defaultWidth}px;`;
             }
             if (this._settingsDimensionsLabel) {
                 this._settingsDimensionsLabel.text = `Auto Dynamic: ${defaultWidth} × auto px`;
@@ -709,15 +712,17 @@ export default class ResourcePulseExtension extends Extension {
         if (this._scrollView) {
             this._scrollView.width = w;
             this._scrollView.height = h;
-            this._scrollView.style = `width: ${w}px; height: ${h}px; max-height: ${h}px;`;
+            this._scrollView.style = `width: ${w}px; height: ${h}px; min-height: ${h}px; max-height: ${h}px;`;
         }
         if (this._popupStack) {
             this._popupStack.width = w;
             this._popupStack.height = h;
+            this._popupStack.style = `width: ${w}px; height: ${h}px; min-width: ${w}px; min-height: ${h}px;`;
         }
         if (this._menuSection) {
             this._menuSection.width = w;
             this._menuSection.height = h;
+            this._menuSection.style = `width: ${w}px; height: ${h}px; min-width: ${w}px; min-height: ${h}px;`;
         }
         if (this._settingsDimensionsLabel) {
             this._settingsDimensionsLabel.text = `Custom: ${w} × ${h} px (Drag corners to resize)`;
@@ -756,50 +761,52 @@ export default class ResourcePulseExtension extends Extension {
             let isDragging = false;
             let startX = 0, startY = 0;
             let startWidth = 0, startHeight = 0;
+            let lastClickTime = 0;
 
-            handle.connect('button-press-event', (actor, event) => {
-                if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
-                if (event.get_click_count() === 2) {
+            const startDrag = (event) => {
+                const now = event.get_time();
+                if (now - lastClickTime < 350) {
                     this._resetMenuDimensions();
+                    lastClickTime = 0;
                     return Clutter.EVENT_STOP;
                 }
+                lastClickTime = now;
+
                 const [x, y] = event.get_coords();
                 startX = x;
                 startY = y;
 
                 // Safely read real rendered allocation size
-                let curW = 0;
-                let curH = 0;
+                let curW = (this._currentWidth && this._currentWidth > 100) ? this._currentWidth : 0;
+                let curH = (this._currentHeight && this._currentHeight > 100) ? this._currentHeight : 0;
 
-                if (this._menuSection) {
-                    const box = this._menuSection.get_allocation_box();
-                    if (box) {
-                        const bw = box.get_width();
-                        const bh = box.get_height();
-                        if (bw > 100) curW = bw;
-                        if (bh > 100) curH = bh;
+                if (!curW || !curH) {
+                    if (this._menuSection) {
+                        const box = this._menuSection.get_allocation_box();
+                        if (box) {
+                            if (!curW && box.get_width() > 100) curW = box.get_width();
+                            if (!curH && box.get_height() > 100) curH = box.get_height();
+                        }
+                    }
+                    if (!curW || !curH) {
+                        if (this._scrollView) {
+                            const box = this._scrollView.get_allocation_box();
+                            if (box) {
+                                if (!curW && box.get_width() > 100) curW = box.get_width();
+                                if (!curH && box.get_height() > 100) curH = box.get_height();
+                            }
+                        }
+                    }
+                    if (!curW || !curH) {
+                        if (this._menuContainer) {
+                            const box = this._menuContainer.get_allocation_box();
+                            if (box) {
+                                if (!curW && box.get_width() > 100) curW = box.get_width();
+                                if (!curH && box.get_height() > 100) curH = box.get_height();
+                            }
+                        }
                     }
                 }
-                if ((!curW || !curH) && this._scrollView) {
-                    const box = this._scrollView.get_allocation_box();
-                    if (box) {
-                        const bw = box.get_width();
-                        const bh = box.get_height();
-                        if (!curW && bw > 100) curW = bw;
-                        if (!curH && bh > 100) curH = bh;
-                    }
-                }
-                if ((!curW || !curH) && this._menuContainer) {
-                    const box = this._menuContainer.get_allocation_box();
-                    if (box) {
-                        const bw = box.get_width();
-                        const bh = box.get_height();
-                        if (!curW && bw > 100) curW = bw;
-                        if (!curH && bh > 100) curH = bh;
-                    }
-                }
-                if (!curW && this._currentWidth > 100) curW = this._currentWidth;
-                if (!curH && this._currentHeight > 100) curH = this._currentHeight;
                 if (!curW) curW = 420;
                 if (!curH) curH = 500;
 
@@ -811,6 +818,18 @@ export default class ResourcePulseExtension extends Extension {
                 this._dragGrab = global.stage.grab(handle);
                 handle.setActive(true);
                 return Clutter.EVENT_STOP;
+            };
+
+            handle.connect('button-press-event', (actor, event) => {
+                if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+                return startDrag(event);
+            });
+
+            handle.connect('touch-event', (actor, event) => {
+                if (event.type() === Clutter.EventType.TOUCH_BEGIN) {
+                    return startDrag(event);
+                }
+                return Clutter.EVENT_PROPAGATE;
             });
 
             const finishDrag = () => {
@@ -837,17 +856,10 @@ export default class ResourcePulseExtension extends Extension {
                     const deltaY = currY - startY;
                     this._applyResizeDelta(c.id, deltaX, deltaY, startWidth, startHeight);
                     return Clutter.EVENT_STOP;
-                } else if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END) {
+                } else if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END || type === Clutter.EventType.TOUCH_CANCEL) {
                     return finishDrag();
                 }
                 return Clutter.EVENT_PROPAGATE;
-            });
-
-            handle.connect('destroy', () => {
-                if (isDragging && this._dragGrab) {
-                    this._dragGrab.dismiss();
-                    this._dragGrab = null;
-                }
             });
 
             this._resizeHandles[c.id] = handle;
