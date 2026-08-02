@@ -85,6 +85,7 @@ const ResizeHandle = GObject.registerClass({
         this.connect('notify::hover', () => {
             this._hovered = this.hover;
             this.remove_all_transitions();
+            if (!this.get_stage() || !this.is_mapped()) return;
             if (this._hovered && !this._active) {
                 this.ease({
                     scale_x: 1.15,
@@ -100,7 +101,7 @@ const ResizeHandle = GObject.registerClass({
                     mode: Clutter.AnimationMode.EASE_OUT_QUAD
                 });
             }
-            if (this.is_mapped()) this.queue_repaint();
+            this.queue_repaint();
         });
         this.connect('repaint', this._draw.bind(this));
     }
@@ -557,6 +558,14 @@ export default class ResourcePulseExtension extends Extension {
         this._topBarWidgets = {};
         this._tooltipTexts = {};
         this._settings = null;
+        this._overviewPage = null;
+        this._detailArea = null;
+        this._detailSections = null;
+        this._summaryCards = null;
+        this._popupStack = null;
+        this._menuContainer = null;
+        this._scrollView = null;
+        this._menuSection = null;
         this._coreWidgets = null;
         this._procWidgets = [];
         this._cpu = null;
@@ -618,7 +627,7 @@ export default class ResourcePulseExtension extends Extension {
             const tooltipW = this._tooltip.get_width() || 120;
 
             let targetX = Math.round(stageX + (w / 2) - (tooltipW / 2));
-            const screenW = global.screen_width || 1920;
+            const screenW = global.stage?.width || global.screen_width || 1920;
             targetX = Math.max(10, Math.min(screenW - tooltipW - 10, targetX));
             const targetY = Math.round(stageY + h + 6);
 
@@ -818,7 +827,7 @@ export default class ResourcePulseExtension extends Extension {
                 let curH = (this._currentHeight && this._currentHeight > 100) ? this._currentHeight : 0;
 
                 if (!curW || !curH) {
-                    if (this._menuSection) {
+                    if (this._menuSection && this._menuSection.has_allocation()) {
                         const box = this._menuSection.get_allocation_box();
                         if (box) {
                             if (!curW && box.get_width() > 100) curW = box.get_width();
@@ -826,7 +835,7 @@ export default class ResourcePulseExtension extends Extension {
                         }
                     }
                     if (!curW || !curH) {
-                        if (this._scrollView) {
+                        if (this._scrollView && this._scrollView.has_allocation()) {
                             const box = this._scrollView.get_allocation_box();
                             if (box) {
                                 if (!curW && box.get_width() > 100) curW = box.get_width();
@@ -835,7 +844,7 @@ export default class ResourcePulseExtension extends Extension {
                         }
                     }
                     if (!curW || !curH) {
-                        if (this._menuContainer) {
+                        if (this._menuContainer && this._menuContainer.has_allocation()) {
                             const box = this._menuContainer.get_allocation_box();
                             if (box) {
                                 if (!curW && box.get_width() > 100) curW = box.get_width();
@@ -926,7 +935,7 @@ export default class ResourcePulseExtension extends Extension {
 
         // 1. Header
         const header = new St.BoxLayout({ style: 'spacing: 8px; margin-bottom: 14px;', y_align: Clutter.ActorAlign.CENTER, x_expand: true });
-        const backBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        const backBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 99px; padding: 6px;', reactive: true });
         const backIcon = new St.Icon({ icon_name: 'go-previous-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
         backBtn.add_child(backIcon);
         backBtn.connect('clicked', () => {
@@ -1419,6 +1428,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
     }
 
     async _poll() {
+        if (!this._settings || !this._indicator) return;
         try {
             const pinned = this._getStrv('pinned-metrics', ['cpu', 'memory']);
             const isOpen = this._menuOpen;
@@ -1447,6 +1457,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 needGpu ? this._gpu.sample() : Promise.resolve(this._lastGpu || { present: false, percent: 0 })
             ]);
 
+            if (!this._settings || !this._indicator) return;
+
             if (needCpu) this._lastCpu = cpu;
             if (needMem) this._lastMem = mem;
             if (needBat) this._lastBat = bat;
@@ -1456,6 +1468,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             if (needGpu) this._lastGpu = gpu;
 
             const pwr = needPwr ? await this._pwr.sample(bat) : (this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null });
+            if (!this._settings || !this._indicator) return;
             if (needPwr) this._lastPwr = pwr;
 
             let processes = [];
@@ -1463,6 +1476,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 try {
                     const sortFlag = isDetailedMem ? '--sort=-pmem' : '--sort=-pcpu';
                     const res = await runSubprocess(['ps', '-eo', 'pid,pcpu,pmem,comm', '--no-headers', sortFlag]);
+                    if (!this._settings || !this._indicator) return;
                     if (res.success && res.stdout) {
                         const lines = res.stdout.trim().split('\n');
                         for (let i = 0; i < Math.min(lines.length, 8); i++) {
@@ -1481,6 +1495,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                     }
                 } catch (e) {}
             }
+
+            if (!this._settings || !this._indicator) return;
 
             const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes };
             this._updateTopBarUI(data);
@@ -1553,6 +1569,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
     }
 
     _updateTopBarUI(data) {
+        if (!this._settings || !this._indicator) return;
         const tempUnit = this._settings.get_string('unit-temp') || 'C';
         const useGiB = this._settings.get_string('unit-mem') === 'GiB';
         const cpuWarn = this._settings.get_int('threshold-cpu') || 90;
@@ -1742,7 +1759,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const titleLbl = new St.Label({ text: 'System Overview', style: 'font-size: 1.3em; font-weight: bold; color: #ffffff;', x_expand: true });
         headerBox.add_child(titleLbl);
 
-        const refreshBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        const refreshBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 99px; padding: 6px;', reactive: true });
         const refreshIcon = new St.Icon({ icon_name: 'view-refresh-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
         refreshIcon.set_pivot_point(0.5, 0.5);
         refreshBtn.add_child(refreshIcon);
@@ -1756,7 +1773,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             });
         });
 
-        const menuBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px; margin-left: 6px;', reactive: true });
+        const menuBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true });
         const menuIcon = new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
         menuIcon.set_pivot_point(0.5, 0.5);
         menuBtn.add_child(menuIcon);
@@ -2025,7 +2042,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // Top bar for CPU detail header (matches Right Panel header)
         this._detailHeader = new St.BoxLayout({ style: 'margin-bottom: 14px; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
 
-        const backBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        const backBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 99px; padding: 6px;', reactive: true });
         backBtn.add_child(new St.Icon({ icon_name: 'go-previous-symbolic', style: 'icon-size: 16px; color: #ffffff;' }));
         backBtn.connect('clicked', () => {
             this._activeTab = 'overview';
@@ -2038,7 +2055,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         this._detailHeaderTitleBox.add_child(this._detailHeaderIcon);
         this._detailHeaderTitleBox.add_child(this._detailHeaderTitle);
 
-        const optBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 50%; padding: 6px;', reactive: true });
+        const optBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.05); border-radius: 99px; padding: 6px;', reactive: true });
         const optIcon = new St.Icon({ icon_name: 'view-more-symbolic', style: 'icon-size: 16px; color: #ffffff;' });
         optIcon.set_pivot_point(0.5, 0.5);
         optBtn.add_child(optIcon);
@@ -2606,6 +2623,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
     // ── Dashboard Update ──────────────────────────────────────────────────────
 
     _updateDashboardUI(data) {
+        if (!this._settings || !this._indicator) return;
         const tempUnit = this._settings.get_string('unit-temp') || 'C';
         const memUnit  = this._settings.get_string('unit-mem')  || 'GB';
         const useGiB   = memUnit === 'GiB';
