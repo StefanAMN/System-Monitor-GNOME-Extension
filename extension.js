@@ -80,8 +80,14 @@ function runSubprocess(argv) {
 const Sparkline = GObject.registerClass({
     GTypeName: 'ResourcePulseSparkline',
 }, class Sparkline extends St.DrawingArea {
-    _init(width = 400, height = 100, maxVal = 100, autoScale = false, options = {}) {
-        super._init({ style_class: 'resource-pulse-sparkline', width, height });
+    _init(width = -1, height = 100, maxVal = 100, autoScale = false, options = {}) {
+        const initParams = {
+            style_class: 'resource-pulse-sparkline',
+            x_expand: true,
+            height: height
+        };
+        if (width > 0) initParams.width = width;
+        super._init(initParams);
         this.history = [];
         this.maxVal = maxVal;
         this.autoScale = autoScale;
@@ -294,11 +300,21 @@ export default class ResourcePulseExtension extends Extension {
 
         // Dropdown container
         this._menuSection = new PopupMenu.PopupBaseMenuItem({ reactive: false, activate: false });
+        
+        this._scrollView = new St.ScrollView({
+            style_class: 'resource-pulse-scroll-view',
+            hscrollbar_policy: St.PolicyType.NEVER,
+            vscrollbar_policy: St.PolicyType.AUTOMATIC,
+            x_expand: true,
+            y_expand: true
+        });
+
         this._menuContainer = new St.BoxLayout({
             vertical: true,
             style_class: 'resource-pulse-menu-section',
             reactive: true,
-            can_focus: true
+            can_focus: true,
+            x_expand: true
         });
 
         // Keyboard navigation inside dropdown menu
@@ -328,7 +344,8 @@ export default class ResourcePulseExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         });
 
-        this._menuSection.add_child(this._menuContainer);
+        this._scrollView.add_child(this._menuContainer);
+        this._menuSection.add_child(this._scrollView);
         this._indicator.menu.box.add_style_class_name('resource-pulse-popup');
         this._indicator.menu.addMenuItem(this._menuSection);
 
@@ -339,16 +356,20 @@ export default class ResourcePulseExtension extends Extension {
         this._buildOverview();
         this._buildDetails();
         this._updateTabVisibility();
+        this._updateMenuDimensions();
 
         // Track menu open
         this._menuOpen = false;
         this._openStateId = this._indicator.menu.connect('open-state-changed', (menu, open) => {
             this._menuOpen = open;
             if (open) {
+                this._updateMenuDimensions();
                 this._hideTooltip();
                 this._poll();
             }
         });
+
+        this._monitorsChangedId = Main.layoutManager.connect('monitors-changed', () => this._updateMenuDimensions());
 
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
@@ -386,6 +407,10 @@ export default class ResourcePulseExtension extends Extension {
             this._timeoutId = null;
         }
         if (this._openStateId) this._indicator.menu.disconnect(this._openStateId);
+        if (this._monitorsChangedId) {
+            Main.layoutManager.disconnect(this._monitorsChangedId);
+            this._monitorsChangedId = null;
+        }
 
         if (this._tooltip) {
             this._tooltip.destroy();
@@ -457,6 +482,25 @@ export default class ResourcePulseExtension extends Extension {
                     if (this._tooltip) this._tooltip.visible = false;
                 }
             });
+        }
+    }
+
+    _updateMenuDimensions() {
+        const monitor = Main.layoutManager.primaryMonitor || Main.layoutManager.currentMonitor || { width: 1920, height: 1080 };
+        const screenW = monitor.width || (global.screen_width || 1920);
+        const screenH = monitor.height || (global.screen_height || 1080);
+
+        // Extended view proportional to screen width (~28% of screen width)
+        // Scaled fluidly between 380px (for compact/nested sessions) and 600px (for 4K/Ultrawide displays)
+        const targetWidth = Math.min(Math.max(380, Math.round(screenW * 0.28)), 600);
+        // Vertical viewport bound: max 80% of screen height so it is never cut off
+        const maxContentHeight = Math.max(380, Math.round(screenH * 0.80));
+
+        if (this._menuContainer) {
+            this._menuContainer.style = `width: ${targetWidth}px; min-width: ${targetWidth}px; max-width: ${targetWidth}px;`;
+        }
+        if (this._scrollView) {
+            this._scrollView.style = `max-height: ${maxContentHeight}px;`;
         }
     }
 
@@ -846,7 +890,7 @@ export default class ResourcePulseExtension extends Extension {
         this._overviewPage.add_child(headerBox);
 
         // Horizontal Row for CPU, Memory, Battery
-        this._primaryRow = new St.BoxLayout({ style: 'spacing: 12px; margin-bottom: 12px;' });
+        this._primaryRow = new St.BoxLayout({ style: 'spacing: 12px; margin-bottom: 12px;', x_expand: true });
         this._overviewPage.add_child(this._primaryRow);
 
         this._summaryCards = {};
@@ -854,7 +898,7 @@ export default class ResourcePulseExtension extends Extension {
         // 1. CPU Card
         const cpuCard = new St.BoxLayout({
             style: 'background-color: #1f2937; border: 1px solid rgba(53, 132, 228, 0.4); border-radius: 12px; padding: 12px;',
-            vertical: true, reactive: true, can_focus: true
+            vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const cpuHead = new St.BoxLayout({ style: 'spacing: 6px;' });
         const cpuIcon = new St.Icon({ icon_name: this._getIconName('cpu'), style: 'icon-size: 16px; color: #3584e4;' });
@@ -863,7 +907,7 @@ export default class ResourcePulseExtension extends Extension {
         cpuCard.add_child(cpuHead);
         const cpuVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
         cpuCard.add_child(cpuVal);
-        const cpuSpark = new Sparkline(110, 38, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
+        const cpuSpark = new Sparkline(-1, 38, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
         cpuSpark.x_expand = true;
         cpuCard.add_child(cpuSpark);
         const cpuBar = new ProgressBar(4, 0.208, 0.518, 0.894);
@@ -880,7 +924,7 @@ export default class ResourcePulseExtension extends Extension {
         // 2. Memory Card
         const memCard = new St.BoxLayout({
             style: 'background-color: #1e1a2e; border: 1px solid rgba(145, 65, 172, 0.4); border-radius: 12px; padding: 12px;',
-            vertical: true, reactive: true, can_focus: true
+            vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const memHead = new St.BoxLayout({ style: 'spacing: 6px;' });
         const memIcon = new St.Icon({ icon_name: this._getIconName('memory'), style: 'icon-size: 16px; color: #9141ac;' });
@@ -889,7 +933,7 @@ export default class ResourcePulseExtension extends Extension {
         memCard.add_child(memHead);
         const memVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
         memCard.add_child(memVal);
-        const memSpark = new Sparkline(110, 38, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
+        const memSpark = new Sparkline(-1, 38, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
         memSpark.x_expand = true;
         memCard.add_child(memSpark);
         const memBar = new ProgressBar(4, 0.569, 0.255, 0.675);
@@ -906,7 +950,7 @@ export default class ResourcePulseExtension extends Extension {
         // 3. Battery Card
         const batCard = new St.BoxLayout({
             style: 'background-color: #192820; border: 1px solid rgba(46, 194, 126, 0.4); border-radius: 12px; padding: 12px;',
-            vertical: true, reactive: true, can_focus: true
+            vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const batHead = new St.BoxLayout({ style: 'spacing: 6px;' });
         const batIcon = new St.Icon({ icon_name: this._getIconName('battery'), style: 'icon-size: 16px; color: #2ec27e;' });
@@ -932,7 +976,7 @@ export default class ResourcePulseExtension extends Extension {
 
         // Secondary Grid Layout (2x2)
         const grid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
-        this._secondaryBox = new St.Widget({ layout_manager: grid, style_class: 'resource-pulse-secondary-grid' });
+        this._secondaryBox = new St.Widget({ layout_manager: grid, style_class: 'resource-pulse-secondary-grid', x_expand: true });
         this._overviewPage.add_child(this._secondaryBox);
 
         const secondaryMetrics = [
@@ -955,7 +999,7 @@ export default class ResourcePulseExtension extends Extension {
             const colors = bgMap[m.key] || { bg: '#222', border: 'rgba(255,255,255,0.15)' };
             const card = new St.BoxLayout({
                 style: `background-color: ${colors.bg}; border: 1px solid ${colors.border}; border-radius: 12px; padding: 12px;`,
-                vertical: true, reactive: true, can_focus: true
+                vertical: true, reactive: true, can_focus: true, x_expand: true
             });
 
             const iconColorMap = {
@@ -1080,7 +1124,8 @@ export default class ResourcePulseExtension extends Extension {
     _buildDetails() {
         this._detailArea = new St.BoxLayout({
             vertical: true,
-            style: 'padding: 16px; min-width: 440px; max-width: 480px;'
+            style_class: 'resource-pulse-detail-area',
+            x_expand: true
         });
 
         // Top bar for CPU detail header (matches Right Panel header)
@@ -1204,7 +1249,7 @@ export default class ResourcePulseExtension extends Extension {
         usageCard.add_child(usageHead);
 
         // CPU Detail Grid Graph
-        this._cpuSparkline = new Sparkline(400, 110, 100, false, {
+        this._cpuSparkline = new Sparkline(-1, 110, 100, false, {
             showGrid: true,
             color: [0.208, 0.518, 0.894, 1.0],
             fillOpacity: 0.1,
@@ -1332,7 +1377,7 @@ export default class ResourcePulseExtension extends Extension {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Memory Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._memSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._memSparkline = new Sparkline(-1, 100, 100, false, { showGrid: true, color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._memSparkline.x_expand = true;
         sparkCard.add_child(this._memSparkline);
         box.add_child(sparkCard);
@@ -1375,7 +1420,7 @@ export default class ResourcePulseExtension extends Extension {
         // Percent History
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Charge Level History (%)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._batSparkline = new Sparkline(400, 90, 100, false, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._batSparkline = new Sparkline(-1, 90, 100, false, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batSparkline.x_expand = true;
         sparkCard.add_child(this._batSparkline);
         box.add_child(sparkCard);
@@ -1383,7 +1428,7 @@ export default class ResourcePulseExtension extends Extension {
         // Power Rate History (W)
         const rateCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         rateCard.add_child(new St.Label({ text: 'Charge/Discharge Rate (W)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._batRateSparkline = new Sparkline(400, 90, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._batRateSparkline = new Sparkline(-1, 90, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batRateSparkline.x_expand = true;
         rateCard.add_child(this._batRateSparkline);
         box.add_child(rateCard);
@@ -1410,7 +1455,7 @@ export default class ResourcePulseExtension extends Extension {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Draw History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._pwrSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._pwrSparkline = new Sparkline(-1, 100, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._pwrSparkline.x_expand = true;
         sparkCard.add_child(this._pwrSparkline);
         box.add_child(sparkCard);
@@ -1438,7 +1483,7 @@ export default class ResourcePulseExtension extends Extension {
         // Read Rate Sparkline
         const readCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         readCard.add_child(new St.Label({ text: 'Read Rate (MB/s)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._dskReadSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskReadSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskReadSparkline.x_expand = true;
         readCard.add_child(this._dskReadSparkline);
         box.add_child(readCard);
@@ -1446,7 +1491,7 @@ export default class ResourcePulseExtension extends Extension {
         // Write Rate Sparkline
         const writeCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         writeCard.add_child(new St.Label({ text: 'Write Rate (MB/s)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._dskWriteSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskWriteSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskWriteSparkline.x_expand = true;
         writeCard.add_child(this._dskWriteSparkline);
         box.add_child(writeCard);
@@ -1477,7 +1522,7 @@ export default class ResourcePulseExtension extends Extension {
         // Download Sparkline
         const rxCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         rxCard.add_child(new St.Label({ text: 'Download Rate', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._netRxSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netRxSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._netRxSparkline.x_expand = true;
         rxCard.add_child(this._netRxSparkline);
         box.add_child(rxCard);
@@ -1485,7 +1530,7 @@ export default class ResourcePulseExtension extends Extension {
         // Upload Sparkline
         const txCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         txCard.add_child(new St.Label({ text: 'Upload Rate', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._netTxSparkline = new Sparkline(400, 80, 100, true, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netTxSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._netTxSparkline.x_expand = true;
         txCard.add_child(this._netTxSparkline);
         box.add_child(txCard);
@@ -1516,7 +1561,7 @@ export default class ResourcePulseExtension extends Extension {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Temperature History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._thmSparkline = new Sparkline(400, 100, 100, true, { showGrid: true, color: [1.0, 0.47, 0.0, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._thmSparkline = new Sparkline(-1, 100, 100, true, { showGrid: true, color: [1.0, 0.47, 0.0, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._thmSparkline.x_expand = true;
         sparkCard.add_child(this._thmSparkline);
         box.add_child(sparkCard);
@@ -1593,7 +1638,7 @@ export default class ResourcePulseExtension extends Extension {
         // 2. GPU Usage Sparkline Card
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'GPU Utilization (%)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._gpuSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._gpuSparkline = new Sparkline(-1, 100, 100, false, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._gpuSparkline.x_expand = true;
         sparkCard.add_child(this._gpuSparkline);
         box.add_child(sparkCard);
