@@ -76,5 +76,10 @@
       <summary>Trigger for opening the menu</summary>
       <description>Writing true opens the extension menu.</description>
     </key>
+    <key name="overview-card-order" type="as">
+      <default>['cpu', 'memory', 'battery', 'disk', 'network', 'thermal', 'power', 'gpu']</default>
+      <summary>Overview Card Order</summary>
+      <description>Display order of metric cards inside the overview panel.</description>
+    </key>
   </schema>
 </schemalist>
