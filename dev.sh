@@ -225,6 +225,28 @@ cmd_status() {
 }
 
 # ------------------------------------------------------------------------------
+# Command: Hardware Metric Accuracy & Dynamic Step Benchmark
+# ------------------------------------------------------------------------------
+cmd_benchmark() {
+    local SUITE="${1:-all}"
+    local ARG2="${2:-}"
+    log_title "Running Hardware Accuracy & Dynamic Load Benchmark ($SUITE)"
+
+    if ! command -v gjs >/dev/null 2>&1; then
+        log_error "gjs is required to execute the benchmark harness."
+        exit 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_error "python3 is required to generate synthetic hardware loads."
+        exit 1
+    fi
+
+    check_syntax
+
+    gjs -m "$SCRIPT_DIR/tests/benchmark_runner.js" "$SUITE" "$ARG2"
+}
+
+# ------------------------------------------------------------------------------
 # Command: Package extension (.zip)
 # ------------------------------------------------------------------------------
 cmd_pack() {
@@ -245,6 +267,7 @@ cmd_help() {
     echo -e "  ${GREEN}reload, reenable${RESET}   (Default) Compile schemas, verify symlink, and re-enable in current session"
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Run a headless automated test in isolated environment (default 5s)"
+    echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
     echo -e "  ${GREEN}help${RESET}               Show this help message\n"
@@ -262,6 +285,10 @@ case "${1:-reload}" in
         ;;
     test-headless|test-ci|verify|check)
         cmd_test_ci "${2:-5}"
+        ;;
+    benchmark|test-benchmark|bench)
+        shift
+        cmd_benchmark "$@"
         ;;
     status|log|logs)
         cmd_status

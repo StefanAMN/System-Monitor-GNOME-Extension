@@ -10,4 +10,5 @@ schemas/gschemas.compiled
 
 # Temporary / test files
 scratch/
-tests/
+__pycache__/
+*.pyc
