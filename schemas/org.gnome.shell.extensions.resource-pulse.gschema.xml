@@ -61,6 +61,16 @@
       <summary>Network Top Bar Format</summary>
       <description>Format of network metric in top bar ('download', 'upload', or 'both').</description>
     </key>
+    <key name="menu-custom-width" type="i">
+      <default>0</default>
+      <summary>Custom Menu Width</summary>
+      <description>User-resized width of the dropdown panel in pixels (0 for default).</description>
+    </key>
+    <key name="menu-custom-height" type="i">
+      <default>0</default>
+      <summary>Custom Menu Height</summary>
+      <description>User-resized height of the dropdown panel in pixels (0 for default).</description>
+    </key>
     <key name="action-open-menu" type="b">
       <default>false</default>
       <summary>Trigger for opening the menu</summary>
