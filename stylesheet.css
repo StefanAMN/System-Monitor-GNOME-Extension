@@ -436,3 +436,177 @@
     background-color: rgba(255, 255, 255, 0.06);
 }
 
+/* ── Corner Resize Handles ────────────────────────────────────────────────── */
+
+.resource-pulse-resize-handle {
+    background-color: transparent;
+}
+
+.resource-pulse-resize-handle:hover {
+    background-color: rgba(53, 132, 228, 0.08);
+}
+
+.resource-pulse-resize-handle:active {
+    background-color: rgba(53, 132, 228, 0.18);
+}
+
+.resource-pulse-resize-handle-se {
+    border-bottom-right-radius: 14px;
+}
+
+.resource-pulse-resize-handle-sw {
+    border-bottom-left-radius: 14px;
+}
+
+.resource-pulse-resize-handle-ne {
+    border-top-right-radius: 14px;
+}
+
+.resource-pulse-resize-handle-nw {
+    border-top-left-radius: 14px;
+}
+
+/* ── In-Panel 3-Dots Quick Menu Popover ───────────────────────────────────── */
+
+.resource-pulse-quick-menu {
+    background-color: #242424;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+.resource-pulse-quick-menu-item {
+    padding: 8px 12px;
+    border-radius: 8px;
+    spacing: 10px;
+    transition-duration: 100ms;
+}
+
+.resource-pulse-quick-menu-item:hover,
+.resource-pulse-quick-menu-item:focus {
+    background-color: rgba(255, 255, 255, 0.09);
+}
+
+.resource-pulse-quick-menu-item:active {
+    background-color: rgba(53, 132, 228, 0.25);
+}
+
+.resource-pulse-quick-menu-label {
+    font-size: 0.85em;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+/* ── In-Panel Settings Page ───────────────────────────────────────────────── */
+
+.resource-pulse-settings-page {
+    spacing: 12px;
+}
+
+.resource-pulse-settings-card {
+    background-color: #242424;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 10px;
+}
+
+.resource-pulse-settings-card-title {
+    font-size: 0.85em;
+    font-weight: bold;
+    color: #3584e4;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+}
+
+.resource-pulse-setting-row {
+    padding: 6px 0;
+    spacing: 12px;
+}
+
+.resource-pulse-setting-label {
+    font-size: 0.85em;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.resource-pulse-setting-desc {
+    font-size: 0.75em;
+    color: #8c8c94;
+    margin-top: 1px;
+}
+
+.resource-pulse-toggle-btn {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 4px 12px;
+    font-size: 0.78em;
+    font-weight: 600;
+    color: #a0a0b8;
+    transition-duration: 120ms;
+}
+
+.resource-pulse-toggle-btn:hover {
+    background-color: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+}
+
+.resource-pulse-toggle-btn.active {
+    background-color: #3584e4;
+    border-color: #3584e4;
+    color: #ffffff;
+}
+
+.resource-pulse-stepper-btn {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.85em;
+    font-weight: bold;
+    color: #ffffff;
+    transition-duration: 100ms;
+}
+
+.resource-pulse-stepper-btn:hover {
+    background-color: rgba(255, 255, 255, 0.16);
+}
+
+.resource-pulse-stepper-btn:active {
+    background-color: rgba(53, 132, 228, 0.3);
+}
+
+.resource-pulse-action-btn {
+    background-color: #3584e4;
+    border: 1px solid rgba(53, 132, 228, 0.8);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 0.8em;
+    font-weight: bold;
+    color: #ffffff;
+    transition-duration: 120ms;
+}
+
+.resource-pulse-action-btn:hover {
+    background-color: #4a95ea;
+}
+
+.resource-pulse-action-btn:active {
+    background-color: #276fc2;
+}
+
+.resource-pulse-action-btn:disabled {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: transparent;
+    color: #666677;
+}
+
+.resource-pulse-status-label {
+    font-size: 0.75em;
+    color: #2ec27e;
+    font-weight: 600;
+}
+
