@@ -1,0 +1,6 @@
+{
+  "uuid": "rp-ui-driver@resource-pulse.test",
+  "name": "Resource Pulse UI Test Driver",
+  "description": "Test-only: drives the Resource Pulse menu through every tab and a disable/enable cycle. Never installed for users.",
+  "shell-version": ["50"]
+}

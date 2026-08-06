@@ -259,7 +259,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 const proc = Gio.Subprocess.new(['pkexec', 'bash', '-c', script], Gio.SubprocessFlags.NONE);
                 proc.wait_async(null, (obj, res) => {
                     try {
-                        obj.wait_finish(res);
+                        obj.wait_check_finish(res);
                         powerFixRow.subtitle = 'Permissions successfully updated!';
                         powerFixButton.sensitive = false;
                     } catch (e) {

@@ -21,42 +21,7 @@ import { NetworkSampler } from './lib/network.js';
 import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { runSubprocess } from './lib/utils.js';
-
-// ─── Formatters ───────────────────────────────────────────────────────────────
-
-function formatBytes(bytes, useGiB = false) {
-    if (bytes === 0) return '0 B';
-    const k = useGiB ? 1024 : 1000;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    const val = bytes / Math.pow(k, i);
-    const suffix = useGiB && i > 0
-        ? sizes[i].replace('K', 'Ki').replace('M', 'Mi').replace('G', 'Gi').replace('T', 'Ti')
-        : sizes[i];
-    return `${val.toFixed(1)} ${suffix}`;
-}
-
-function formatSpeed(bytesPerSec) {
-    if (bytesPerSec === 0) return '0 B/s';
-    const k = 1024;
-    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-    const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-    return `${(bytesPerSec / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-}
-
-function formatTemp(celsius, unit = 'C') {
-    if (unit === 'F') return `${Math.round((celsius * 9) / 5 + 32)}°F`;
-    return `${Math.round(celsius)}°C`;
-}
-
-function formatUptime(seconds) {
-    const d = Math.floor(seconds / 86400);
-    const h = Math.floor((seconds % 86400) / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (d > 0) return `${d}d ${h}h`;
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
-}
+import { formatBytes, formatSpeed, formatTemp, formatUptime } from './lib/format.js';
 
 // ─── Custom Cairo Widgets ─────────────────────────────────────────────────────
 
@@ -603,6 +568,8 @@ export default class ResourcePulseExtension extends Extension {
         }
         this._resizeHandles = {};
 
+        // Destroying an open menu leaves the shell allocating a disposed BoxPointer.
+        this._indicator.menu.close(false);
         this._indicator.destroy();
         this._indicator = null;
         this._indicatorBox = null;
@@ -626,6 +593,14 @@ export default class ResourcePulseExtension extends Extension {
         this._menuSection = null;
         this._coreWidgets = null;
         this._procWidgets = [];
+        this._memProcWidgets = null;
+        this._dskMountRows = null;
+        this._netIfaceRows = null;
+        this._thmSensorRows = null;
+        this._thmFanRows = null;
+        this._pwrStats = null;
+        this._lastCpu = this._lastMem = this._lastBat = this._lastDsk = null;
+        this._lastNet = this._lastThm = this._lastGpu = this._lastPwr = null;
         this._cpu = null;
         this._mem = null;
         this._bat = null;
@@ -1431,7 +1406,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             const proc = Gio.Subprocess.new(['pkexec', 'bash', '-c', script], Gio.SubprocessFlags.NONE);
             proc.wait_async(null, (obj, res) => {
                 try {
-                    obj.wait_finish(res);
+                    obj.wait_check_finish(res);
                     if (statusLabel) {
                         statusLabel.text = '✓ RAPL permissions successfully updated!';
                         statusLabel.style = 'color: #2ec27e;';
@@ -1986,11 +1961,10 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 
         const cancelHoldTimer = () => {
             if (holdTimerId) {
+                if (this._dragHoldTimerId === holdTimerId)
+                    this._dragHoldTimerId = null;
                 GLib.source_remove(holdTimerId);
                 holdTimerId = null;
-            }
-            if (this._dragHoldTimerId === holdTimerId) {
-                this._dragHoldTimerId = null;
             }
         };
 
@@ -2728,7 +2702,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const val = new St.Label({ text: valueText, style: 'font-size: 0.85em; color: #ffffff; font-weight: 600;' });
         row.add_child(lbl);
         row.add_child(val);
-        return { row, val };
+        return { row, lbl, val };
     }
 
     _buildCpuDetails() {
