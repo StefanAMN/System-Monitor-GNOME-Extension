@@ -3,8 +3,6 @@ import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
-import GObject from 'gi://GObject';
-import Cairo from 'cairo';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -21,322 +19,30 @@ import { NetworkSampler } from './lib/network.js';
 import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { runSubprocess } from './lib/utils.js';
+import { RingBuffer } from './lib/ringbuffer.js';
+import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
 import { formatBytes, formatSpeed, formatTemp, formatUptime } from './lib/format.js';
 
-// ─── Custom Cairo Widgets ─────────────────────────────────────────────────────
+// ─── Polling / history constants ─────────────────────────────────────────────
 
-const ResizeHandle = GObject.registerClass({
-    GTypeName: 'ResourcePulseResizeHandle',
-}, class ResizeHandle extends St.DrawingArea {
-    _init(corner = 'se', size = 32, cursor = Clutter.CursorType.DEFAULT) {
-        super._init({
-            style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${corner}`,
-            reactive: true,
-            track_hover: true,
-            can_focus: false,
-            width: size,
-            height: size
-        });
-        this.set_cursor_type(cursor);
-        this._corner = corner;
-        this._hovered = false;
-        this._active = false;
+const HISTORY_CAPACITY = 60;
+// On-demand refreshes closer than this to the previous sample reuse it:
+// counter deltas over a few milliseconds are mostly noise.
+const MIN_RESAMPLE_US = 500000;
+const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 
-        // Set pivot point to corner apex: (1.0, 1.0) for SE, (0.0, 1.0) for SW
-        const pivotX = corner === 'se' ? 1.0 : 0.0;
-        const pivotY = 1.0;
-        this.set_pivot_point(pivotX, pivotY);
-
-        this.connect('notify::hover', () => {
-            this._hovered = this.hover;
-            this.remove_all_transitions();
-            if (!this.get_stage() || !this.is_mapped()) return;
-            if (this._hovered && !this._active) {
-                this.ease({
-                    scale_x: 1.15,
-                    scale_y: 1.15,
-                    duration: 180,
-                    mode: Clutter.AnimationMode.EASE_OUT_BACK
-                });
-            } else if (!this._active) {
-                this.ease({
-                    scale_x: 1.0,
-                    scale_y: 1.0,
-                    duration: 150,
-                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
-                });
-            }
-            this.queue_repaint();
-        });
-        this.connect('repaint', this._draw.bind(this));
-    }
-
-    setActive(active) {
-        if (this._active !== active) {
-            this._active = active;
-            this.remove_all_transitions();
-            if (active) {
-                this.ease({
-                    scale_x: 1.25,
-                    scale_y: 1.25,
-                    duration: 120,
-                    mode: Clutter.AnimationMode.EASE_OUT_CUBIC
-                });
-            } else {
-                this.ease({
-                    scale_x: this._hovered ? 1.15 : 1.0,
-                    scale_y: this._hovered ? 1.15 : 1.0,
-                    duration: 250,
-                    mode: Clutter.AnimationMode.EASE_OUT_BACK
-                });
-            }
-            if (this.is_mapped()) this.queue_repaint();
-        }
-    }
-
-    _draw(area) {
-        // No static resize icon! The corner only illuminates when hovered or active.
-        if (!this._hovered && !this._active) return;
-
-        const cr = area.get_context();
-        const [w, h] = area.get_surface_size();
-        cr.save();
-
-        const cornerX = this._corner === 'se' ? w : 0;
-        const cornerY = h;
-        const radius = Math.max(w, h);
-
-        // Radiant radial corner illumination
-        const glow = new Cairo.RadialGradient(cornerX, cornerY, 0, cornerX, cornerY, radius);
-        if (this._active) {
-            glow.addColorStopRGBA(0.0, 0.208, 0.518, 0.894, 0.65);
-            glow.addColorStopRGBA(0.5, 0.208, 0.518, 0.894, 0.28);
-            glow.addColorStopRGBA(1.0, 0.208, 0.518, 0.894, 0.0);
-        } else {
-            glow.addColorStopRGBA(0.0, 0.208, 0.518, 0.894, 0.40);
-            glow.addColorStopRGBA(0.5, 0.208, 0.518, 0.894, 0.15);
-            glow.addColorStopRGBA(1.0, 0.208, 0.518, 0.894, 0.0);
-        }
-
-        cr.setSource(glow);
-        cr.rectangle(0, 0, w, h);
-        cr.fill();
-
-        // Sleek corner accent highlight arc matching the panel corner radius
-        cr.setLineWidth(2.5);
-        cr.setLineCap(Cairo.LineCap.ROUND);
-        if (this._active) {
-            cr.setSourceRGBA(0.40, 0.70, 1.0, 0.95);
-        } else {
-            cr.setSourceRGBA(0.40, 0.70, 1.0, 0.70);
-        }
-
-        const arcRadius = 14;
-        if (this._corner === 'se') {
-            cr.arc(w - arcRadius, h - arcRadius, arcRadius - 1, 0, Math.PI / 2);
-        } else {
-            cr.arc(arcRadius, h - arcRadius, arcRadius - 1, Math.PI / 2, Math.PI);
-        }
-        cr.stroke();
-
-        cr.restore();
-    }
-});
-
-const Sparkline = GObject.registerClass({
-    GTypeName: 'ResourcePulseSparkline',
-}, class Sparkline extends St.DrawingArea {
-    _init(width = -1, height = 100, maxVal = 100, autoScale = false, options = {}) {
-        const initParams = {
-            style_class: 'resource-pulse-sparkline',
-            x_expand: true,
-            height: height
-        };
-        if (width > 0) initParams.width = width;
-        super._init(initParams);
-        this.history = [];
-        this.maxVal = maxVal;
-        this.autoScale = autoScale;
-        this.scaleLabel = '';
-        this.options = Object.assign({
-            showGrid: false,
-            color: [0.208, 0.518, 0.894, 1.0], // Default blue
-            fillOpacity: 0.12,
-            lineWidth: 1.5,
-            gridRows: 4,
-            paddingLeft: 0,
-            paddingRight: 0,
-            paddingTop: options.showGrid ? 12 : 2,
-            paddingBottom: 0
-        }, options);
-        this.connect('repaint', this._draw.bind(this));
-        this.connect('notify::mapped', () => {
-            if (this.is_mapped()) this.queue_repaint();
-        });
-    }
-
-    addSample(val) {
-        this.history.push(val);
-        if (this.history.length > 60) this.history.shift();
-        if (this.is_mapped()) this.queue_repaint();
-    }
-
-    setScaleLabel(label) {
-        if (this.scaleLabel !== label) {
-            this.scaleLabel = label;
-            if (this.is_mapped()) this.queue_repaint();
-        }
-    }
-
-    _draw(area) {
-        const cr = area.get_context();
-        const [w, h] = area.get_surface_size();
-        cr.save();
-
-        const opt = this.options;
-        const color = opt.color;
-        const padL = opt.paddingLeft || 0;
-        const padR = opt.paddingRight || 0;
-        const padT = opt.paddingTop || 0;
-        const padB = opt.paddingBottom || 0;
-
-        const graphW = w - padL - padR;
-        const graphH = h - padT - padB;
-
-        // Draw background grid if showGrid is true
-        if (opt.showGrid) {
-            cr.setLineWidth(1);
-            cr.setSourceRGBA(1, 1, 1, 0.08); // Grid color
-
-            // Border
-            cr.rectangle(padL, padT, graphW, graphH);
-            cr.stroke();
-
-            // Horizontal lines and labels
-            const gridRows = opt.gridRows || 4;
-            cr.setFontSize(10);
-            cr.selectFontFace("Sans", Cairo.FontSlant.NORMAL, Cairo.FontWeight.NORMAL);
-            
-            for (let i = 0; i <= gridRows; i++) {
-                const ratio = i / gridRows;
-                const y = padT + graphH - (ratio * graphH);
-                
-                if (i > 0 && i < gridRows) {
-                    cr.moveTo(padL, y);
-                    cr.lineTo(padL + graphW, y);
-                    cr.stroke();
-                }
-
-                const pct = Math.round(ratio * this.maxVal);
-                const lbl = `${pct}%`;
-                const extents = cr.textExtents(lbl);
-                cr.setSourceRGBA(1, 1, 1, 0.6);
-                cr.moveTo(padL - extents.width - 6, y + extents.height / 2 - 1);
-                cr.showText(lbl);
-                cr.setSourceRGBA(1, 1, 1, 0.08); // Reset grid color
-            }
-
-            // X-axis labels (60s and 0s)
-            cr.setSourceRGBA(1, 1, 1, 0.6);
-            const lblLeft = "60s";
-            const extL = cr.textExtents(lblLeft);
-            cr.moveTo(padL, padT + graphH + extL.height + 4);
-            cr.showText(lblLeft);
-
-            const lblRight = "0s";
-            const extR = cr.textExtents(lblRight);
-            cr.moveTo(padL + graphW - extR.width, padT + graphH + extR.height + 4);
-            cr.showText(lblRight);
-        }
-
-        if (this.history.length < 2) { cr.restore(); return; }
-
-        let max = this.maxVal;
-        if (this.autoScale) {
-            const localMax = Math.max(...this.history);
-            if (localMax > max) max = localMax;
-        }
-        if (max <= 0) max = 1;
-
-        const step = graphW / 59;
-        const getPoint = (i) => {
-            const val = this.history[i];
-            const x = padL + i * step;
-            const y = padT + graphH - (val / max) * graphH;
-            return [x, y];
-        };
-
-        // Draw gradient area
-        cr.moveTo(padL, padT + graphH);
-        for (let i = 0; i < this.history.length; i++) {
-            const [x, y] = getPoint(i);
-            cr.lineTo(x, y);
-        }
-        cr.lineTo(padL + (this.history.length - 1) * step, padT + graphH);
-        cr.closePath();
-        cr.setSourceRGBA(color[0], color[1], color[2], opt.fillOpacity);
-        cr.fill();
-
-        // Draw line
-        cr.setLineWidth(opt.lineWidth);
-        cr.setSourceRGBA(color[0], color[1], color[2], color[3]);
-        for (let i = 0; i < this.history.length; i++) {
-            const [x, y] = getPoint(i);
-            if (i === 0) cr.moveTo(x, y);
-            else cr.lineTo(x, y);
-        }
-        cr.stroke();
-
-        cr.restore();
-    }
-});
-
-const ProgressBar = GObject.registerClass({
-    GTypeName: 'ResourcePulseProgressBar',
-}, class ProgressBar extends St.DrawingArea {
-    _init(height = 6, r = 0.2, g = 0.51, b = 0.89) {
-        super._init({ style_class: 'resource-pulse-progress-track', height, x_expand: true });
-        this.pct = 0;
-        this.r = r; this.g = g; this.b = b;
-        this.connect('repaint', this._draw.bind(this));
-        this.connect('notify::mapped', () => {
-            if (this.is_mapped()) this.queue_repaint();
-        });
-    }
-    setColor(r, g, b) {
-        if (this.r !== r || this.g !== g || this.b !== b) {
-            this.r = r; this.g = g; this.b = b;
-            if (this.is_mapped()) this.queue_repaint();
-        }
-    }
-    setPercent(pct) {
-        pct = Math.max(0, Math.min(100, pct));
-        if (this.pct !== pct) {
-            this.pct = pct;
-            if (this.is_mapped()) this.queue_repaint();
-        }
-    }
-    _draw(area) {
-        const cr = area.get_context();
-        const [w, h] = area.get_surface_size();
-        cr.save();
-        
-        // Track
-        cr.setSourceRGBA(0, 0, 0, 0.3);
-        cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
-        cr.arc(w - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
-        cr.fill();
-
-        // Fill
-        const fillW = Math.max(h, w * (this.pct / 100));
-        cr.setSourceRGBA(this.r, this.g, this.b, 1.0);
-        cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
-        cr.arc(fillW - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
-        cr.fill();
-        
-        cr.restore();
-    }
-});
+const WATT_SCALE = { autoScale: true, maxVal: 10, formatValue: v => `${v < 10 ? v.toFixed(1) : Math.round(v)}W` };
+const MBS_SCALE = { autoScale: true, maxVal: 1, formatValue: v => (v < 10 ? v.toFixed(1) : `${Math.round(v)}`) };
+const KBS_SCALE = { autoScale: true, maxVal: 10, formatValue: v => (v >= 1024 ? `${(v / 1024).toFixed(1)}M` : `${Math.round(v)}K`) };
+// Per-history axis: unit of the stored samples and the floor of the auto scale.
+const SPARK_SCALES = {
+    batRate: WATT_SCALE,
+    pwr: WATT_SCALE,
+    dskRead: MBS_SCALE,
+    dskWrite: MBS_SCALE,
+    netRx: KBS_SCALE,
+    netTx: KBS_SCALE
+};
 
 // ─── Extension Class ──────────────────────────────────────────────────────────
 
@@ -353,6 +59,21 @@ export default class ResourcePulseExtension extends Extension {
         this._net = new NetworkSampler();
         this._thm = new ThermalSampler();
         this._gpu = new GpuSampler();
+
+        // Poll state. The generation token invalidates polls that are still
+        // awaiting I/O when the extension is disabled or re-enabled.
+        this._gen = (this._gen ?? 0) + 1;
+        this._pollInFlight = false;
+        this._recordPending = false;
+        this._lastPollTime = 0;
+        this._lastData = null;
+        this._deferredPollId = null;
+
+        // Time-series history: fixed-capacity buffers owned here, painted by sparklines.
+        this._hist = {};
+        for (const key of HISTORY_KEYS) this._hist[key] = new RingBuffer(HISTORY_CAPACITY);
+        this._histStamp = {};
+        this._sparklines = [];
 
         // Tooltip state
         this._tooltip = null;
@@ -525,9 +246,16 @@ export default class ResourcePulseExtension extends Extension {
         if (this._pollId) this._settings.disconnect(this._pollId);
         if (this._openMenuId) this._settings.disconnect(this._openMenuId);
 
+        this._gen++;
+        this._pollInFlight = false;
+        this._lastData = null;
         if (this._timeoutId) {
             GLib.source_remove(this._timeoutId);
             this._timeoutId = null;
+        }
+        if (this._deferredPollId) {
+            GLib.source_remove(this._deferredPollId);
+            this._deferredPollId = null;
         }
         if (this._openStateId) this._indicator.menu.disconnect(this._openStateId);
         if (this._monitorsChangedId) {
@@ -594,6 +322,9 @@ export default class ResourcePulseExtension extends Extension {
         this._coreWidgets = null;
         this._procWidgets = [];
         this._memProcWidgets = null;
+        this._hist = null;
+        this._histStamp = null;
+        this._sparklines = [];
         this._dskMountRows = null;
         this._netIfaceRows = null;
         this._thmSensorRows = null;
@@ -1390,6 +1121,7 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _runPowerFix(statusLabel = null, button = null) {
+        const gen = this._gen;
         if (button) button.reactive = false;
         if (statusLabel) {
             statusLabel.text = 'Requesting administrator permission...';
@@ -1404,9 +1136,16 @@ udevadm trigger
 chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 `;
             const proc = Gio.Subprocess.new(['pkexec', 'bash', '-c', script], Gio.SubprocessFlags.NONE);
-            proc.wait_async(null, (obj, res) => {
+            proc.wait_check_async(null, (obj, res) => {
+                let failure = null;
                 try {
                     obj.wait_check_finish(res);
+                } catch (e) {
+                    failure = e;
+                }
+                if (gen !== this._gen) return;
+                try {
+                    if (failure) throw failure;
                     if (statusLabel) {
                         statusLabel.text = '✓ RAPL permissions successfully updated!';
                         statusLabel.style = 'color: #2ec27e;';
@@ -1541,91 +1280,187 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 
     _startPolling() {
         if (this._timeoutId) GLib.source_remove(this._timeoutId);
-        const interval = this._settings.get_int('poll-interval') || 2;
+        const interval = Math.max(1, this._settings.get_int('poll-interval') || 2);
+        this._intervalUs = interval * 1000000;
+
+        // Samples taken at another cadence would distort the time axis.
+        for (const key of HISTORY_KEYS) this._hist[key].clear();
+        const span = interval * HISTORY_CAPACITY;
+        const spanLabel = span > 60 && span % 60 === 0 ? `${span / 60}m` : `${span}s`;
+        for (const spark of this._sparklines) spark.setSpanLabel(spanLabel);
+
         this._poll();
         this._timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
-            this._poll();
+            this._poll(true);
             return GLib.SOURCE_CONTINUE;
         });
     }
 
-    async _poll() {
+    _deferPoll(waitUs) {
+        if (this._deferredPollId) return;
+        this._deferredPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.ceil(waitUs / 1000), () => {
+            this._deferredPollId = null;
+            this._poll();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _render(data) {
+        this._updateTopBarUI(data);
+        this._updateDashboardUI(data);
+    }
+
+    _pushHistory(key, value, now) {
+        // A metric that was not sampled for a while (unpinned with the menu
+        // closed) restarts its graph instead of joining stale and fresh points.
+        const last = this._histStamp[key] || 0;
+        if (last && now - last > 2.5 * this._intervalUs) this._hist[key].clear();
+        this._histStamp[key] = now;
+        this._hist[key].push(value);
+    }
+
+    _recordHistory(data, need, now) {
+        const MB = 1024 * 1024;
+        if (need.cpu) this._pushHistory('cpu', data.cpu.total, now);
+        if (need.mem) this._pushHistory('mem', data.mem.percent, now);
+        if (need.bat && data.bat.present) {
+            this._pushHistory('bat', data.bat.percent, now);
+            this._pushHistory('batRate', data.bat.energyRate || 0, now);
+        }
+        if (need.pwr && (data.pwr.raplSupported || data.pwr.systemPower !== null))
+            this._pushHistory('pwr', data.pwr.systemPower ?? data.pwr.packagePower ?? 0, now);
+        if (need.dsk) {
+            this._pushHistory('dskRead', data.dsk.readRate / MB, now);
+            this._pushHistory('dskWrite', data.dsk.writeRate / MB, now);
+        }
+        if (need.net) {
+            this._pushHistory('netRx', data.net.total.rxRate / 1024, now);
+            this._pushHistory('netTx', data.net.total.txRate / 1024, now);
+        }
+        if (need.thm) this._pushHistory('thm', data.thm.packageTemp, now);
+        if (need.gpu && data.gpu.present) this._pushHistory('gpu', data.gpu.percent, now);
+    }
+
+    async _sampleProcesses(byMemory) {
+        const processes = [];
+        const sortFlag = byMemory ? '--sort=-pmem' : '--sort=-pcpu';
+        const res = await runSubprocess(['ps', '-eo', 'pid,pcpu,pmem,comm', '--no-headers', sortFlag]);
+        if (!res.success || !res.stdout) return processes;
+        const lines = res.stdout.trim().split('\n');
+        for (let i = 0; i < Math.min(lines.length, 8) && processes.length < 5; i++) {
+            const parts = lines[i].trim().split(/\s+/);
+            if (parts.length < 4) continue;
+            const comm = parts.slice(3).join(' ');
+            if (comm === 'ps' || comm === 'sh') continue;
+            processes.push({ pid: parts[0], cpu: parseFloat(parts[1]) || 0, mem: parseFloat(parts[2]) || 0, comm });
+        }
+        return processes;
+    }
+
+    /**
+     * Sample and render. Only one poll runs at a time.
+     * tick=true is the periodic timer sample, the only kind recorded in
+     * history so the time axis stays uniform. tick=false is an on-demand
+     * refresh (menu opened, setting changed, refresh button).
+     */
+    async _poll(tick = false) {
         if (!this._settings || !this._indicator) return;
+        const now = GLib.get_monotonic_time();
+        if (tick) {
+            if (this._pollInFlight) {
+                // The running on-demand sample stands in for this tick.
+                this._recordPending = true;
+                return;
+            }
+        } else {
+            const wait = this._pollInFlight
+                ? MIN_RESAMPLE_US
+                : MIN_RESAMPLE_US - (now - this._lastPollTime);
+            if (wait > 0) {
+                if (this._lastData) this._render(this._lastData);
+                this._deferPoll(wait);
+                return;
+            }
+        }
+
+        const gen = this._gen;
+        this._pollInFlight = true;
+        this._lastPollTime = now;
         try {
             const pinned = this._getStrv('pinned-metrics', ['cpu', 'memory']);
             const isOpen = this._menuOpen;
+            const tab = this._activeTab;
 
-            const isDetailedCpu = isOpen && this._activeTab === 'cpu';
-            const isDetailedMem = isOpen && this._activeTab === 'memory';
-            const isDetailedDsk = isOpen && (this._activeTab === 'disk' || this._activeTab === 'overview');
-            const isDetailedThm = isOpen && (this._activeTab === 'thermal' || this._activeTab === 'overview');
+            const isDetailedCpu = isOpen && tab === 'cpu';
+            const isDetailedMem = isOpen && tab === 'memory';
+            const isDetailedDsk = isOpen && tab === 'disk';
+            const isDetailedThm = isOpen && tab === 'thermal';
 
-            const needCpu = isOpen || pinned.includes('cpu');
-            const needMem = isOpen || pinned.includes('memory');
-            const needBat = isOpen || pinned.includes('battery') || pinned.includes('power');
-            const needDsk = isOpen || pinned.includes('disk');
-            const needNet = isOpen || pinned.includes('network');
-            const needThm = isOpen || pinned.includes('thermal');
-            const needGpu = isOpen || pinned.includes('gpu');
-            const needPwr = isOpen || pinned.includes('power');
+            // While the menu is open every sampler runs so all graphs keep a
+            // continuous history; only the expensive detail reads follow the tab.
+            const need = {
+                cpu: isOpen || pinned.includes('cpu'),
+                mem: isOpen || pinned.includes('memory'),
+                bat: isOpen || pinned.includes('battery') || pinned.includes('power'),
+                dsk: isOpen || pinned.includes('disk'),
+                net: isOpen || pinned.includes('network'),
+                thm: isOpen || pinned.includes('thermal'),
+                gpu: isOpen || pinned.includes('gpu'),
+                pwr: isOpen || pinned.includes('power')
+            };
 
             const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
-                needCpu ? this._cpu.sample(isDetailedCpu) : Promise.resolve(this._lastCpu || { total: 0, cores: [] }),
-                needMem ? this._mem.sample() : Promise.resolve(this._lastMem || { percent: 0, total: 0, used: 0 }),
-                needBat ? this._bat.sample() : Promise.resolve(this._lastBat || { present: false }),
-                needDsk ? this._dsk.sample(isDetailedDsk) : Promise.resolve(this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 }),
-                needNet ? this._net.sample() : Promise.resolve(this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} }),
-                needThm ? this._thm.sample(isDetailedThm) : Promise.resolve(this._lastThm || { packageTemp: 0, sensors: [], fans: [] }),
-                needGpu ? this._gpu.sample() : Promise.resolve(this._lastGpu || { present: false, percent: 0 })
+                need.cpu ? this._cpu.sample(isDetailedCpu) : this._lastCpu || { total: 0, cores: [] },
+                need.mem ? this._mem.sample() : this._lastMem || { percent: 0, total: 0, used: 0 },
+                need.bat ? this._bat.sample() : this._lastBat || { present: false },
+                need.dsk ? this._dsk.sample(isDetailedDsk) : this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 },
+                need.net ? this._net.sample() : this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} },
+                need.thm ? this._thm.sample(isDetailedThm) : this._lastThm || { packageTemp: 0, sensors: [], fans: [] },
+                need.gpu ? this._gpu.sample() : this._lastGpu || { present: false, percent: 0 }
             ]);
+            if (gen !== this._gen) return;
 
-            if (!this._settings || !this._indicator) return;
+            if (need.cpu) this._lastCpu = cpu;
+            if (need.mem) this._lastMem = mem;
+            if (need.bat) this._lastBat = bat;
+            if (need.dsk) this._lastDsk = dsk;
+            if (need.net) this._lastNet = net;
+            if (need.thm) this._lastThm = thm;
+            if (need.gpu) this._lastGpu = gpu;
 
-            if (needCpu) this._lastCpu = cpu;
-            if (needMem) this._lastMem = mem;
-            if (needBat) this._lastBat = bat;
-            if (needDsk) this._lastDsk = dsk;
-            if (needNet) this._lastNet = net;
-            if (needThm) this._lastThm = thm;
-            if (needGpu) this._lastGpu = gpu;
-
-            const pwr = needPwr ? await this._pwr.sample(bat) : (this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null });
-            if (!this._settings || !this._indicator) return;
-            if (needPwr) this._lastPwr = pwr;
+            const pwr = need.pwr
+                ? await this._pwr.sample(bat)
+                : this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null };
+            if (gen !== this._gen) return;
+            if (need.pwr) this._lastPwr = pwr;
 
             let processes = [];
-            if (isOpen && (isDetailedCpu || isDetailedMem)) {
-                try {
-                    const sortFlag = isDetailedMem ? '--sort=-pmem' : '--sort=-pcpu';
-                    const res = await runSubprocess(['ps', '-eo', 'pid,pcpu,pmem,comm', '--no-headers', sortFlag]);
-                    if (!this._settings || !this._indicator) return;
-                    if (res.success && res.stdout) {
-                        const lines = res.stdout.trim().split('\n');
-                        for (let i = 0; i < Math.min(lines.length, 8); i++) {
-                            const parts = lines[i].trim().split(/\s+/);
-                            if (parts.length >= 4) {
-                                const pid = parts[0];
-                                const cpuPct = parseFloat(parts[1]) || 0;
-                                const memPct = parseFloat(parts[2]) || 0;
-                                const comm = parts.slice(3).join(' ');
-                                if (comm !== 'ps' && comm !== 'sh') {
-                                    processes.push({ pid, cpu: cpuPct, mem: memPct, comm });
-                                }
-                            }
-                        }
-                        processes = processes.slice(0, 5);
-                    }
-                } catch (e) {}
+            if (isDetailedCpu || isDetailedMem) {
+                processes = await this._sampleProcesses(isDetailedMem);
+                if (gen !== this._gen) return;
             }
 
-            if (!this._settings || !this._indicator) return;
-
             const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes };
-            this._updateTopBarUI(data);
-            this._updateDashboardUI(data);
+            if (tick || this._recordPending) this._recordHistory(data, need, now);
+            this._lastData = data;
+            this._render(data);
         } catch (e) {
             console.error(`ResourcePulse poll error: ${e.message}`);
+        } finally {
+            if (gen === this._gen) {
+                this._pollInFlight = false;
+                this._recordPending = false;
+            }
         }
+    }
+
+    _newSparkline(key, height, options = {}) {
+        const scale = key === 'thm'
+            ? { paddingLeft: 38, formatValue: v => formatTemp(v, this._settings?.get_string('unit-temp') || 'C') }
+            : SPARK_SCALES[key];
+        const spark = new Sparkline(this._hist[key], height, Object.assign({}, options, scale));
+        this._sparklines.push(spark);
+        return spark;
     }
 
     _getIconName(key) {
@@ -2390,7 +2225,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         cpuCard.add_child(cpuHead);
         const cpuVal = new St.Label({ text: '--%', style: 'font-size: 1.7em; font-weight: bold; color: #ffffff;' });
         cpuCard.add_child(cpuVal);
-        const cpuSpark = new Sparkline(-1, 30, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
+        const cpuSpark = this._newSparkline('cpu', 30, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
         cpuSpark.x_expand = true;
         cpuCard.add_child(cpuSpark);
         const cpuBar = new ProgressBar(4, 0.208, 0.518, 0.894);
@@ -2414,7 +2249,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         memCard.add_child(memHead);
         const memVal = new St.Label({ text: '--%', style: 'font-size: 1.7em; font-weight: bold; color: #ffffff;' });
         memCard.add_child(memVal);
-        const memSpark = new Sparkline(-1, 30, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
+        const memSpark = this._newSparkline('mem', 30, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
         memSpark.x_expand = true;
         memCard.add_child(memSpark);
         const memBar = new ProgressBar(4, 0.569, 0.255, 0.675);
@@ -2717,7 +2552,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         usageCard.add_child(usageHead);
 
         // CPU Detail Grid Graph
-        this._cpuSparkline = new Sparkline(-1, 110, 100, false, {
+        this._cpuSparkline = this._newSparkline('cpu', 110, {
             showGrid: true,
             color: [0.208, 0.518, 0.894, 1.0],
             fillOpacity: 0.1,
@@ -2845,7 +2680,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Memory Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._memSparkline = new Sparkline(-1, 100, 100, false, { showGrid: true, color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._memSparkline = this._newSparkline('mem', 100, { showGrid: true, color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._memSparkline.x_expand = true;
         sparkCard.add_child(this._memSparkline);
         box.add_child(sparkCard);
@@ -2888,7 +2723,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // Percent History
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Charge Level History (%)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._batSparkline = new Sparkline(-1, 90, 100, false, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._batSparkline = this._newSparkline('bat', 90, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batSparkline.x_expand = true;
         sparkCard.add_child(this._batSparkline);
         box.add_child(sparkCard);
@@ -2896,7 +2731,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // Power Rate History (W)
         const rateCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         rateCard.add_child(new St.Label({ text: 'Charge/Discharge Rate (W)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._batRateSparkline = new Sparkline(-1, 90, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._batRateSparkline = this._newSparkline('batRate', 90, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batRateSparkline.x_expand = true;
         rateCard.add_child(this._batRateSparkline);
         box.add_child(rateCard);
@@ -2923,7 +2758,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Draw History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._pwrSparkline = new Sparkline(-1, 100, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._pwrSparkline = this._newSparkline('pwr', 100, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._pwrSparkline.x_expand = true;
         sparkCard.add_child(this._pwrSparkline);
         box.add_child(sparkCard);
@@ -2951,7 +2786,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // Read Rate Sparkline
         const readCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         readCard.add_child(new St.Label({ text: 'Read Rate (MB/s)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._dskReadSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskReadSparkline = this._newSparkline('dskRead', 80, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskReadSparkline.x_expand = true;
         readCard.add_child(this._dskReadSparkline);
         box.add_child(readCard);
@@ -2959,7 +2794,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // Write Rate Sparkline
         const writeCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         writeCard.add_child(new St.Label({ text: 'Write Rate (MB/s)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._dskWriteSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskWriteSparkline = this._newSparkline('dskWrite', 80, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskWriteSparkline.x_expand = true;
         writeCard.add_child(this._dskWriteSparkline);
         box.add_child(writeCard);
@@ -2990,7 +2825,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // Download Sparkline
         const rxCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         rxCard.add_child(new St.Label({ text: 'Download Rate', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._netRxSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netRxSparkline = this._newSparkline('netRx', 80, { showGrid: true, color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._netRxSparkline.x_expand = true;
         rxCard.add_child(this._netRxSparkline);
         box.add_child(rxCard);
@@ -2998,7 +2833,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // Upload Sparkline
         const txCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         txCard.add_child(new St.Label({ text: 'Upload Rate', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._netTxSparkline = new Sparkline(-1, 80, 100, true, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netTxSparkline = this._newSparkline('netTx', 80, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._netTxSparkline.x_expand = true;
         txCard.add_child(this._netTxSparkline);
         box.add_child(txCard);
@@ -3029,7 +2864,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'Temperature History', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._thmSparkline = new Sparkline(-1, 100, 100, true, { showGrid: true, color: [1.0, 0.47, 0.0, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._thmSparkline = this._newSparkline('thm', 100, { showGrid: true, color: [1.0, 0.47, 0.0, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._thmSparkline.x_expand = true;
         sparkCard.add_child(this._thmSparkline);
         box.add_child(sparkCard);
@@ -3108,7 +2943,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // 2. GPU Usage Sparkline Card
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
         sparkCard.add_child(new St.Label({ text: 'GPU Utilization (%)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
-        this._gpuSparkline = new Sparkline(-1, 100, 100, false, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._gpuSparkline = this._newSparkline('gpu', 100, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._gpuSparkline.x_expand = true;
         sparkCard.add_child(this._gpuSparkline);
         box.add_child(sparkCard);
@@ -3182,13 +3017,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             if (this._summaryCards?.cpu) {
                 this._summaryCards.cpu.valueLabel.text = `${Math.round(cpu.total)}%`;
                 this._summaryCards.cpu.pbar.setPercent(cpu.total);
-                if (this._summaryCards.cpu.spark) {
-                    this._summaryCards.cpu.spark.addSample(cpu.total);
-                }
-            }
-            if (this._cpuSparkline) {
-                this._cpuSparkline.addSample(cpu.total);
-                this._cpuSparkline.setScaleLabel(`Cur: ${Math.round(cpu.total)}%`);
             }
             if (this._cpuDetailsVal) this._cpuDetailsVal.text = `${Math.round(cpu.total)}%`;
 
@@ -3248,13 +3076,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             if (this._summaryCards?.memory) {
                 this._summaryCards.memory.valueLabel.text = `${Math.round(mem.percent)}%`;
                 this._summaryCards.memory.pbar.setPercent(mem.percent);
-                if (this._summaryCards.memory.spark) {
-                    this._summaryCards.memory.spark.addSample(mem.percent);
-                }
-            }
-            if (this._memSparkline) {
-                this._memSparkline.addSample(mem.percent);
-                this._memSparkline.setScaleLabel(`Used: ${Math.round(mem.percent)}%`);
             }
             if (this._memUsed) this._memUsed.val.text =
                 `${formatBytes(mem.used, useGiB)} / ${formatBytes(mem.total, useGiB)}`;
@@ -3293,15 +3114,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 }
             }
             if (bat.present) {
-                if (this._batSparkline) {
-                    this._batSparkline.addSample(bat.percent);
-                    this._batSparkline.setScaleLabel(`Cur: ${Math.round(bat.percent)}%`);
-                }
-                if (this._batRateSparkline) {
-                    const rateW = bat.energyRate || 0;
-                    this._batRateSparkline.addSample(rateW);
-                    this._batRateSparkline.setScaleLabel(`Rate: ${rateW.toFixed(1)} W`);
-                }
                 if (this._batState) {
                     const s = bat.state === 'charging' ? 'Charging'
                         : bat.state === 'discharging' ? 'Discharging' : 'Full';
@@ -3363,10 +3175,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 }
                 const avgDraw = this._pwrStats.count > 0 ? (this._pwrStats.sum / this._pwrStats.count) : 0;
 
-                if (this._pwrSparkline) {
-                    this._pwrSparkline.addSample(draw);
-                    this._pwrSparkline.setScaleLabel(`Draw: ${drawStr}`);
-                }
                 if (this._pwrSystem)  this._pwrSystem.val.text  = pwr.systemPower  !== null ? `${pwr.systemPower.toFixed(1)} W`  : '--';
                 if (this._pwrPackage) this._pwrPackage.val.text = pwr.packagePower !== null ? `${pwr.packagePower.toFixed(1)} W` : '--';
                 
@@ -3400,14 +3208,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 sc.pbar.setPercent(diskPct);
                 sc.subLabel.visible = true;
                 sc.subLabel.text = `Read: ${readMB.toFixed(1)} MB/s · Write: ${writeMB.toFixed(1)} MB/s`;
-            }
-            if (this._dskReadSparkline) {
-                this._dskReadSparkline.addSample(readMB);
-                this._dskReadSparkline.setScaleLabel(`Read: ${readMB.toFixed(1)} MB/s`);
-            }
-            if (this._dskWriteSparkline) {
-                this._dskWriteSparkline.addSample(writeMB);
-                this._dskWriteSparkline.setScaleLabel(`Write: ${writeMB.toFixed(1)} MB/s`);
             }
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
@@ -3455,14 +3255,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 sc.subLabel.visible = true;
                 sc.subLabel.text = `↓ ${formatSpeed(net.total.rxRate)}   ↑ ${formatSpeed(net.total.txRate)}`;
             }
-            if (this._netRxSparkline) {
-                this._netRxSparkline.addSample(net.total.rxRate / 1024);
-                this._netRxSparkline.setScaleLabel(`DL: ${formatSpeed(net.total.rxRate)}`);
-            }
-            if (this._netTxSparkline) {
-                this._netTxSparkline.addSample(net.total.txRate / 1024);
-                this._netTxSparkline.setScaleLabel(`UL: ${formatSpeed(net.total.txRate)}`);
-            }
             if (this._netRx) this._netRx.val.text = formatSpeed(net.total.rxRate);
             if (this._netTx) this._netTx.val.text = formatSpeed(net.total.txRate);
             if (this._netSessionRx) this._netSessionRx.val.text = formatBytes(net.sessionRx || 0, useGiB);
@@ -3503,10 +3295,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             if (sc) {
                 sc.valueLabel.text = formatTemp(thm.packageTemp, tempUnit);
                 sc.pbar.setPercent(Math.min(100, (thm.packageTemp / 100) * 100)); // normalized to 100C
-            }
-            if (this._thmSparkline) {
-                this._thmSparkline.addSample(thm.packageTemp);
-                this._thmSparkline.setScaleLabel(`Temp: ${formatTemp(thm.packageTemp, tempUnit)}`);
             }
             if (this._menuOpen && this._activeTab === 'thermal') {
                 if (this._thmSensorsBox && thm.sensors) {
@@ -3618,10 +3406,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             if (this._gpuHwPowerVal) this._gpuHwPowerVal.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
 
             // Sparkline
-            if (this._gpuSparkline) {
-                this._gpuSparkline.addSample(gpu.percent);
-                this._gpuSparkline.setScaleLabel(`Cur: ${Math.round(gpu.percent)}%`);
-            }
 
             // VRAM Card
             if (this._gpuVramCard) {
@@ -3647,6 +3431,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             if (this._gpuFan) this._gpuFan.val.text = gpu.fanSpeed !== null ? `${gpu.fanSpeed} RPM` : '--';
             if (this._gpuPower) this._gpuPower.val.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
         }
+
+        for (const spark of this._sparklines) spark.refresh();
 
         // ── Top Processes (CPU & Memory tabs) ──
         if (this._menuOpen && data.processes && data.processes.length > 0) {
