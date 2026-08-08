@@ -1398,8 +1398,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             };
 
             const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
-                need.cpu ? this._cpu.sample(isDetailedCpu) : this._lastCpu || { total: 0, cores: [] },
-                need.mem ? this._mem.sample() : this._lastMem || { percent: 0, total: 0, used: 0 },
+                need.cpu ? this._cpu.sample(isDetailedCpu, isOpen) : this._lastCpu || { total: 0, cores: [] },
+                need.mem ? this._mem.sample(isDetailedMem) : this._lastMem || { percent: 0, total: 0, used: 0 },
                 need.bat ? this._bat.sample() : this._lastBat || { present: false },
                 need.dsk ? this._dsk.sample(isDetailedDsk) : this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 },
                 need.net ? this._net.sample() : this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} },
@@ -1529,7 +1529,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         // 1. Compute rich tooltips
         if (data.cpu) {
             const loadStr = data.cpu.loadavg ? data.cpu.loadavg.map(v => v.toFixed(2)).join(', ') : '--';
-            this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || 'CPU'}\nLoad: ${loadStr}\nFreq: ${data.cpu.frequency || '--'}`;
+            this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || 'CPU'}\nLoad: ${loadStr}${data.cpu.frequency ? `\nFreq: ${data.cpu.frequency}` : ''}`;
         }
         if (data.mem) {
             const usedStr = formatBytes(data.mem.used, useGiB);
@@ -3042,7 +3042,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 
             // Details Stats row
             if (this._cpuDetailsLoad) this._cpuDetailsLoad.text = cpu.loadavg.join(' · ');
-            if (this._cpuDetailsFreq) this._cpuDetailsFreq.text = cpu.frequency;
+            if (this._cpuDetailsFreq && cpu.frequency) this._cpuDetailsFreq.text = cpu.frequency;
             if (this._cpuDetailsUptime) this._cpuDetailsUptime.text = formatUptime(cpu.uptime);
 
             if (cpu.cores) this._updateCpuCoresUI(cpu.cores, cpu.coreFreqs);
