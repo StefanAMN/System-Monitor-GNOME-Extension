@@ -107,10 +107,10 @@ cmd_reload() {
 }
 
 # ------------------------------------------------------------------------------
-# Command: Dedicated isolated test environment
+# Command: Dedicated windowed test environment (opens a separate window)
 # ------------------------------------------------------------------------------
 cmd_test_dedicated() {
-    log_title "Launching Dedicated Isolated Test Environment"
+    log_title "Launching Dedicated Windowed Test Environment"
 
     check_syntax
     compile_schemas
@@ -121,40 +121,52 @@ cmd_test_dedicated() {
         exit 1
     fi
 
-    echo -e "${YELLOW}Notice:${RESET} This starts an ${BOLD}independent, isolated GNOME Shell 50 session${RESET} with a virtual display."
-    echo -e "It will ${BOLD}NOT affect or crash your main desktop session${RESET}. All logs will stream below."
-    echo -e "Press ${BOLD}Ctrl+C${RESET} at any time to exit the dedicated test environment.\n"
+    local HOST_WL="${WAYLAND_DISPLAY:-wayland-0}"
+    local HOST_DISP="${DISPLAY:-:0}"
+
+    echo -e "${YELLOW}Notice:${RESET} Opening an ${BOLD}isolated GNOME Shell 50 test window${RESET} on your desktop."
+    echo -e "This runs in a ${BOLD}dedicated Wayland window${RESET} (Mutter Devkit) completely isolated from your host session."
+    echo -e "You can interact with the top bar, click the extension icon, and test resizing safely."
+    echo -e "Press ${BOLD}Ctrl+C${RESET} in this terminal or close the window to exit.\n"
 
     dbus-run-session -- bash -c '
         UUID="resource-pulse@yourdomain.example"
+        HOST_WL="'"$HOST_WL"'"
+        HOST_DISP="'"$HOST_DISP"'"
         
-        # Start isolated headless GNOME Shell with virtual monitor
-        gnome-shell --headless --virtual-monitor 1280x720 2>&1 &
+        echo -e "\033[34m[TEST-ENV]\033[0m Starting isolated GNOME Shell 50 compositor..."
+        gnome-shell --devkit --wayland &
         SHELL_PID=$!
         
         cleanup() {
             echo -e "\n\033[33mStopping dedicated test session...\033[0m"
-            kill "$SHELL_PID" 2>/dev/null || true
+            kill "$MDK_PID" "$SHELL_PID" 2>/dev/null || true
             wait "$SHELL_PID" 2>/dev/null || true
             exit 0
         }
         trap cleanup SIGINT SIGTERM EXIT
 
-        echo -e "\033[34m[TEST-ENV]\033[0m Initializing isolated GNOME Shell 50..."
         sleep 2.5
 
         echo -e "\033[34m[TEST-ENV]\033[0m Enabling $UUID in test session..."
-        gnome-extensions enable "$UUID"
-        sleep 1
+        gnome-extensions enable "$UUID" 2>/dev/null || true
+        sleep 0.5
+
+        # Check if mutter-devkit was auto-spawned; if not, launch it on the host display
+        MDK_PID=$(pgrep -f "mutter-devkit" | head -n 1 || true)
+        if [ -z "$MDK_PID" ] && [ -x "/usr/libexec/mutter-devkit" ]; then
+            echo -e "\033[34m[TEST-ENV]\033[0m Launching Mutter Devkit window on host display ($HOST_WL)..."
+            WAYLAND_DISPLAY="$HOST_WL" DISPLAY="$HOST_DISP" /usr/libexec/mutter-devkit &
+            MDK_PID=$!
+        fi
 
         echo -e "\033[32m[TEST-ENV]\033[0m Test session status:"
         gnome-extensions info "$UUID"
 
-        echo -e "\n\033[1;32m✓ Dedicated environment is active and running!\033[0m"
-        echo -e "\033[36mStreaming live logs (press Ctrl+C to terminate test session):\033[0m\n"
+        echo -e "\n\033[1;32m✓ Dedicated windowed test environment is active!\033[0m"
+        echo -e "\033[36mInteract with the extension in the test window. Press Ctrl+C here to stop.\033[0m\n"
         
-        # Wait for user interrupt or process exit
-        wait "$SHELL_PID"
+        wait "$MDK_PID" 2>/dev/null || wait "$SHELL_PID"
     '
 }
 
@@ -231,8 +243,8 @@ cmd_help() {
     echo -e "Usage: ${BOLD}./dev.sh [command]${RESET}\n"
     echo -e "Commands:"
     echo -e "  ${GREEN}reload, reenable${RESET}   (Default) Compile schemas, verify symlink, and re-enable in current session"
-    echo -e "  ${GREEN}test, dedicated${RESET}    Launch a dedicated isolated GNOME Shell 50 environment to test safely"
-    echo -e "  ${GREEN}test-ci [sec]${RESET}      Run an automated non-interactive test in isolated environment (default 5s)"
+    echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
+    echo -e "  ${GREEN}test-headless [sec]${RESET} Run a headless automated test in isolated environment (default 5s)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
     echo -e "  ${GREEN}help${RESET}               Show this help message\n"
@@ -245,10 +257,10 @@ case "${1:-reload}" in
     reload|reenable|enable)
         cmd_reload
         ;;
-    test|dedicated|nested)
+    test|dedicated|nested|window)
         cmd_test_dedicated
         ;;
-    test-ci|verify|check)
+    test-headless|test-ci|verify|check)
         cmd_test_ci "${2:-5}"
         ;;
     status|log|logs)
