@@ -18,10 +18,10 @@ import { DiskSampler } from './lib/disk.js';
 import { NetworkSampler } from './lib/network.js';
 import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
-import { runSubprocess } from './lib/utils.js';
+import { ProcessSampler } from './lib/process.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
-import { formatBytes, formatSpeed, formatTemp, formatUptime } from './lib/format.js';
+import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
 
 // ─── Polling / history constants ─────────────────────────────────────────────
 
@@ -54,6 +54,7 @@ export default class ResourcePulseExtension extends Extension {
         this._cpu = new CpuSampler();
         this._mem = new MemorySampler();
         this._bat = new BatterySampler();
+        this._proc = new ProcessSampler();
         this._pwr = new PowerSampler();
         this._dsk = new DiskSampler();
         this._net = new NetworkSampler();
@@ -334,7 +335,10 @@ export default class ResourcePulseExtension extends Extension {
         this._lastNet = this._lastThm = this._lastGpu = this._lastPwr = null;
         this._cpu = null;
         this._mem = null;
+        this._bat?.destroy();
         this._bat = null;
+        this._proc = null;
+        this._chipFor = null;
         this._pwr = null;
         this._dsk = null;
         this._net = null;
@@ -1341,22 +1345,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         if (need.gpu && data.gpu.present) this._pushHistory('gpu', data.gpu.percent, now);
     }
 
-    async _sampleProcesses(byMemory) {
-        const processes = [];
-        const sortFlag = byMemory ? '--sort=-pmem' : '--sort=-pcpu';
-        const res = await runSubprocess(['ps', '-eo', 'pid,pcpu,pmem,comm', '--no-headers', sortFlag]);
-        if (!res.success || !res.stdout) return processes;
-        const lines = res.stdout.trim().split('\n');
-        for (let i = 0; i < Math.min(lines.length, 8) && processes.length < 5; i++) {
-            const parts = lines[i].trim().split(/\s+/);
-            if (parts.length < 4) continue;
-            const comm = parts.slice(3).join(' ');
-            if (comm === 'ps' || comm === 'sh') continue;
-            processes.push({ pid: parts[0], cpu: parseFloat(parts[1]) || 0, mem: parseFloat(parts[2]) || 0, comm });
-        }
-        return processes;
-    }
-
     /**
      * Sample and render. Only one poll runs at a time.
      * tick=true is the periodic timer sample, the only kind recorded in
@@ -1436,8 +1424,11 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 
             let processes = [];
             if (isDetailedCpu || isDetailedMem) {
-                processes = await this._sampleProcesses(isDetailedMem);
+                processes = (await this._proc.sample(mem.total, isDetailedMem)).top;
                 if (gen !== this._gen) return;
+            } else if (!isOpen) {
+                // Deltas across a closed menu would be averages over minutes.
+                this._proc.reset();
             }
 
             const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes };
@@ -1547,18 +1538,15 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             this._tooltipTexts['memory'] = `Used: ${usedStr} / ${totalStr}\nAvailable: ${availStr}\nSwap: ${Math.round(data.mem.swapPercent || 0)}%`;
         }
         if (data.bat && data.bat.present) {
-            const state = data.bat.state === 'charging' ? 'Charging' : data.bat.state === 'discharging' ? 'Discharging' : 'Full';
+            const state = batteryStateLabel(data.bat.state);
             let timeStr = '';
-            if (data.bat.timeRemaining > 0) {
-                const h = Math.floor(data.bat.timeRemaining / 3600);
-                const m = Math.floor((data.bat.timeRemaining % 3600) / 60);
-                timeStr = ` · ${h}h ${m}m ${data.bat.state === 'charging' ? 'to full' : 'left'}`;
-            }
+            if (data.bat.timeRemaining > 0)
+                timeStr = ` · ${formatDuration(data.bat.timeRemaining)} ${data.bat.state === 'charging' ? 'to full' : 'left'}`;
             this._tooltipTexts['battery'] = `Battery: ${data.bat.percent.toFixed(1)}% (${state}${timeStr})\nHealth: ${data.bat.health.toFixed(1)}% · Rate: ${(data.bat.energyRate || 0).toFixed(1)}W`;
         }
         if (data.pwr) {
-            const draw = data.pwr.systemPower !== null ? data.pwr.systemPower : (data.pwr.packagePower || 0);
-            this._tooltipTexts['power'] = `Power Draw: ${draw.toFixed(1)}W\nCPU Package: ${data.pwr.packagePower ? data.pwr.packagePower.toFixed(1) + 'W' : '--'}`;
+            const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : 'n/a on AC';
+            this._tooltipTexts['power'] = `System Draw: ${sys}\nCPU Package: ${data.pwr.packagePower ? data.pwr.packagePower.toFixed(1) + 'W' : '--'}`;
         }
         if (data.dsk && data.dsk.mounts && data.dsk.mounts.length > 0) {
             const root = data.dsk.mounts[0];
@@ -3023,39 +3011,29 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             // Hardware details on Overview
             if (this._hwName) this._hwName.text = cpu.hardwareModel || 'Unknown CPU';
             if (this._hwStats) {
-                const genStr = cpu.cpuGen ? `${cpu.cpuGen} · ` : '';
-                this._hwStats.text = `${genStr}${cpu.coresCount} cores · ${cpu.threadsCount} threads`;
+                const parts = [];
+                if (cpu.cpuGen) parts.push(cpu.cpuGen);
+                if (cpu.coresCount) parts.push(`${cpu.coresCount} cores`);
+                parts.push(`${cpu.threadsCount || cpu.cores.length} threads`);
+                this._hwStats.text = parts.join(' · ');
             }
             
-            // Dynamic chip style (Intel vs AMD)
-            if (this._chipBox) {
-                const model = (cpu.hardwareModel || '').toLowerCase();
-                const isAmd = model.includes('amd') || model.includes('ryzen');
-                if (isAmd) {
-                    this._chipBox.style = 'background-color: #d22630; border-radius: 6px; padding: 6px 10px;';
-                    this._chipLabel1.text = 'AMD';
-                    this._chipLabel1.style = 'font-size: 0.65em; color: #f9b8bb; font-weight: 300;';
-                    this._chipLabel2.text = 'RYZEN';
-                    this._chipLabel2.style = 'font-size: 0.9em; color: #ffffff; font-weight: bold;';
-                    let ver = '7';
-                    if (model.includes('3')) ver = '3';
-                    else if (model.includes('5')) ver = '5';
-                    else if (model.includes('9')) ver = '9';
-                    this._chipLabel3.text = ver;
-                    this._chipLabel3.style = 'font-size: 1.1em; color: #ffaaaa; font-weight: bold;';
-                } else {
-                    this._chipBox.style = 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;';
-                    this._chipLabel1.text = 'intel';
-                    this._chipLabel1.style = 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;';
-                    this._chipLabel2.text = 'CORE';
-                    this._chipLabel2.style = 'font-size: 0.9em; color: #ffffff; font-weight: bold;';
-                    let ver = 'i5';
-                    if (model.includes('i3')) ver = 'i3';
-                    else if (model.includes('i7')) ver = 'i7';
-                    else if (model.includes('i9')) ver = 'i9';
-                    this._chipLabel3.text = ver;
-                    this._chipLabel3.style = 'font-size: 1.1em; color: #5bc3ff; font-weight: bold;';
-                }
+            // Vendor badge: identity never changes, so style it once.
+            if (this._chipBox && this._chipFor !== cpu.hardwareModel) {
+                this._chipFor = cpu.hardwareModel;
+                const badge = cpu.vendor === 'amd'
+                    ? { bg: '#d22630', top: 'AMD', mid: /ryzen/i.test(cpu.hardwareModel) ? 'RYZEN' : 'CPU', c1: '#f9b8bb', c3: '#ffaaaa' }
+                    : cpu.vendor === 'intel'
+                        ? { bg: '#0e5fa6', top: 'intel', mid: /^i\d|ultra/i.test(cpu.hardwareModel) ? 'CORE' : 'CPU', c1: '#a0c8f0', c3: '#5bc3ff' }
+                        : { bg: '#4a4a55', top: '', mid: 'CPU', c1: '#c0c0c8', c3: '#e0e0e8' };
+                this._chipBox.style = `background-color: ${badge.bg}; border-radius: 6px; padding: 6px 10px;`;
+                this._chipLabel1.text = badge.top;
+                this._chipLabel1.visible = badge.top !== '';
+                this._chipLabel1.style = `font-size: 0.65em; color: ${badge.c1}; font-weight: 300;`;
+                this._chipLabel2.text = badge.mid;
+                this._chipLabel3.text = cpu.tier || '';
+                this._chipLabel3.visible = !!cpu.tier;
+                this._chipLabel3.style = `font-size: 1.1em; color: ${badge.c3}; font-weight: bold;`;
             }
 
             if (this._hwUptimeVal) this._hwUptimeVal.text = formatUptime(cpu.uptime);
@@ -3102,22 +3080,15 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                     sc.valueLabel.text = `${Math.round(bat.percent)}%`;
                     sc.pbar.setPercent(bat.percent);
                     
-                    let stateStr = bat.state === 'charging' ? 'Charging'
-                        : bat.state === 'discharging' ? 'Discharging' : 'Fully Charged';
-                    if (bat.timeRemaining > 0) {
-                        const h = Math.floor(bat.timeRemaining / 3600);
-                        const m = Math.floor((bat.timeRemaining % 3600) / 60);
-                        const label = bat.state === 'charging' ? 'to full' : 'left';
-                        stateStr += ` · ${h}h ${m}m ${label}`;
-                    }
+                    let stateStr = batteryStateLabel(bat.state);
+                    if (bat.timeRemaining > 0)
+                        stateStr += ` · ${formatDuration(bat.timeRemaining)} ${bat.state === 'charging' ? 'to full' : 'left'}`;
                     sc.statusLbl.text = stateStr;
                 }
             }
             if (bat.present) {
                 if (this._batState) {
-                    const s = bat.state === 'charging' ? 'Charging'
-                        : bat.state === 'discharging' ? 'Discharging' : 'Full';
-                    this._batState.val.text = s;
+                    this._batState.val.text = batteryStateLabel(bat.state);
                 }
                 if (this._batTimeEst) {
                     let estText = '--';
@@ -3163,7 +3134,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 if (isCharging) {
                     sc.subLabel.text = `Charging (+${bat.energyRate.toFixed(1)} W)`;
                 } else {
-                    sc.subLabel.text = pwr.systemPower !== null ? 'On Battery' : 'AC Connected';
+                    sc.subLabel.text = pwr.systemPower !== null ? 'On Battery'
+                        : pwr.raplSupported ? 'AC · CPU package only' : 'AC Connected';
                 }
             }
             if (hasDraw) {
@@ -3506,7 +3478,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             w.nameLbl.text = proc.comm;
             const valNum = isMemory ? proc.mem : proc.cpu;
             w.statLbl.text = `${valNum.toFixed(1)}%`;
-            w.pbar.setPercent(valNum);
+            w.pbar.setPercent(Math.min(100, valNum));
 
             let iconName = 'system-run-symbolic';
             const commLower = proc.comm.toLowerCase();
