@@ -33,6 +33,31 @@ NVIDIA and AMD GPU paths cannot be executed on this machine and are never marked
 - `metadata.json` `shell-version` (45–50) conflicts with AGENTS.md (`["50"]`); left untouched, needs owner decision.
 - Inline styles → CSS classes is not done in this pass (visual-regression risk without interactive review).
 
-## State
+## State (2026-10-01)
 
-See git log on `audit-fixes`. Resume: `./dev.sh test-unit && ./dev.sh test-headless 8`.
+All milestones landed on `audit-fixes`; working tree clean apart from the untracked `CLAUDE.md`.
+
+| # | Commit | Proof that was run |
+|---|--------|--------------------|
+| M1 | a7771c1 | `test-ui` fails on the old code (`r.lbl is undefined`), passes after |
+| M2 | 20d4d51 | `test-ui` asserts history length stays 3..12 and capacity 60 under overlapping on-demand polls |
+| M3 | 6ed734a | gjs harness: 300 listings, fds 10 -> 312 before, 10 -> 10 after |
+| M4 | 3c68a7f | `yes` worker reads 99.8-100.1 %; 14-16 ms per sample at 441 processes |
+| M5 | fef2b97 | cpu sample 0.68 -> 0.27 ms, memory 0.33 -> 0.09 ms (mean of 200) |
+| M6 | cf4fe18 | `./dev.sh test-unit`: 58 checks incl. 400-child churn run |
+| M7 | see git log | `test-unit`, `test-ui`, `./dev.sh pack` (zip contains `ui/` and new `lib/` modules) |
+
+Not executed, therefore not claimed:
+
+- NVIDIA (`nvidia-smi`) and AMD GPU paths, AMD RAPL, multi-battery and no-battery machines.
+- CPU / RSS of the real `gnome-shell` process with the extension loaded over hours (only per-sampler timings in a gjs harness were measured).
+- Offline-core handling against a really offlined core (covered by a fixture only).
+- Visual check of the dashboard in the user's live session; the headless run only proves there are no JS errors and that rows populate.
+
+Still open:
+
+- `metadata.json` `shell-version` vs AGENTS.md — owner decision.
+- Inline styles -> CSS classes, and splitting the ~3500-line `extension.js` into per-tab modules (only widgets, formatters, ring buffer and samplers were moved out).
+- `lib/thermal.js` detailed read (~55 ms) and `lib/gpu.js` were not optimised.
+
+Resume / re-verify: `./dev.sh test-unit && ./dev.sh test-ui`.

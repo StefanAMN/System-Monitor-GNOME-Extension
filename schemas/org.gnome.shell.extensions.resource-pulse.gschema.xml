@@ -7,6 +7,7 @@
       <description>List of metrics to show in the top bar.</description>
     </key>
     <key name="poll-interval" type="i">
+      <range min="1" max="10"/>
       <default>2</default>
       <summary>Poll Interval</summary>
       <description>Update interval in seconds (1 to 10).</description>
@@ -27,16 +28,19 @@
       <description>Show icons only in the top bar indicator without text labels.</description>
     </key>
     <key name="threshold-cpu" type="i">
+      <range min="50" max="100"/>
       <default>90</default>
       <summary>CPU Alert Threshold</summary>
       <description>CPU percentage threshold to trigger warning style.</description>
     </key>
     <key name="threshold-mem" type="i">
+      <range min="50" max="100"/>
       <default>90</default>
       <summary>Memory Alert Threshold</summary>
       <description>Memory percentage threshold to trigger warning style.</description>
     </key>
     <key name="threshold-temp" type="i">
+      <range min="40" max="100"/>
       <default>80</default>
       <summary>Temperature Alert Threshold</summary>
       <description>Temperature threshold to trigger warning style.</description>
