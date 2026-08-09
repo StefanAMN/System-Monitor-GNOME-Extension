@@ -268,6 +268,17 @@ cmd_test_ui() {
 # ------------------------------------------------------------------------------
 # Command: Show current extension status & journal logs
 # ------------------------------------------------------------------------------
+cmd_test_unit() {
+    check_syntax
+    log_info "Running parser / engine unit tests (gjs, no shell needed)..."
+    if gjs -m "$SCRIPT_DIR/tests/unit.js"; then
+        log_success "Unit tests passed"
+    else
+        log_error "Unit tests failed"
+        exit 1
+    fi
+}
+
 cmd_status() {
     log_title "Extension Status & Logs"
     gnome-extensions info "$UUID" 2>/dev/null || log_warn "Extension not found via gnome-extensions"
@@ -305,7 +316,7 @@ cmd_pack() {
     log_title "Packaging Extension"
     check_syntax
     compile_schemas
-    gnome-extensions pack --extra-source=lib --extra-source=icons --force
+    gnome-extensions pack --extra-source=lib --extra-source=ui --force
     log_success "Extension packaged: $(ls -1 *.zip 2>/dev/null | head -n 1)"
 }
 
@@ -319,6 +330,7 @@ cmd_help() {
     echo -e "  ${GREEN}reload, reenable${RESET}   (Default) Compile schemas, verify symlink, and re-enable in current session"
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Run a headless automated test in isolated environment (default 5s)"
+    echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every menu tab + a disable/enable cycle headlessly and scan the shell log"
     echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
@@ -338,6 +350,9 @@ case "${1:-reload}" in
         ;;
     test-headless|test-ci|verify|check)
         cmd_test_ci "${2:-5}"
+        ;;
+    test-unit|unit)
+        cmd_test_unit
         ;;
     test-ui|ui)
         cmd_test_ui
