@@ -9,6 +9,7 @@ import { RingBuffer } from '../lib/ringbuffer.js';
 import { parseStatBlob, cpuPercent, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync } from '../lib/utils.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale } from '../lib/present.js';
 
 let failed = 0;
 let passed = 0;
@@ -107,6 +108,16 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(cpuPercent({ start: 100, ticks: 900 }, { start: 999, ticks: 5 }, 1, 100), 0, 'proc cpu: reused PID');
     eq(cpuPercent({ start: 100, ticks: 100 }, { start: 100, ticks: 150 }, 0, 100), 0, 'proc cpu: zero dt never divides');
     eq(cpuPercent({ start: 100, ticks: 150 }, { start: 100, ticks: 100 }, 1, 100), 0, 'proc cpu: backwards counter');
+}
+
+// ── presentation helpers ──
+{
+    eq(powerReadout({ raplSupported: false, packagePower: null, systemPower: null }).value, null, 'power: nothing readable is n/a, not 0 W');
+    ok(powerReadout({ raplSupported: false, packagePower: null, systemPower: null }).reason.length > 0, 'power: n/a carries a reason');
+    eq(powerReadout({ raplSupported: true, packagePower: 0, systemPower: null }).value, 0, 'power: a real 0 W reading stays 0');
+    eq(powerReadout({ raplSupported: true, packagePower: 9, systemPower: 14.5 }).value, 14.5, 'power: system draw preferred on battery');
+    eq(thermalUnavailable({ packageTemp: 0, sensors: [], fans: [] }), true, 'thermal: no sensors is unavailable');
+    eq(thermalUnavailable({ packageTemp: 51, sensors: [{}], fans: [] }), false, 'thermal: reading present');
 }
 
 // ── live: process churn, bounded state, no fd leak ──
