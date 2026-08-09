@@ -476,9 +476,6 @@ export default class ResourcePulseExtension extends Extension {
         // Build Corner Resize Handles
         this._buildCornerResizeHandles();
 
-        // Build Interactive Resize HUD
-        this._buildResizeHud();
-
         // Build In-Panel 3-Dots Quick Menu Popover
         this._buildQuickMenuPopover();
 
@@ -506,7 +503,6 @@ export default class ResourcePulseExtension extends Extension {
                 this._poll();
             } else {
                 this._hideQuickMenu();
-                this._hideResizeHud();
                 if (this._dragGrab) {
                     this._dragGrab.dismiss();
                     this._dragGrab = null;
@@ -572,11 +568,6 @@ export default class ResourcePulseExtension extends Extension {
             this._dragGrab.dismiss();
             this._dragGrab = null;
         }
-        if (this._resizeHud) {
-            this._resizeHud.destroy();
-            this._resizeHud = null;
-        }
-        this._resizeHudLabel = null;
         if (this._quickMenuPopover) {
             this._quickMenuPopover.destroy();
             this._quickMenuPopover = null;
@@ -758,7 +749,6 @@ export default class ResourcePulseExtension extends Extension {
         newH = Math.max(minH, Math.min(maxH, Math.round(newH)));
 
         this._applyDimensions(newW, newH);
-        this._updateResizeHud(newW, newH);
     }
 
     _applyDimensions(w, h) {
@@ -891,7 +881,6 @@ export default class ResourcePulseExtension extends Extension {
                 this._activeResizeCorner = c.id;
                 this._dragGrab = global.stage.grab(handle);
                 handle.setActive(true);
-                this._showResizeHud(startWidth, startHeight);
                 return Clutter.EVENT_STOP;
             };
 
@@ -916,7 +905,6 @@ export default class ResourcePulseExtension extends Extension {
                 isDragging = false;
                 this._activeResizeCorner = null;
                 handle.setActive(false);
-                this._hideResizeHud();
                 this._saveCustomDimensions();
                 return Clutter.EVENT_STOP;
             };
@@ -940,75 +928,6 @@ export default class ResourcePulseExtension extends Extension {
 
             this._resizeHandles[c.id] = handle;
             this._popupStack.add_child(handle);
-        });
-    }
-
-    _buildResizeHud() {
-        this._resizeHud = new St.BoxLayout({
-            style_class: 'resource-pulse-resize-hud',
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.END,
-            reactive: false,
-            can_focus: false,
-            visible: false,
-            opacity: 0
-        });
-        this._resizeHud.margin_bottom = 20;
-
-        const icon = new St.Icon({
-            icon_name: 'view-fullscreen-symbolic',
-            style: 'icon-size: 13px; color: #3584e4; margin-right: 6px;'
-        });
-        this._resizeHud.add_child(icon);
-
-        this._resizeHudLabel = new St.Label({
-            text: '0 × 0 px',
-            style_class: 'resource-pulse-resize-hud-label',
-            y_align: Clutter.ActorAlign.CENTER
-        });
-        this._resizeHud.add_child(this._resizeHudLabel);
-
-        this._popupStack.add_child(this._resizeHud);
-    }
-
-    _showResizeHud(w, h) {
-        if (!this._resizeHud || !this._resizeHudLabel) return;
-        this._resizeHudLabel.text = `${w} × ${h} px`;
-        this._resizeHud.remove_all_transitions();
-        this._resizeHud.set_pivot_point(0.5, 0.5);
-        this._resizeHud.scale_x = 0.75;
-        this._resizeHud.scale_y = 0.75;
-        this._resizeHud.opacity = 0;
-        this._resizeHud.visible = true;
-        this._resizeHud.ease({
-            scale_x: 1.0,
-            scale_y: 1.0,
-            opacity: 255,
-            duration: 180,
-            mode: Clutter.AnimationMode.EASE_OUT_BACK
-        });
-    }
-
-    _updateResizeHud(w, h) {
-        if (this._resizeHudLabel) {
-            this._resizeHudLabel.text = `${w} × ${h} px`;
-        }
-    }
-
-    _hideResizeHud() {
-        if (!this._resizeHud || !this._resizeHud.visible) return;
-        this._resizeHud.remove_all_transitions();
-        this._resizeHud.ease({
-            scale_x: 0.8,
-            scale_y: 0.8,
-            opacity: 0,
-            duration: 220,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: () => {
-                if (this._resizeHud) {
-                    this._resizeHud.visible = false;
-                }
-            }
         });
     }
 
