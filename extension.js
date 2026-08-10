@@ -3495,7 +3495,7 @@ export default class ResourcePulseExtension extends Extension {
 
                 item.add_child(detailsCol);
 
-                const statLbl = new St.Label({ style: 'font-size: 0.85em; color: #a0a0b8; font-weight: 600;', width: 45 });
+                const statLbl = new St.Label({ style: 'font-size: 0.85em; color: #a0a0b8; font-weight: 600; text-align: right;', width: isMemory ? 76 : 52 });
                 statLbl.x_align = Clutter.ActorAlign.END;
                 item.add_child(statLbl);
 
@@ -3520,12 +3520,13 @@ export default class ResourcePulseExtension extends Extension {
             'system': 'system-run-symbolic'
         };
 
+        const useGiB = this._settings.get_string('unit-mem') === 'GiB';
         processes.forEach((proc, i) => {
             const w = this[targetWidgetsKey][i];
             if (!w) return;
-            w.nameLbl.text = proc.comm;
+            w.nameLbl.text = proc.count > 1 ? `${proc.comm}  ×${proc.count}` : proc.comm;
             const valNum = isMemory ? proc.mem : proc.cpu;
-            w.statLbl.text = `${valNum.toFixed(1)}%`;
+            w.statLbl.text = isMemory ? formatBytes(proc.rssBytes, useGiB) : `${valNum.toFixed(1)}%`;
             w.pbar.setPercent(Math.min(100, valNum));
 
             let iconName = 'system-run-symbolic';

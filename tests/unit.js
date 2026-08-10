@@ -6,7 +6,7 @@ import System from 'system';
 
 import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../lib/format.js';
 import { RingBuffer } from '../lib/ringbuffer.js';
-import { parseStatBlob, cpuPercent, ProcessSampler } from '../lib/process.js';
+import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync } from '../lib/utils.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale } from '../lib/present.js';
@@ -110,6 +110,15 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(cpuPercent({ start: 100, ticks: 150 }, { start: 100, ticks: 100 }, 1, 100), 0, 'proc cpu: backwards counter');
 }
 
+// ── process grouping ──
+{
+    const row = (comm, pid, cpu, rss) => ({ comm, pid, cpu, rss, rssBytes: rss * 4096, mem: rss / 100 });
+    const g = groupByName([row('firefox', 10, 5, 100), row('bash', 11, 1, 10), row('firefox', 12, 7.5, 300), row('firefox', 13, 0, 50)]);
+    eq(g.map(x => [x.comm, x.count, x.cpu, x.rss, x.rssBytes]), [['firefox', 3, 12.5, 450, 450 * 4096], ['bash', 1, 1, 10, 10 * 4096]], 'group: sums cpu and memory per name, keeps first-seen order');
+    eq(g[0].pid, 10, 'group: keeps a representative pid');
+    eq(groupByName([]), [], 'group: empty');
+}
+
 // ── presentation helpers ──
 {
     eq(powerReadout({ raplSupported: false, packagePower: null, systemPower: null }).value, null, 'power: nothing readable is n/a, not 0 W');
@@ -183,6 +192,7 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
             maxCpu = Math.max(maxCpu, p.cpu);
             if (!(p.cpu >= 0) || !(p.mem >= 0)) ok(false, `churn: bad value for ${p.comm}: ${p.cpu}/${p.mem}`);
         }
+        ok(r.top.length <= 5 && r.top.every(p => p.count >= 1), `churn round ${round}: grouped rows`);
         eq(sampler._prev.size, r.count, `churn round ${round}: previous-sample map holds only live processes`);
         await sleep(60);
     }
