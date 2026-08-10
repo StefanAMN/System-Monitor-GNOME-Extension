@@ -138,6 +138,29 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     ok(longest('battery', { batFmt: 'percent-time' }, ['100% · 12h 59m']), 'template: battery with time');
 }
 
+{
+    const S = 1000000;
+    const scale = new PeakScale(15, 60);
+    eq(scale.update(5, 1 * S), 15, 'peak: never below the floor');
+    eq(scale.update(45, 2 * S), 45, 'peak: rises at once');
+    eq(scale.update(5, 62 * S), 30, 'peak: halves its excess over the floor per half-life');
+    ok(scale.update(5, 3600 * S) < 15.001, 'peak: settles on the floor');
+    eq(scale.update(0, 3600 * S), scale.update(0, 3599 * S), 'peak: clock going backwards does not grow it');
+    eq(new PeakScale(15).percent(0, S), 0, 'peak: zero reading is 0%, no division by zero');
+    eq(new PeakScale(15).percent(30, S), 100, 'peak: new peak is full scale');
+
+    const shown = visibleInterfaces({
+        eno1: { isVirtual: false, rxRate: 0, txRate: 0 },
+        wwan0: { isVirtual: false, rxRate: 0, txRate: 0 },
+        usb0: { isVirtual: false, rxRate: 0, txRate: 0 },
+        wlp43s0: { isVirtual: false, rxRate: 5000, txRate: 10 },
+        docker0: { isVirtual: true, rxRate: 0, txRate: 0 },
+        tailscale0: { isVirtual: true, rxRate: 900, txRate: 0 }
+    }).map(([name]) => name);
+    eq(shown, ['eno1', 'wwan0', 'usb0', 'wlp43s0', 'tailscale0'], 'interfaces: every physical one, virtual only when active');
+    eq(visibleInterfaces(undefined), [], 'interfaces: none');
+}
+
 // ── live: process churn, bounded state, no fd leak ──
 const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));

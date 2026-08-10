@@ -57,6 +57,9 @@ export default class ResourcePulseExtension extends Extension {
         this._mem = new MemorySampler();
         this._bat = new BatterySampler();
         this._proc = new ProcessSampler();
+        // Bars without a natural maximum scale to the recent peak.
+        this._pwrScale = new PeakScale(15);            // watts
+        this._netScale = new PeakScale(1024 * 1024);   // bytes/s
         this._pwr = new PowerSampler();
         this._dsk = new DiskSampler();
         this._net = new NetworkSampler();
@@ -340,6 +343,8 @@ export default class ResourcePulseExtension extends Extension {
         this._bat?.destroy();
         this._bat = null;
         this._proc = null;
+        this._pwrScale = null;
+        this._netScale = null;
         this._chipFor = null;
         this._pwr = null;
         this._dsk = null;
@@ -3164,7 +3169,7 @@ export default class ResourcePulseExtension extends Extension {
             if (sc) {
                 sc.box.visible = true;
                 sc.valueLabel.text = drawStr;
-                sc.pbar.setPercent(Math.min(100, (draw / 45) * 100)); // normalized to 45W limit
+                sc.pbar.setPercent(this._pwrScale.percent(draw, GLib.get_monotonic_time()));
                 sc.subLabel.visible = true;
                 if (isCharging) {
                     sc.subLabel.text = `Charging (+${bat.energyRate.toFixed(1)} W)`;
@@ -3259,7 +3264,7 @@ export default class ResourcePulseExtension extends Extension {
             const sc = this._summaryCards?.network;
             if (sc) {
                 sc.valueLabel.text = formatSpeed(net.total.rxRate + net.total.txRate);
-                sc.pbar.setPercent(Math.min(100, ((net.total.rxRate + net.total.txRate) / (10 * 1024 * 1024)) * 100)); // normalized to 10MB/s
+                sc.pbar.setPercent(this._netScale.percent(net.total.rxRate + net.total.txRate, GLib.get_monotonic_time()));
                 sc.subLabel.visible = true;
                 sc.subLabel.text = `↓ ${formatSpeed(net.total.rxRate)}   ↑ ${formatSpeed(net.total.txRate)}`;
             }
@@ -3269,9 +3274,7 @@ export default class ResourcePulseExtension extends Extension {
             if (this._netSessionTx) this._netSessionTx.val.text = formatBytes(net.sessionTx || 0, useGiB);
 
             if (this._menuOpen && this._activeTab === 'network' && this._netIfaceList && net.interfaces) {
-                const activeIfaces = Object.entries(net.interfaces).filter(([name, iface]) =>
-                    iface.rxRate > 100 || iface.txRate > 100 || /^(wlan|eth|enp|wlp)/.test(name)
-                );
+                const activeIfaces = visibleInterfaces(net.interfaces);
                 if (!this._netIfaceRows) this._netIfaceRows = [];
                 if (this._netIfaceRows.length !== activeIfaces.length) {
                     this._netIfaceList.destroy_all_children();
