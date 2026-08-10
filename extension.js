@@ -20,7 +20,7 @@ import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
-import { powerReadout, thermalUnavailable } from './lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
 import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
@@ -221,8 +221,8 @@ export default class ResourcePulseExtension extends Extension {
         this._pinnedId = this._settings.connect('changed::pinned-metrics', () => this._rebuildTopBar());
         this._cardOrderId = this._settings.connect('changed::overview-card-order', () => this._onCardOrderChanged());
         this._compactId = this._settings.connect('changed::compact-label', () => this._rebuildTopBar());
-        this._batFmtId = this._settings.connect('changed::battery-top-format', () => this._poll());
-        this._netFmtId = this._settings.connect('changed::network-top-format', () => this._poll());
+        this._batFmtId = this._settings.connect('changed::battery-top-format', () => { this._rebuildTopBar(); this._poll(); });
+        this._netFmtId = this._settings.connect('changed::network-top-format', () => { this._rebuildTopBar(); this._poll(); });
         this._tooltipsId = this._settings.connect('changed::show-tooltips', () => this._hideTooltip());
         this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
         this._openMenuId = this._settings.connect('changed::action-open-menu', () => {
@@ -1475,6 +1475,11 @@ export default class ResourcePulseExtension extends Extension {
 
         const pinned = this._settings.get_strv('pinned-metrics') || [];
         const compact = this._settings.get_boolean('compact-label');
+        const templateOpts = {
+            batFmt: this._settings.get_string('battery-top-format'),
+            netFmt: this._settings.get_string('network-top-format'),
+            tempUnit: this._settings.get_string('unit-temp')
+        };
 
         pinned.forEach((key, index) => {
             if (index > 0) {
@@ -1499,6 +1504,17 @@ export default class ResourcePulseExtension extends Extension {
                     text: '--',
                     style_class: 'resource-pulse-label',
                     y_align: Clutter.ActorAlign.CENTER
+                });
+                // Reserve room for the widest value so neighbours in the
+                // panel do not shift every time a digit is gained or lost.
+                // Measured with the label's real font once it is styled.
+                const template = labelTemplate(key, templateOpts);
+                label.connect('style-changed', () => {
+                    const [width] = label.clutter_text.create_pango_layout(template).get_pixel_size();
+                    // Via CSS so St widens minimum and natural size together;
+                    // setting only the Clutter min-width aborts the shell.
+                    const style = `min-width: ${width}px;`;
+                    if (width > 0 && label.style !== style) label.style = style;
                 });
                 box.add_child(label);
             }
@@ -1580,6 +1596,11 @@ export default class ResourcePulseExtension extends Extension {
         }
 
         // 2. Update top bar text & icons
+        const batWidget = this._topBarWidgets['battery'];
+        if (batWidget && data.bat && data.bat.state) {
+            const iconName = batteryIconName(data.bat.present ? data.bat.percent : NaN, data.bat.state);
+            if (batWidget.icon.icon_name !== iconName) batWidget.icon.icon_name = iconName;
+        }
         Object.keys(this._topBarWidgets).forEach(key => {
             const widget = this._topBarWidgets[key];
             if (!widget.label) return;
@@ -1597,8 +1618,6 @@ export default class ResourcePulseExtension extends Extension {
                 } else {
                     text = basePct;
                 }
-                widget.icon.icon_name = data.bat.state === 'charging'
-                    ? 'battery-good-charging-symbolic' : 'battery-good-symbolic';
             }
             else if (key === 'battery' && data.bat && data.bat.present === false && data.bat.state)
                 text = 'n/a';
@@ -1621,13 +1640,14 @@ export default class ResourcePulseExtension extends Extension {
                 text = thermalUnavailable(data.thm) ? 'n/a' : formatTemp(data.thm.packageTemp, tempUnit);
             else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : 'n/a';
 
-            widget.label.text = text;
+            if (widget.label.text !== text) widget.label.text = text;
 
             let warn = false;
             if (key === 'cpu' && data.cpu && data.cpu.total >= cpuWarn) warn = true;
             if (key === 'memory' && data.mem && data.mem.percent >= memWarn) warn = true;
             if (key === 'thermal' && data.thm && data.thm.packageTemp >= tempWarn) warn = true;
-            widget.label.style = warn ? 'color: #e01b24;' : '';
+            if (warn) widget.label.add_style_class_name('resource-pulse-label-warn');
+            else widget.label.remove_style_class_name('resource-pulse-label-warn');
         });
     }
 

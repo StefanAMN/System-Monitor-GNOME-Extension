@@ -254,7 +254,7 @@ cmd_test_ui() {
     ' || true
 
     local BAD
-    BAD="$(grep -nE "RP-UITEST FAIL|JS ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove" "$LOG" || true)"
+    BAD="$(grep -nE "RP-UITEST FAIL|JS ERROR|Clutter-ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove" "$LOG" || true)"
     if grep -q "RP-UITEST DONE" "$LOG" && [ -z "$BAD" ]; then
         log_success "UI test passed (log: $LOG)"
     else
