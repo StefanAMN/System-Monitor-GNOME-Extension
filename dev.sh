@@ -231,13 +231,13 @@ cmd_test_ui() {
     local SANDBOX
     SANDBOX="$(mktemp -d /tmp/rp-ui-test.XXXXXX)"
     local EXT_DIR="$SANDBOX/data/gnome-shell/extensions"
-    mkdir -p "$EXT_DIR" "$SANDBOX/config"
+    mkdir -p "$EXT_DIR" "$SANDBOX/config" "$SANDBOX/shots"
     ln -s "$SCRIPT_DIR" "$EXT_DIR/$UUID"
     ln -s "$SCRIPT_DIR/tests/ui-driver" "$EXT_DIR/rp-ui-driver@resource-pulse.test"
     local LOG="$SANDBOX/shell.log"
 
     # Private XDG dirs: no other user extensions, no writes to the real dconf.
-    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" \
+    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" RP_UITEST_SHOTS="$SANDBOX/shots" \
     dbus-run-session -- bash -c '
         gnome-shell --headless --virtual-monitor 1280x720 > "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
@@ -246,7 +246,7 @@ cmd_test_ui() {
         gnome-extensions enable "'"$UUID"'"
         sleep 1
         gnome-extensions enable rp-ui-driver@resource-pulse.test
-        for _ in $(seq 1 90); do
+        for _ in $(seq 1 150); do
             grep -qE "RP-UITEST (DONE|FAIL)" "'"$LOG"'" && break
             sleep 1
         done
