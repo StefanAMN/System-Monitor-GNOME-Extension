@@ -16,12 +16,8 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
         });
         window.add(page);
 
-        // Intercept window close to trigger the extension to open
-        window.connect('close-request', () => {
-            settings.set_boolean('action-open-menu', true);
-            return false; // propagate so window still closes
-        });
-
+        // Closing the window just closes it. Only the explicit back button
+        // below returns to the panel menu.
         // 1.5. Inject a small back button into the top-left HeaderBar
         function findHeaderBar(w) {
             if (!w) return null;
