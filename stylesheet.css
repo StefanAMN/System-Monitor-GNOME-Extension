@@ -44,7 +44,6 @@
     background-color: #1e1e1e;
     border-radius: 14px;
     padding: 16px;
-    box-sizing: border-box;
 }
 
 /* ── Headers ──────────────────────────────────────────────────────────────── */
@@ -62,7 +61,7 @@
 
 .resource-pulse-icon-button {
     background-color: rgba(255, 255, 255, 0.05);
-    border-radius: 50%;
+    border-radius: 99px;
     padding: 6px;
     color: #ffffff;
     transition-duration: 100ms;
@@ -156,7 +155,6 @@
     font-size: 0.75em;
     color: #8c8c94 !important;
     margin-bottom: 6px;
-    line-height: 1.2;
 }
 
 /* ── Hardware Card (Overview Bottom) ──────────────────────────────────────── */
@@ -566,7 +564,7 @@
     background-color: #276fc2;
 }
 
-.resource-pulse-action-btn:disabled {
+.resource-pulse-action-btn:insensitive {
     background-color: rgba(255, 255, 255, 0.06);
     border-color: transparent;
     color: #666677;
