@@ -2,6 +2,7 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
+import Clutter from 'gi://Clutter';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -41,6 +42,50 @@ async function shot(name) {
     } finally {
         stream.close(null);
     }
+}
+
+// Real pointer input through the compositor, so anything that swallows or
+// blocks events (grabs, overlapping actors, broken handlers) is exercised.
+let pointer = null;
+async function clickActor(actor) {
+    if (!pointer) {
+        pointer = Clutter.get_default_backend().get_default_seat()
+            .create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    }
+    const [x, y] = actor.get_transformed_position();
+    const [w, h] = actor.get_transformed_size();
+    const now = () => GLib.get_monotonic_time();
+    pointer.notify_absolute_motion(now(), x + w / 2, y + h / 2);
+    await sleep(150);
+    const hit = global.stage.get_actor_at_pos(Clutter.PickMode.REACTIVE, x + w / 2, y + h / 2);
+    if (hit !== actor && !actor.contains(hit)) {
+        const chain = [];
+        for (let a = hit; a && chain.length < 6; a = a.get_parent())
+            chain.push(`${a.constructor.name}.${a.style_class || a.name || ''}[${Math.round(a.width)}x${Math.round(a.height)}]`);
+        throw new Error(`pointer at ${Math.round(x + w / 2)},${Math.round(y + h / 2)} hits ${chain.join(' < ')} instead of the target`);
+    }
+    pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+    await sleep(80);
+    pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+    await sleep(600);
+}
+
+async function clickThrough(rp, label) {
+    await clickActor(rp._indicator);
+    check(rp._indicator.menu.isOpen, `${label}: clicking the panel button did not open the menu`);
+    for (const key of ['cpu', 'memory', 'disk', 'network']) {
+        await clickActor(rp._summaryCards[key].box);
+        check(rp._activeTab === key, `${label}: clicking the ${key} card left tab at '${rp._activeTab}'`);
+        rp._activeTab = 'overview';
+        rp._updateTabVisibility();
+        await sleep(500);
+    }
+    await clickActor(rp._overviewMenuBtn);
+    check(rp._activeTab === 'settings', `${label}: clicking the menu button left tab at '${rp._activeTab}'`);
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
 }
 
 function luminance(color) {
@@ -147,7 +192,7 @@ async function cycleTabs(rp, pass, tag = null) {
     for (const [key, w] of Object.entries(rp._topBarWidgets)) {
         if (!w.label) continue;
         const widths = [];
-        for (const text of ['9%', '100%', 'n/a']) {
+        for (const text of ['9%', '99%', 'n/a']) {
             w.label.text = text;
             widths.push(w.label.get_preferred_width(-1)[1]);
         }
@@ -171,9 +216,27 @@ async function run() {
     let ext = Main.extensionManager.lookup(TARGET);
     check(ext?.stateObj, 'target extension not enabled');
 
+    // Pin everything (sandboxed dconf) so every top-bar label is exercised.
+    ext.stateObj._settings.set_strv('pinned-metrics',
+        ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu']);
+    await sleep(2500);
+    await shot('topbar');
+    {
+        // No pinned label may reserve much more room than its text needs.
+        const rp = ext.stateObj;
+        for (const [key, w] of Object.entries(rp._topBarWidgets)) {
+            const [textW] = w.label.clutter_text.get_layout().get_pixel_size();
+            const slack = w.label.width - textW;
+            check(slack <= 14, `top-bar ${key} reserves ${slack}px beyond its text '${w.label.text}'`);
+        }
+        const kids = rp._indicatorBox.get_children();
+        check(kids.filter(k => k.style_class === 'resource-pulse-divider' && k.width > 0).length === 7, 'top-bar dividers missing');
+    }
+
     // Pages are built on first visit, not in enable().
     check(Object.keys(ext.stateObj._detailSections).length === 0 && !ext.stateObj._settingsPage,
         'detail / settings pages were built eagerly');
+    await clickThrough(ext.stateObj, 'first open');
     await cycleTabs(ext.stateObj, 1, 'dark');
     check(Object.keys(ext.stateObj._detailSections).length === 8 && ext.stateObj._settingsPage,
         'detail / settings pages missing after visiting every tab');
@@ -208,6 +271,7 @@ async function run() {
     check(ext?.stateObj?._indicator, 'target extension did not re-enable');
 
     await cycleTabs(ext.stateObj, 2);
+    await clickThrough(ext.stateObj, 'after re-enable');
 
     // Disable while a poll is in flight. The menu stays closed: tearing down
     // an open PanelMenu trips shell-internal BoxPointer allocation errors

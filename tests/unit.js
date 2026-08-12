@@ -4,7 +4,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import System from 'system';
 
-import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../lib/format.js';
+import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../lib/format.js';
 import { RingBuffer } from '../lib/ringbuffer.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
@@ -138,13 +138,19 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(batteryIconName(NaN, 'unknown'), 'battery-missing-symbolic', 'battery icon: absent');
     eq(batteryIconName(130, 'discharging'), 'battery-level-100-symbolic', 'battery icon: clamps');
 
-    const longest = (key, opts, samples) => samples.every(t => t.length <= labelTemplate(key, opts).length);
-    ok(longest('cpu', {}, ['0%', '9%', '100%', 'n/a', '--']), 'template: cpu covers every value');
-    ok(longest('power', {}, ['0.0W', '14.2W', '120.5W', 'n/a']), 'template: power');
-    ok(longest('thermal', { tempUnit: 'F' }, [formatTemp(105, 'F'), 'n/a']), 'template: thermal F');
-    ok(longest('network', { netFmt: 'download' }, [`↓ ${formatSpeed(0)}`, `↓ ${formatSpeed(1023.9 * 1024)}`, `↓ ${formatSpeed(999.9 * 1024 ** 3)}`]), 'template: network single');
-    ok(longest('network', { netFmt: 'both' }, [`↓${formatSpeed(1023.9 * 1024)} ↑${formatSpeed(1023.9 * 1024)}`]), 'template: network both');
-    ok(longest('battery', { batFmt: 'percent-time' }, ['100% · 12h 59m']), 'template: battery with time');
+    const fits = (key, opts, samples) => samples.every(t => t.length <= labelTemplate(key, opts).length);
+    ok(fits('cpu', {}, ['0%', '9%', '99%', 'n/a', '--']), 'template: cpu covers normal values');
+    ok(labelTemplate('cpu').length < '100%'.length, 'template: no room reserved for the rare 100%');
+    ok(fits('power', {}, ['0.0W', '6.7W', 'n/a']), 'template: power');
+    ok(fits('thermal', { tempUnit: 'C' }, [formatTemp(99, 'C'), 'n/a']), 'template: thermal C');
+    eq(labelTemplate('battery', { batFmt: 'percent-time' }), '100%', 'template: no room reserved for a battery time estimate that may be absent');
+
+    eq([0, 500, 1024, 9.94 * 1024, 9.96 * 1024, 999.4 * 1024, 999.6 * 1024, 5 * 1024 ** 2, 2.5 * 1024 ** 3, NaN, -4].map(formatSpeedCompact),
+        ['0.0 KB/s', '0.5 KB/s', '1.0 KB/s', '9.9 KB/s', '10 KB/s', '999 KB/s', '1.0 MB/s', '5.0 MB/s', '2.5 GB/s', '0.0 KB/s', '0.0 KB/s'],
+        'compact speed: never more than three digits');
+    const speeds = [0, 1, 999, 1024, 20000, 1023 * 1024, 1024 ** 2, 7e8, 3e9, 9e11];
+    ok(speeds.every(v => `↓ ${formatSpeedCompact(v)}`.length <= labelTemplate('network', { netFmt: 'download' }).length), 'template: network single covers every rate');
+    ok(speeds.every(v => `↓${formatSpeedCompact(v)} ↑${formatSpeedCompact(v)}`.length <= labelTemplate('network', { netFmt: 'both' }).length), 'template: network both');
 }
 
 {
