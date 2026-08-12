@@ -91,6 +91,19 @@ async function cycleTabs(rp, pass, tag = null) {
     check(need <= avail + 1, `pass ${pass}: cpu details need ${need}px but the menu offers ${avail}px`);
     check(rp._coreWidgets[0].pbar.width >= 20, `pass ${pass}: per-core bar collapsed to ${rp._coreWidgets[0].pbar.width}px`);
 
+    // Hover readout: every x position, including off-graph ones, must paint cleanly.
+    const graph = rp._sparklines.find(g => g.options.showGrid && g.is_mapped());
+    check(graph, `pass ${pass}: no detail graph mapped on the cpu tab`);
+    check(graph.sampleSeconds === 2 && graph.spanLabel === '2m', `pass ${pass}: lazily built graph missed its time scale`);
+    for (const x of [-5, 0, graph.width / 2, graph.width - 30, graph.width - 1, graph.width + 50]) {
+        graph._setHoverX(x);
+        await sleep(60);
+    }
+    graph._setHoverX(graph.width - 30);
+    await sleep(150);
+    if (tag) await shot(`${tag}-hover`);
+    graph._setHoverX(-1);
+
     check(rp._summaryCards.cpu.valueLabel.text !== '--%', `pass ${pass}: cpu card never updated`);
     // 60 s of history at most, however many on-demand polls were fired.
     check(rp._hist.cpu.length >= 3, `pass ${pass}: cpu history not recorded (${rp._hist.cpu.length})`);
@@ -158,7 +171,12 @@ async function run() {
     let ext = Main.extensionManager.lookup(TARGET);
     check(ext?.stateObj, 'target extension not enabled');
 
+    // Pages are built on first visit, not in enable().
+    check(Object.keys(ext.stateObj._detailSections).length === 0 && !ext.stateObj._settingsPage,
+        'detail / settings pages were built eagerly');
     await cycleTabs(ext.stateObj, 1, 'dark');
+    check(Object.keys(ext.stateObj._detailSections).length === 8 && ext.stateObj._settingsPage,
+        'detail / settings pages missing after visiting every tab');
     ext.stateObj._indicator.menu.open();
     await sleep(300);
     checkTheme(ext.stateObj, false, 'dark');
@@ -181,8 +199,10 @@ async function run() {
     // Same path the screen lock takes.
     Main.extensionManager.disableExtension(TARGET);
     await sleep(500);
+    const t0 = GLib.get_monotonic_time();
     Main.extensionManager.enableExtension(TARGET);
     enabledAt = GLib.get_monotonic_time();
+    console.log(`RP-UITEST enable() took ${((enabledAt - t0) / 1000).toFixed(1)} ms`);
     await sleep(1500);
     ext = Main.extensionManager.lookup(TARGET);
     check(ext?.stateObj?._indicator, 'target extension did not re-enable');

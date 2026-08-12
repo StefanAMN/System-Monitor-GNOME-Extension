@@ -50,6 +50,9 @@ const SPARK_SCALES = {
 
 export default class ResourcePulseExtension extends Extension {
     enable() {
+        // Everything enable() and later code hang on `this` is dropped again
+        // in disable(), so no widget reference can outlive its actor.
+        this._baseKeys = new Set(Object.keys(this));
         this._settings = this.getSettings();
 
         // Samplers
@@ -166,7 +169,6 @@ export default class ResourcePulseExtension extends Extension {
         this._procWidgets = [];
         this._buildOverview();
         this._buildDetails();
-        this._buildSettingsPage();
         this._updateTabVisibility();
         this._updateMenuDimensions();
 
@@ -325,6 +327,8 @@ export default class ResourcePulseExtension extends Extension {
         this._previewTargetIndex = null;
         this._detailArea = null;
         this._detailSections = null;
+        this._detailBuilders = null;
+        this._spanLabel = null;
         this._summaryCards = null;
         this._popupStack = null;
         this._menuContainer = null;
@@ -362,6 +366,16 @@ export default class ResourcePulseExtension extends Extension {
         this._net = null;
         this._thm = null;
         this._gpu = null;
+
+        // Pages are built lazily, so a field left over from the previous
+        // session would not be overwritten by the next enable(). Drop them
+        // all. _gen survives: it is what invalidates in-flight callbacks.
+        const base = this._baseKeys;
+        if (base) {
+            for (const key of Object.keys(this)) {
+                if (key !== '_gen' && !base.has(key)) delete this[key];
+            }
+        }
     }
 
     _hasKey(key) {
@@ -725,6 +739,7 @@ export default class ResourcePulseExtension extends Extension {
             this._previousTab = this._activeTab;
             this._activeTab = 'settings';
         }
+        this._ensureSettingsPage();
         this._refreshSettingsUI();
         this._updateTabVisibility();
     }
@@ -1325,7 +1340,12 @@ export default class ResourcePulseExtension extends Extension {
         for (const key of HISTORY_KEYS) this._hist[key].clear();
         const span = interval * HISTORY_CAPACITY;
         const spanLabel = span > 60 && span % 60 === 0 ? `${span / 60}m` : `${span}s`;
-        for (const spark of this._sparklines) spark.setSpanLabel(spanLabel);
+        this._spanLabel = spanLabel;
+        this._sampleSeconds = interval;
+        for (const spark of this._sparklines) {
+            spark.setSpanLabel(spanLabel);
+            spark.setSampleSeconds(interval);
+        }
 
         this._poll();
         this._timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
@@ -1486,6 +1506,9 @@ export default class ResourcePulseExtension extends Extension {
             ? { paddingLeft: 38, formatValue: v => formatTemp(v, this._settings?.get_string('unit-temp') || 'C') }
             : SPARK_SCALES[key];
         const spark = new Sparkline(this._hist[key], height, Object.assign({}, options, scale));
+        // Pages are built on first visit, after polling has started.
+        if (this._spanLabel) spark.setSpanLabel(this._spanLabel);
+        if (this._sampleSeconds) spark.setSampleSeconds(this._sampleSeconds);
         this._sparklines.push(spark);
         return spark;
     }
@@ -2500,28 +2523,42 @@ export default class ResourcePulseExtension extends Extension {
 
         this._detailArea.add_child(this._detailHeader);
 
-        this._detailSections = {
-            cpu:     this._buildCpuDetails(),
-            memory:  this._buildMemoryDetails(),
-            battery: this._buildBatteryDetails(),
-            power:   this._buildPowerDetails(),
-            disk:    this._buildDiskDetails(),
-            network: this._buildNetworkDetails(),
-            thermal: this._buildThermalDetails(),
-            gpu:     this._buildGpuDetails(),
+        // Sections are built on first visit: most opens only ever show the
+        // overview, so enable() should not pay for eight unseen pages.
+        this._detailSections = {};
+        this._detailBuilders = {
+            cpu:     () => this._buildCpuDetails(),
+            memory:  () => this._buildMemoryDetails(),
+            battery: () => this._buildBatteryDetails(),
+            power:   () => this._buildPowerDetails(),
+            disk:    () => this._buildDiskDetails(),
+            network: () => this._buildNetworkDetails(),
+            thermal: () => this._buildThermalDetails(),
+            gpu:     () => this._buildGpuDetails(),
         };
-
-        for (const key of Object.keys(this._detailSections)) {
-            if (this._detailSections[key]) {
-                this._detailArea.add_child(this._detailSections[key]);
-                this._detailSections[key].visible = false;
-            }
-        }
 
         this._menuContainer.add_child(this._detailArea);
     }
 
+    _ensureDetailSection(key) {
+        if (!this._detailSections || this._detailSections[key] || !this._detailBuilders?.[key]) return;
+        const section = this._detailBuilders[key]();
+        this._detailSections[key] = section;
+        this._detailArea.add_child(section);
+        // Show what is already known instead of placeholders until the next sample.
+        if (this._lastData) this._updateDashboardUI(this._lastData);
+    }
+
+    _ensureSettingsPage() {
+        if (this._settingsPage || !this._menuContainer) return;
+        this._buildSettingsPage();
+        this._settingsPage.visible = false;
+        this._refreshSettingsUI();
+    }
+
     _updateTabVisibility() {
+        if (this._activeTab === 'settings') this._ensureSettingsPage();
+        else if (this._activeTab !== 'overview') this._ensureDetailSection(this._activeTab);
         if (this._activeTab === 'overview') {
             if (!this._overviewPage.visible) {
                 this._overviewPage.opacity = 0;
@@ -2562,7 +2599,8 @@ export default class ResourcePulseExtension extends Extension {
             // Set header title & icon dynamically
             this._detailHeaderIcon.icon_name = this._getIconName(this._activeTab);
             this._detailHeaderIcon.style_class = `rp-c-${this._activeTab}`;
-            this._detailHeaderTitle.text = this._activeTab.charAt(0).toUpperCase() + this._activeTab.slice(1);
+            this._detailHeaderTitle.text = { cpu: 'CPU', gpu: 'GPU' }[this._activeTab] ||
+                this._activeTab.charAt(0).toUpperCase() + this._activeTab.slice(1);
 
             for (const [key, section] of Object.entries(this._detailSections || {})) {
                 if (section) section.visible = (key === this._activeTab);
