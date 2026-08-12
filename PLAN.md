@@ -82,6 +82,28 @@ Owner decisions: group processes **by name** (no extra reads); **full light-them
 
 Edge cases: pinned metric whose hardware is absent; colour-scheme switch while the menu is open; hover on an empty sparkline; grouped process whose members exit between samples.
 
-## UI state
+## UI state (2026-10-02)
 
-(updated as milestones land)
+All UI milestones landed; working tree clean apart from the untracked `CLAUDE.md`.
+
+| # | Proof that was run |
+|---|--------------------|
+| U1 | headless: disk card equals root usage, injected unreadable power / missing thermal read "n/a" with reason, stale process list dimmed |
+| U2 | headless: every pinned label has the same preferred width for '9%', '100%', 'n/a'. First attempt (Clutter min-width) aborted the shell; the test caught it |
+| U3, U4 | unit: peak tracker rise / decay / floor; interface filter fixture |
+| U5 | unit: grouping; live: group totals vs `ps -eo comm,rss` (2199 vs 2212 MB); sampler 10-15 ms, unchanged |
+| U6 | headless: sandboxed desktop switched to light and back, resolved text / background luminance and card tint asserted; screenshots of every tab in both variants inspected |
+| U7 | enable() 26.7 -> 17.8 ms; headless disable/enable cycle; hover readout painted at in- and out-of-range positions, screenshot inspected |
+
+`./dev.sh test-ui` saves screenshots of every tab (dark and light) to `<sandbox>/shots/`.
+
+Not executed, therefore not claimed:
+
+- The owner's live session: real pointer hover, card dragging in light mode, and the look on the real panel were only seen in headless screenshots.
+- Top-bar label widths with a non-default panel font or fractional scaling.
+- Light variant of the GPU page on NVIDIA / AMD hardware (brand badges keep their brand colours).
+
+Known limits:
+
+- Grouping is by the kernel's 15-byte `comm`, so helpers that rename themselves ("Isolated Web Co") form their own group; summed RSS is an upper bound.
+- Brand badges and the power-fix status text keep fixed colours in both variants.
