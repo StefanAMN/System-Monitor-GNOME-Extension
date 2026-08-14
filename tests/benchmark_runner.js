@@ -28,6 +28,49 @@ function sleep(ms) {
     }));
 }
 
+// Independent ground truth for CPU tests: the CPU time the worker processes
+// themselves consumed, from /proc/<pid>/stat (utime + stime, in clock ticks).
+const CLK_TCK = 100;
+function readText(path) {
+    try {
+        const [, bytes] = GLib.file_get_contents(path);
+        return new TextDecoder().decode(bytes);
+    } catch (e) {
+        return null; // process exited: a normal event
+    }
+}
+function descendantPids(pid) {
+    const out = [];
+    const stack = [pid];
+    while (stack.length) {
+        const p = stack.pop();
+        const tasks = Gio.File.new_for_path(`/proc/${p}/task`);
+        let children = '';
+        try {
+            const en = tasks.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+            let info;
+            while ((info = en.next_file(null)))
+                children += ` ${readText(`/proc/${p}/task/${info.get_name()}/children`) || ''}`;
+            en.close(null);
+        } catch (e) {}
+        for (const c of children.trim().split(/\s+/).filter(Boolean).map(Number)) {
+            out.push(c);
+            stack.push(c);
+        }
+    }
+    return out;
+}
+function processTicks(pids) {
+    let total = 0;
+    for (const pid of pids) {
+        const stat = readText(`/proc/${pid}/stat`);
+        if (!stat) continue;
+        const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        total += Number(f[11]) + Number(f[12]);
+    }
+    return total;
+}
+
 function printHeader(title) {
     print(`\n${BOLD}${CYAN}=== ${title} ===${RESET}`);
 }
@@ -44,7 +87,9 @@ export class BenchmarkSuite {
         this._mem = new MemorySampler();
         this._dsk = new DiskSampler();
         this._results = [];
-        this._scriptPath = GLib.build_filenamev([GLib.get_current_dir(), 'tests', 'workload_generator.py']);
+        // Next to this file, wherever the command is run from.
+        const [here] = GLib.filename_from_uri(import.meta.url);
+        this._scriptPath = GLib.build_filenamev([GLib.path_get_dirname(here), 'workload_generator.py']);
     }
 
     async init() {
@@ -67,7 +112,34 @@ export class BenchmarkSuite {
         return proc;
     }
 
+    /**
+     * Wait until the worker has written its ready file. A worker that is not
+     * running would otherwise surface as a misleading accuracy FAIL.
+     */
+    async _waitReady(proc, readyFile, timeoutMs = 5000) {
+        try {
+            for (let waited = 0; waited < timeoutMs; waited += 100) {
+                if (GLib.file_test(readyFile, GLib.FileTest.EXISTS)) return;
+                if (proc.get_if_exited()) break;
+                await sleep(100);
+            }
+            let output = '';
+            if (proc.get_if_exited()) {
+                const bytes = proc.get_stdout_pipe().read_bytes(65536, null);
+                output = new TextDecoder().decode(bytes.toArray()).trim();
+            }
+            throw new Error(`workload worker did not start (${this._scriptPath})${output ? `:\n${output}` : ''}`);
+        } finally {
+            try { GLib.unlink(readyFile); } catch (e) {}
+        }
+    }
+
+    _readyFile() {
+        return GLib.build_filenamev([GLib.get_tmp_dir(), `rp_bench_ready_${GLib.get_monotonic_time()}.tmp`]);
+    }
+
     async _stopWorker(proc) {
+        if (proc.get_if_exited()) return;
         try {
             proc.send_signal(15); // SIGTERM allows Python cleanup() handler to terminate workers
         } catch (e) {}
@@ -81,14 +153,16 @@ export class BenchmarkSuite {
     // --------------------------------------------------------------------------
     // 1. Static CPU Accuracy Test
     // --------------------------------------------------------------------------
-    async testCpu(targetCores = 2, duration = 4.5) {
+    async testCpu(targetCores = 2, duration = 6.5) {
         printHeader(`Static CPU Benchmark (${targetCores} cores saturated @ 100%)`);
 
         // Measure baseline
         const bSample1 = await this._cpu.sample(true);
         await sleep(1000);
         const bSample2 = await this._cpu.sample(true);
-        const baseCpu = (bSample1.total + bSample2.total) / 2;
+        await sleep(1000);
+        const bSample3 = await this._cpu.sample(true);
+        const baseCpu = (bSample1.total + bSample2.total + bSample3.total) / 3;
         const totalThreads = bSample2.threadsCount || bSample2.cores.length || 12;
         const expectedDelta = (targetCores / totalThreads) * 100;
         const expectedTotal = Math.min(100, baseCpu + expectedDelta);
@@ -96,50 +170,66 @@ export class BenchmarkSuite {
         print(`  Baseline CPU: ${baseCpu.toFixed(1)}% across ${totalThreads} logical threads`);
         print(`  Spawning ${targetCores} worker process(es)... Expected total: ~${expectedTotal.toFixed(1)}%`);
 
-        const readyFile = `/tmp/rp_bench_ready_${Date.now()}.tmp`;
+        const readyFile = this._readyFile();
         const proc = this._spawnWorker([
             '--cpu-cores', targetCores.toString(),
             '--duration', duration.toString(),
             '--ready-file', readyFile
         ]);
 
-        // Wait for ready flag
-        for (let i = 0; i < 20; i++) {
-            if (GLib.file_test(readyFile, GLib.FileTest.EXISTS)) break;
-            await sleep(100);
+        let measured, workerShare, background, avgTopCoreLoad;
+        try {
+            await this._waitReady(proc, readyFile);
+            await sleep(1200); // Settling time
+
+            // One 3 s window measured two ways: the sampler's system total,
+            // and the workers' own CPU time (ground truth). Background load
+            // on a desktop moves by several points between any baseline and
+            // the window, which swamps a 1-core signal on many-thread
+            // machines, so the sampler is judged against the workers
+            // measured over the same window instead of against a baseline.
+            const pids = descendantPids(proc.get_identifier());
+            await this._cpu.sample(true);
+            const t0 = GLib.get_monotonic_time();
+            const ticks0 = processTicks(pids);
+            await sleep(3000);
+            const s1 = await this._cpu.sample(true);
+            const ticks1 = processTicks(pids);
+            const dt = (GLib.get_monotonic_time() - t0) / 1e6;
+
+            measured = s1.total;
+            workerShare = ((ticks1 - ticks0) / CLK_TCK / dt) / totalThreads * 100;
+            background = measured - workerShare;
+            const sortedCores = [...s1.cores].sort((x, y) => y - x);
+            const topCores = sortedCores.slice(0, targetCores);
+            avgTopCoreLoad = topCores.reduce((x, y) => x + y, 0) / topCores.length;
+        } finally {
+            await this._stopWorker(proc);
         }
-        try { GLib.unlink(readyFile); } catch (e) {}
 
-        await sleep(1200); // Settling time
-
-        // Sample during load (average of 2 consecutive ticks)
-        const load1 = await this._cpu.sample(true);
-        await sleep(1000);
-        const load2 = await this._cpu.sample(true);
-        const measuredCpu = (load1.total + load2.total) / 2;
-        const measuredDelta = Math.max(0, measuredCpu - baseCpu);
-        const errorPct = Math.abs(measuredDelta - expectedDelta) / expectedDelta * 100;
-
-        await this._stopWorker(proc);
-
-        // Check if top individual cores match
-        const sortedCores = [...load2.cores].sort((a, b) => b - a);
-        const topCores = sortedCores.slice(0, targetCores);
-        const avgTopCoreLoad = topCores.reduce((a, b) => a + b, 0) / topCores.length;
-
-        // Tolerances: Top cores detected at high load (>=70%) and overall delta within tolerance
-        const passed = avgTopCoreLoad >= 70.0;
+        // 1. The load really ran (workers got >= 80% of their cores).
+        // 2. The sampler did not under-report: system total >= the workers'
+        //    own share (1.5 points allowed for tick rounding).
+        // 3. It did not over-report: what is left for everything else is
+        //    within 10 points of the idle baseline.
+        const loadRan = workerShare >= expectedDelta * 0.8;
+        const notUnder = measured >= workerShare - 1.5;
+        const notOver = background <= baseCpu + 10;
+        const passed = loadRan && notUnder && notOver;
+        // No single deviation figure: the three conditions above are the verdict.
+        const errorPct = null;
         this._results.push({ name: `CPU (${targetCores} cores)`, passed });
 
         printResultRow(
             'CPU Total Load',
-            `+${expectedDelta.toFixed(1)}%`,
-            `+${measuredDelta.toFixed(1)}%`,
+            `≥${workerShare.toFixed(1)}%`,
+            `${measured.toFixed(1)}%`,
             '%',
             errorPct,
             passed,
-            `Top ${targetCores} Cores Avg: ${avgTopCoreLoad.toFixed(1)}%`
+            `workers ${workerShare.toFixed(1)}% of ${expectedDelta.toFixed(1)}% expected · others ${background.toFixed(1)}% (idle ${baseCpu.toFixed(1)}%) · top ${targetCores} core avg ${avgTopCoreLoad.toFixed(1)}%`
         );
+        if (!loadRan) print(`  ${YELLOW}Workload did not get its cores; result says nothing about the sampler.${RESET}`);
 
         await sleep(1000); // Allow CPU to settle back
     }
@@ -154,29 +244,25 @@ export class BenchmarkSuite {
         const baseUsedMb = bMem.used / (1024 * 1024);
         print(`  Baseline Memory: ${baseUsedMb.toFixed(0)} MB used / ${(bMem.total / (1024 * 1024)).toFixed(0)} MB total`);
 
-        const readyFile = `/tmp/rp_bench_ready_${Date.now()}.tmp`;
+        const readyFile = this._readyFile();
         const proc = this._spawnWorker([
             '--mem-mb', targetMb.toString(),
             '--duration', duration.toString(),
             '--ready-file', readyFile
         ]);
 
-        for (let i = 0; i < 30; i++) {
-            if (GLib.file_test(readyFile, GLib.FileTest.EXISTS)) break;
-            await sleep(100);
+        let measuredDeltaMb;
+        try {
+            await this._waitReady(proc, readyFile);
+            await sleep(1000); // Settling time (allocation is finished in the worker)
+            const lMem = await this._mem.sample();
+            measuredDeltaMb = Math.max(0, lMem.used / (1024 * 1024) - baseUsedMb);
+        } finally {
+            await this._stopWorker(proc);
         }
-        try { GLib.unlink(readyFile); } catch (e) {}
-
-        await sleep(1000); // Settling time
-
-        const lMem = await this._mem.sample();
-        const loadUsedMb = lMem.used / (1024 * 1024);
-        const measuredDeltaMb = Math.max(0, loadUsedMb - baseUsedMb);
         const errorPct = Math.abs(measuredDeltaMb - targetMb) / targetMb * 100;
 
-        await this._stopWorker(proc);
-
-        // Tolerance: +/- 10% (process overhead & background allocations)
+        // Tolerance: +/- 15% (process overhead & background allocations)
         const passed = Math.abs(measuredDeltaMb - targetMb) <= (targetMb * 0.15);
         this._results.push({ name: `Memory (+${targetMb} MB)`, passed });
 
@@ -204,21 +290,27 @@ export class BenchmarkSuite {
         const baseWriteRateMb = bDsk.writeRate / (1024 * 1024);
         print(`  Baseline Write: ${baseWriteRateMb.toFixed(1)} MB/s`);
 
+        const readyFile = this._readyFile();
         const proc = this._spawnWorker([
             '--disk-mbs', targetMbS.toString(),
-            '--duration', duration.toString()
+            '--duration', duration.toString(),
+            '--ready-file', readyFile
         ]);
 
-        await sleep(1500); // Let write worker ramp up
-
-        const lDsk = await this._dsk.sample(true);
-        const measuredRateMb = lDsk.writeRate / (1024 * 1024);
+        let measuredRateMb, lDsk;
+        try {
+            await this._waitReady(proc, readyFile);
+            await this._dsk.sample(true);
+            await sleep(1500); // One window entirely under load
+            lDsk = await this._dsk.sample(true);
+            measuredRateMb = lDsk.writeRate / (1024 * 1024);
+        } finally {
+            await this._stopWorker(proc);
+        }
         const errorPct = Math.abs(measuredRateMb - targetMbS) / targetMbS * 100;
 
-        await this._stopWorker(proc);
-
-        // Tolerance: +/- 20% due to OS disk write cache / elevator flushing
-        const passed = Math.abs(measuredRateMb - targetMbS) <= (targetMbS * 0.25) || measuredRateMb >= 18;
+        // Tolerance: +/- 25% (write cache / flush timing). Too fast fails too.
+        const passed = Math.abs(measuredRateMb - targetMbS) <= (targetMbS * 0.25);
         this._results.push({ name: `Disk Write (${targetMbS} MB/s)`, passed });
 
         printResultRow(
@@ -251,6 +343,9 @@ export class BenchmarkSuite {
 
         // Monitor phases asynchronously while sampling
         let running = true;
+        let workerDied = false;
+        // The sequence lasts ~14 s; never sample longer than this.
+        const deadline = GLib.get_monotonic_time() + 60 * 1000000;
         const readLoop = async () => {
             while (running) {
                 const [line] = await new Promise((resolve) => {
@@ -262,7 +357,13 @@ export class BenchmarkSuite {
                         }
                     });
                 });
-                if (line === null) break;
+                if (line === null) {
+                    // Worker exited (or never started) without [DYNAMIC_END]:
+                    // stop sampling instead of looping forever.
+                    running = false;
+                    workerDied = true;
+                    break;
+                }
                 const trimmed = line.trim();
 
                 if (trimmed.startsWith('[PHASE_START]')) {
@@ -295,6 +396,11 @@ export class BenchmarkSuite {
         let lastSampleTime = GLib.get_monotonic_time();
         const samplingLoop = async () => {
             while (running) {
+                if (GLib.get_monotonic_time() > deadline) {
+                    running = false;
+                    workerDied = true;
+                    break;
+                }
                 await sleep(800); // 800ms sampling tick for fast responsive tracking
                 const now = GLib.get_monotonic_time();
                 const c = await this._cpu.sample(true);
@@ -336,8 +442,17 @@ export class BenchmarkSuite {
             }
         };
 
-        await Promise.all([readLoop(), samplingLoop()]);
-        await this._stopWorker(proc);
+        try {
+            await Promise.all([readLoop(), samplingLoop()]);
+        } finally {
+            await this._stopWorker(proc);
+        }
+        const expectedPhases = ['BASELINE', 'HIGH_LOAD', 'STEP_DOWN', 'RECOVERY'];
+        if (workerDied || expectedPhases.some(n => !phaseResults.find(p => p.name === n))) {
+            print(`  ${RED}${BOLD}Workload sequence did not complete${RESET} (${this._scriptPath}); phases seen: ${phaseResults.map(p => p.name).join(', ') || 'none'}`);
+            this._results.push({ name: 'Dynamic Step-Response & Recovery', passed: false });
+            return;
+        }
 
         // Calibrate baseline from BASELINE phase samples
         let baseCpu = 0;
