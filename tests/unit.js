@@ -9,6 +9,12 @@ import { RingBuffer } from '../lib/ringbuffer.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync } from '../lib/utils.js';
+import { parseNetDev, counterDelta } from '../lib/network.js';
+import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
+import { sensorLabel, parseMilliCelsius, pickPackageTemp } from '../lib/thermal.js';
+import { raplWatts } from '../lib/power.js';
+import { upowerState, batteryHealth } from '../lib/battery.js';
+import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
 
 let failed = 0;
@@ -117,6 +123,111 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(g.map(x => [x.comm, x.count, x.cpu, x.rss, x.rssBytes]), [['firefox', 3, 12.5, 450, 450 * 4096], ['bash', 1, 1, 10, 10 * 4096]], 'group: sums cpu and memory per name, keeps first-seen order');
     eq(g[0].pid, 10, 'group: keeps a representative pid');
     eq(groupByName([]), [], 'group: empty');
+}
+
+// ── collectors: network ──
+{
+    const netdev = `Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 9000 10 0 0 0 0 0 0 9000 10 0 0 0 0 0 0
+enp0s31f6: 123456 100 1 2 0 0 0 5 654321 90 3 4 0 0 0 0
+wlp43s0:18446744073709551000 7 0 0 0 0 0 0 42 1 0 0 0 0 0 0
+docker0: 1 2 3
+`;
+    const rows = parseNetDev(netdev);
+    eq(rows.map(r => r.iface), ['enp0s31f6', 'wlp43s0'], 'netdev: header and loopback skipped, truncated line dropped, no space after colon handled');
+    eq([rows[0].rxBytes, rows[0].rxErrors, rows[0].rxDrops, rows[0].txBytes, rows[0].txErrors, rows[0].txDrops],
+        [123456, 1, 2, 654321, 3, 4], 'netdev: field positions');
+    eq(parseNetDev(''), [], 'netdev: empty file');
+    eq(counterDelta(1500, 1000), 500, 'net counter: normal delta');
+    eq(counterDelta(200, 4294967000), 0, 'net counter: reset / 32-bit wrap reads 0, not negative or huge');
+    eq(counterDelta(7, 7), 0, 'net counter: idle');
+}
+
+// ── collectors: disk ──
+{
+    const diskstats = [
+        '   7       0 loop0 100 0 2000 10 0 0 0 0 0 5 10 0 0 0 0 0 0',
+        ' 259       0 nvme0n1 5000 10 400000 900 8000 20 900000 1500 0 2000 2400 0 0 0 0 0 0',
+        ' 259       1 nvme0n1p1 4000 10 300000 800 7000 20 800000 1400 0 1900 2200 0 0 0 0 0 0',
+        '   8       0 sda 10 0 80 1 2 0 16 1 0 3 2 0 0 0 0 0 0',
+        ' 252       0 dm-0 1 0 8 0 1 0 8 0 0 1 1 0 0 0 0 0 0',
+        '   8      16 sdab 1 0 8 0 1 0 8 0 0 1 1 0 0 0 0 0 0',
+        ' 179       0 mmcblk0 1 0 8 0 1 0 8 0 0 7 1 0 0 0 0 0 0',
+        ' 179       1 mmcblk0p1 1 0 8 0 1 0 8 0 0 7 1 0 0 0 0 0 0'
+    ].join('\n');
+    const disks = parseDiskstats(diskstats);
+    eq(disks.map(d => d.name), ['nvme0n1', 'sda', 'sdab', 'mmcblk0'], 'diskstats: whole disks only (no partitions, loop, dm)');
+    eq([disks[0].sectorsRead, disks[0].sectorsWritten, disks[0].ioTicks], [400000, 900000, 2000], 'diskstats: sectors read/written and io_ticks fields');
+    eq(ioUtilization(1500, 1000, 1000), 50, 'disk util: 500 ms busy in 1 s');
+    eq(ioUtilization(5000, 1000, 1000), 100, 'disk util: clamped to 100 (multi-queue overlap)');
+    eq(ioUtilization(10, 1000, 1000), 0, 'disk util: counter reset');
+    eq(ioUtilization(10, 0, 0), 0, 'disk util: no elapsed time');
+
+    const mounts = parseMounts([
+        '/dev/nvme0n1p2 / ext4 rw 0 0',
+        '/dev/nvme0n1p3 /home ext4 rw 0 0',
+        'tmpfs /run tmpfs rw 0 0',
+        '/dev/sdb1 /media/me/USB\\040Stick vfat rw 0 0',
+        '/dev/sdb1 /mnt/again vfat rw 0 0',
+        '/dev/sdc1 /srv/data ext4 rw 0 0',
+        '/dev/loop3 /snap/core/1 squashfs ro 0 0'
+    ].join('\n'));
+    eq(mounts, [{ device: '/dev/nvme0n1p3', mount: '/home' }, { device: '/dev/sdb1', mount: '/media/me/USB Stick' }],
+        'mounts: user-facing real filesystems, one per device, \\040 decoded to a space');
+}
+
+// ── collectors: thermal ──
+{
+    eq(sensorLabel('coretemp', 'Package id 0'), { label: 'CPU Package', isPackage: true }, 'thermal: Intel package');
+    eq(sensorLabel('k10temp', 'Tctl'), { label: 'CPU Package (Tctl)', isPackage: true }, 'thermal: AMD Tctl');
+    eq(sensorLabel('k10temp', 'Tccd1'), { label: 'CPU Tccd1', isPackage: false }, 'thermal: AMD CCD');
+    eq(sensorLabel('coretemp', 'Core 3'), { label: 'Core 3', isPackage: false }, 'thermal: core');
+    eq(sensorLabel('acpitz', ''), { label: 'Motherboard', isPackage: false }, 'thermal: ACPI zone');
+    eq(sensorLabel('nvme', 'Composite'), { label: 'NVMe Composite', isPackage: false }, 'thermal: NVMe');
+    eq(sensorLabel('amdgpu', ''), { label: 'amdgpu', isPackage: false }, 'thermal: unlabeled input falls back to chip name');
+    eq([parseMilliCelsius('47000\n'), parseMilliCelsius('0'), parseMilliCelsius('-273000'), parseMilliCelsius('200000'), parseMilliCelsius('garbage')],
+        [47, null, null, null, null], 'thermal: millidegrees, implausible values rejected');
+    eq(pickPackageTemp([{ label: 'Core 0', temp: 50 }, { label: 'CPU Package', temp: 55, isPackage: true }]), 55, 'thermal: package preferred');
+    eq(pickPackageTemp([{ label: 'NVMe', temp: 40 }, { label: 'Core 1', temp: 52 }]), 52, 'thermal: then first core');
+    eq(pickPackageTemp([{ label: 'acpitz', temp: 40 }, { label: 'NVMe', temp: 61 }]), 61, 'thermal: then hottest');
+    eq(pickPackageTemp([]), 0, 'thermal: no sensor');
+}
+
+// ── collectors: power (RAPL) ──
+{
+    eq(raplWatts(1e6, 16e6, 2 ** 32, 1), 15, 'rapl: 15 J in 1 s = 15 W');
+    const range = 262143328850;
+    eq(Math.round(raplWatts(range - 5e6, 5e6, range, 1)), 10, 'rapl: counter wrap at max_energy_range_uj');
+    eq(raplWatts(0, 5e9, 2 ** 32, 1), null, 'rapl: > 1000 W is rejected as implausible');
+    eq(raplWatts(1e6, 2e6, 2 ** 32, 0), null, 'rapl: zero elapsed time');
+}
+
+// ── collectors: battery ──
+{
+    eq([0, 1, 2, 3, 4, 5, 6, 7, -1].map(upowerState),
+        ['unknown', 'charging', 'discharging', 'empty', 'full', 'not charging', 'not charging', 'unknown', 'unknown'],
+        'upower: every documented State value');
+    eq(batteryHealth(45.3, 52).toFixed(2), '87.12', 'battery: health from Wh capacities');
+    eq(batteryHealth(55, 52), 100, 'battery: above design clamps to 100');
+    eq(batteryHealth(0, 0, 93), 93, 'battery: no design capacity falls back');
+}
+
+// ── collectors: GPU (NVIDIA / AMD paths cannot run on this machine) ──
+{
+    const nv = parseNvidiaSmi('NVIDIA GeForce RTX 3060, 550.54.14, 37, 12, 61, 2048, 12288, 45.20, 1530, 2100, 30\n');
+    eq([nv.model, nv.driver, nv.percent, nv.memPercent, nv.temp, nv.memUsed, nv.memTotal, nv.powerDraw, nv.clock, nv.maxClock, nv.fanSpeed],
+        ['NVIDIA GeForce RTX 3060', 'NVIDIA 550.54.14', 37, 12, 61, 2048 * 1048576, 12288 * 1048576, 45.2, 1530, 2100, 30], 'nvidia-smi: all fields');
+    const laptop = parseNvidiaSmi('NVIDIA RTX A500 Laptop GPU, 535.1, 0, 0, 45, 5, 4096, [N/A], 210, 1695, [Not Supported]');
+    eq([laptop.powerDraw, laptop.fanSpeed, laptop.clock], [null, null, 210], 'nvidia-smi: [N/A] and [Not Supported] become null');
+    eq(parseNvidiaSmi(''), null, 'nvidia-smi: no output');
+    eq(parseNvidiaSmi('NVIDIA-SMI has failed because it couldn\'t communicate with the NVIDIA driver.'), null, 'nvidia-smi: driver error text');
+    eq(parseAmdSclk('0: 500Mhz\n1: 1200Mhz *\n2: 2400Mhz\n'), 1200, 'amdgpu: active sclk level');
+    eq(parseAmdSclk('0: 500Mhz\n'), null, 'amdgpu: no active level');
+    eq(intelBusyFromRc6(1000, 1250, 1000), 75, 'intel rc6: 25% asleep = 75% busy');
+    eq(intelBusyFromRc6(1000, 2000, 1000), 0, 'intel rc6: fully asleep');
+    eq(intelBusyFromRc6(1000, 900, 1000), null, 'intel rc6: counter reset');
+    eq(intelBusyFromRc6(1000, 1050, 50), null, 'intel rc6: interval too short');
 }
 
 // ── presentation helpers ──
