@@ -80,6 +80,18 @@ async function clickThrough(rp, label) {
         rp._updateTabVisibility();
         await sleep(500);
     }
+    // Opening a detail tab must fetch its detail data at once, not after
+    // the next 2 s tick: the full thermal list must be there within 1.2 s.
+    await clickActor(rp._summaryCards.thermal.box);
+    check(rp._activeTab === 'thermal', `${label}: clicking the thermal card left tab at '${rp._activeTab}'`);
+    await sleep(600);
+    check(rp._lastThm?.detailed === true, `${label}: no detailed thermal sample shortly after opening the tab`);
+    check((rp._thmSensorRows?.length ?? 0) === rp._lastThm.sensors.length || rp._lastThm.sensors.length === 0,
+        `${label}: thermal tab shows ${rp._thmSensorRows?.length} rows for ${rp._lastThm.sensors.length} sensors`);
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    await sleep(500);
+
     await clickActor(rp._overviewMenuBtn);
     check(rp._activeTab === 'settings', `${label}: clicking the menu button left tab at '${rp._activeTab}'`);
     rp._activeTab = 'overview';
