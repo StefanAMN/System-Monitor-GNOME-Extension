@@ -236,55 +236,32 @@
     font-weight: 600;
 }
 
-/* ── Footer / SysMon Button ───────────────────────────────────────────────── */
-
-.resource-pulse-sysmon-button {
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    padding: 10px 14px;
-    transition-duration: 100ms;
-}
-.resource-pulse-sysmon-button:hover {
-    background-color: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.1);
-}
-.resource-pulse-sysmon-button:active {
-    background-color: rgba(255, 255, 255, 0.12);
-}
-
-.resource-pulse-sysmon-label {
-    font-size: 0.95em;
-    font-weight: bold;
-    color: #ffffff;
-    margin-left: 10px;
-}
 
 /* ── Tints for Cards ──────────────────────────────────────────────────────── */
 
-.tint-cpu { background-color: #242424 !important; border: 1px solid rgba(53, 132, 228, 0.3) !important; }
-.tint-cpu:hover { background-color: #2c2c2c !important; border-color: rgba(53, 132, 228, 0.5) !important; }
+.tint-cpu { background-color: #1f2937; border: 1px solid rgba(53, 132, 228, 0.4); }
+.tint-cpu:hover { background-color: #26354a; border-color: rgba(53, 132, 228, 0.9); }
 
-.tint-memory { background-color: #242424 !important; border: 1px solid rgba(145, 65, 172, 0.3) !important; }
-.tint-memory:hover { background-color: #2c2c2c !important; border-color: rgba(145, 65, 172, 0.5) !important; }
+.tint-memory { background-color: #1e1a2e; border: 1px solid rgba(145, 65, 172, 0.4); }
+.tint-memory:hover { background-color: #292240; border-color: rgba(145, 65, 172, 0.9); }
 
-.tint-battery { background-color: #242424 !important; border: 1px solid rgba(46, 194, 126, 0.3) !important; }
-.tint-battery:hover { background-color: #2c2c2c !important; border-color: rgba(46, 194, 126, 0.5) !important; }
+.tint-battery { background-color: #192820; border: 1px solid rgba(46, 194, 126, 0.4); }
+.tint-battery:hover { background-color: #20382b; border-color: rgba(46, 194, 126, 0.9); }
 
-.tint-power { background-color: rgba(246, 211, 45, 0.04); border-color: rgba(246, 211, 45, 0.12); }
-.tint-power:hover { background-color: rgba(246, 211, 45, 0.08); }
+.tint-power { background-color: #22200a; border: 1px solid rgba(246, 211, 45, 0.35); }
+.tint-power:hover { background-color: #2d2b0e; border-color: rgba(246, 211, 45, 0.9); }
 
-.tint-disk { background-color: rgba(255, 120, 0, 0.04); border-color: rgba(255, 120, 0, 0.12); }
-.tint-disk:hover { background-color: rgba(255, 120, 0, 0.08); }
+.tint-disk { background-color: #22200a; border: 1px solid rgba(246, 211, 45, 0.35); }
+.tint-disk:hover { background-color: #2d2b0e; border-color: rgba(246, 211, 45, 0.9); }
 
-.tint-network { background-color: rgba(224, 27, 36, 0.04); border-color: rgba(224, 27, 36, 0.12); }
-.tint-network:hover { background-color: rgba(224, 27, 36, 0.08); }
+.tint-network { background-color: #22100f; border: 1px solid rgba(224, 27, 36, 0.35); }
+.tint-network:hover { background-color: #2f1615; border-color: rgba(224, 27, 36, 0.9); }
 
-.tint-thermal { background-color: rgba(255, 120, 0, 0.04); border-color: rgba(255, 120, 0, 0.12); }
-.tint-thermal:hover { background-color: rgba(255, 120, 0, 0.08); }
+.tint-thermal { background-color: #221608; border: 1px solid rgba(255, 120, 0, 0.35); }
+.tint-thermal:hover { background-color: #2f1f0b; border-color: rgba(255, 120, 0, 0.9); }
 
-.tint-gpu { background-color: rgba(51, 209, 122, 0.04); border-color: rgba(51, 209, 122, 0.12); }
-.tint-gpu:hover { background-color: rgba(51, 209, 122, 0.08); }
+.tint-gpu { background-color: #0b2014; border: 1px solid rgba(51, 209, 122, 0.35); }
+.tint-gpu:hover { background-color: #10301e; border-color: rgba(51, 209, 122, 0.9); }
 
 /* ── Progress Bars ────────────────────────────────────────────────────────── */
 
