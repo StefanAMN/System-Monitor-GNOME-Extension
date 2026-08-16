@@ -46,6 +46,21 @@
       <summary>Density Mode</summary>
       <description>Density mode for the dashboard cards ('compact' or 'detailed').</description>
     </key>
+    <key name="show-tooltips" type="b">
+      <default>true</default>
+      <summary>Show Tooltips</summary>
+      <description>Show rich contextual hover tooltips on panel indicators.</description>
+    </key>
+    <key name="battery-top-format" type="s">
+      <default>'percent'</default>
+      <summary>Battery Top Bar Format</summary>
+      <description>Format of battery metric in top bar ('percent' or 'percent-time').</description>
+    </key>
+    <key name="network-top-format" type="s">
+      <default>'download'</default>
+      <summary>Network Top Bar Format</summary>
+      <description>Format of network metric in top bar ('download', 'upload', or 'both').</description>
+    </key>
     <key name="action-open-menu" type="b">
       <default>false</default>
       <summary>Trigger for opening the menu</summary>
