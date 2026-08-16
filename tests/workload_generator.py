@@ -25,15 +25,19 @@ _disk_process = None
 
 import ctypes
 
-def _set_pdeathsig():
+def _set_pdeathsig(name=None):
     try:
-        ctypes.CDLL("libc.so.6").prctl(1, 15)
+        libc = ctypes.CDLL("libc.so.6")
+        libc.prctl(1, 15)  # PR_SET_PDEATHSIG = SIGTERM
+        if name:
+            # PR_SET_NAME: a distinctive comm so the process list can be checked
+            libc.prctl(15, ctypes.c_char_p(name.encode()[:15]), 0, 0, 0)
     except Exception:
         pass
 
 def _cpu_busy_loop(stop_event, duty_cycle=100):
     """Burn CPU on a single core at the specified duty cycle (1-100%)."""
-    _set_pdeathsig()
+    _set_pdeathsig("rp-bench-cpu")
     if duty_cycle >= 100:
         while not stop_event.is_set():
             for _ in range(1000000):
@@ -132,6 +136,50 @@ def _disk_io_worker(stop_event, target_mb_s, file_path):
     except Exception:
         pass
 
+_read_file_path = "/var/tmp/rp_benchmark_read.tmp"
+_read_process = None
+_stop_read = None
+
+def _disk_read_worker(stop_event, target_mb_s, file_path):
+    """Read a file at a throttled rate, bypassing the page cache (O_DIRECT)
+    so every byte is a real device read."""
+    _set_pdeathsig("rp-bench-read")
+    chunk = 1024 * 1024
+    buf = mmap.mmap(-1, chunk)  # page-aligned, as O_DIRECT requires
+    fd = os.open(file_path, os.O_RDONLY | getattr(os, "O_DIRECT", 0))
+    try:
+        while not stop_event.is_set():
+            t0 = time.time()
+            if os.readv(fd, [buf]) < chunk:
+                os.lseek(fd, 0, os.SEEK_SET)
+            sleep_time = (1.0 / max(1, target_mb_s)) - (time.time() - t0)
+            if sleep_time > 0 and not stop_event.is_set():
+                time.sleep(sleep_time)
+    finally:
+        os.close(fd)
+
+def set_disk_read_load(target_mb_s):
+    """Start or stop the throttled read worker (creates a 64 MB file once)."""
+    global _read_process, _stop_read
+    if _read_process and _read_process.is_alive():
+        _stop_read.set()
+        _read_process.join(timeout=0.5)
+        if _read_process.is_alive():
+            _read_process.terminate()
+        _read_process = None
+        _stop_read = None
+    if target_mb_s > 0:
+        if not os.path.exists(_read_file_path) or os.path.getsize(_read_file_path) < 64 * 1024 * 1024:
+            with open(_read_file_path, "wb") as f:
+                for _ in range(64):
+                    f.write(os.urandom(1024 * 1024))
+                f.flush()
+                os.fsync(f.fileno())
+        _stop_read = mp.Event()
+        _read_process = mp.Process(target=_disk_read_worker, args=(_stop_read, target_mb_s, _read_file_path))
+        _read_process.daemon = True
+        _read_process.start()
+
 def set_disk_load(target_mb_s):
     """Start or stop throttled disk write worker."""
     global _disk_process, _stop_disk
@@ -153,6 +201,7 @@ def cleanup(signum=None, frame=None):
     """Clean up all processes, memory, and files."""
     set_cpu_load(0)
     set_disk_load(0)
+    set_disk_read_load(0)
     global _mem_queue, _mem_process
     if _mem_queue is not None:
         try: _mem_queue.put(-1)
@@ -164,11 +213,12 @@ def cleanup(signum=None, frame=None):
         _mem_process = None
         _mem_queue = None
 
-    if os.path.exists(_disk_file_path):
-        try:
-            os.remove(_disk_file_path)
-        except OSError:
-            pass
+    for path in (_disk_file_path, _read_file_path):
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
     sys.exit(0)
 
 def run_dynamic_sequence():
@@ -202,6 +252,7 @@ def main():
     parser.add_argument("--cpu-duty", type=int, default=100, help="CPU duty cycle (1-100%%)")
     parser.add_argument("--mem-mb", type=int, default=0, help="Megabytes of RAM to allocate and hold")
     parser.add_argument("--disk-mbs", type=int, default=0, help="Throttled disk write rate in MB/s")
+    parser.add_argument("--disk-read-mbs", type=int, default=0, help="Throttled direct (uncached) disk read rate in MB/s")
     parser.add_argument("--duration", type=float, default=5.0, help="Duration to sustain steady load in seconds")
     parser.add_argument("--ready-file", type=str, default="", help="Touch this file when workload is ready")
     args = parser.parse_args()
@@ -217,6 +268,8 @@ def main():
         set_memory_load(args.mem_mb)
     if args.disk_mbs > 0:
         set_disk_load(args.disk_mbs)
+    if args.disk_read_mbs > 0:
+        set_disk_read_load(args.disk_read_mbs)
 
     if args.ready_file:
         try:

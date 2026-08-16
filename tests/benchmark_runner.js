@@ -11,6 +11,10 @@ import GLib from 'gi://GLib';
 import { CpuSampler } from '../lib/cpu.js';
 import { MemorySampler } from '../lib/memory.js';
 import { DiskSampler } from '../lib/disk.js';
+import { ProcessSampler } from '../lib/process.js';
+import { PowerSampler } from '../lib/power.js';
+import { ThermalSampler } from '../lib/thermal.js';
+import { BatterySampler } from '../lib/battery.js';
 
 // ANSI colors
 const BOLD = '\x1b[1m';
@@ -86,6 +90,10 @@ export class BenchmarkSuite {
         this._cpu = new CpuSampler();
         this._mem = new MemorySampler();
         this._dsk = new DiskSampler();
+        this._proc = new ProcessSampler();
+        this._pwr = new PowerSampler();
+        this._thm = new ThermalSampler();
+        this._bat = new BatterySampler();
         this._results = [];
         // Next to this file, wherever the command is run from.
         const [here] = GLib.filename_from_uri(import.meta.url);
@@ -537,12 +545,185 @@ export class BenchmarkSuite {
         this._results.push({ name: 'Dynamic Step-Response & Recovery', passed: allDynamicPassed });
     }
 
+    _skip(name, why) {
+        print(`  ${YELLOW}${BOLD}SKIP${RESET} ${why}`);
+        this._results.push({ name, passed: true, skipped: why });
+    }
+
+    // --------------------------------------------------------------------------
+    // 5. Process list: the busy worker must top the list with its real CPU use
+    // --------------------------------------------------------------------------
+    async testProcesses(targetCores = 2) {
+        printHeader(`Process List Benchmark (${targetCores} named workers @ 100%)`);
+        const mem = await this._mem.sample();
+        const readyFile = this._readyFile();
+        const proc = this._spawnWorker(['--cpu-cores', String(targetCores), '--duration', '8', '--ready-file', readyFile]);
+        let group, rank, truth;
+        try {
+            await this._waitReady(proc, readyFile);
+            await sleep(1000);
+            const pids = descendantPids(proc.get_identifier());
+            await this._proc.sample(mem.total, false, 20);
+            const t0 = GLib.get_monotonic_time();
+            const ticks0 = processTicks(pids);
+            await sleep(2000);
+            const r = await this._proc.sample(mem.total, false, 20);
+            const ticks1 = processTicks(pids);
+            truth = ((ticks1 - ticks0) / CLK_TCK / ((GLib.get_monotonic_time() - t0) / 1e6)) * 100;
+            rank = r.top.findIndex(g => g.comm === 'rp-bench-cpu');
+            group = r.top[rank];
+        } finally {
+            await this._stopWorker(proc);
+        }
+        // Grouped by name: one row for all workers, at their measured share
+        // (100 = one core), and first in the list.
+        const ok = group && group.count === targetCores && rank === 0 &&
+            Math.abs(group.cpu - truth) <= Math.max(5, truth * 0.1);
+        this._results.push({ name: `Process list (${targetCores} workers)`, passed: !!ok });
+        printResultRow('Worker group CPU', `${truth.toFixed(1)}%`, group ? `${group.cpu.toFixed(1)}%` : 'missing', '%',
+            group ? Math.abs(group.cpu - truth) / truth * 100 : null, !!ok,
+            group ? `rank ${rank + 1}, ${group.count} process(es) grouped` : 'rp-bench-cpu not in the top 20');
+        await sleep(1000);
+    }
+
+    // --------------------------------------------------------------------------
+    // 6. Disk read throughput (page cache bypassed)
+    // --------------------------------------------------------------------------
+    async testDiskRead(targetMbS = 25) {
+        printHeader(`Disk Read Benchmark (direct reads @ ${targetMbS} MB/s)`);
+        const readyFile = this._readyFile();
+        const proc = this._spawnWorker(['--disk-read-mbs', String(targetMbS), '--duration', '6', '--ready-file', readyFile]);
+        let measured, dsk;
+        try {
+            await this._waitReady(proc, readyFile, 15000);
+            await sleep(500);
+            await this._dsk.sample(true);
+            await sleep(2000);
+            dsk = await this._dsk.sample(true);
+            measured = dsk.readRate / (1024 * 1024);
+        } finally {
+            await this._stopWorker(proc);
+        }
+        const passed = Math.abs(measured - targetMbS) <= targetMbS * 0.25;
+        this._results.push({ name: `Disk Read (${targetMbS} MB/s)`, passed });
+        printResultRow('Disk Read Rate', `${targetMbS} MB/s`, `${measured.toFixed(1)} MB/s`, 'MB/s',
+            Math.abs(measured - targetMbS) / targetMbS * 100, passed, `Busy: ${Math.round(dsk.diskPercent)}%`);
+        await sleep(1000);
+    }
+
+    // --------------------------------------------------------------------------
+    // 7. Power and temperature respond to load (no independent ground truth
+    //    exists for these, so this is a direction check, not an accuracy one)
+    // --------------------------------------------------------------------------
+    async _powerOver(ms) {
+        await this._pwr.sample(null);
+        await sleep(ms);
+        return (await this._pwr.sample(null)).packagePower;
+    }
+
+    async testPowerThermal() {
+        const threads = (await this._cpu.sample(true)).threadsCount || GLib.get_num_processors();
+        const cores = Math.max(2, Math.floor(threads / 2));
+        printHeader(`Power & Thermal Response (${cores} cores loaded for 8 s)`);
+        const idleThm = await this._thm.sample(false);
+        const idlePower = await this._powerOver(2000);
+        const rapl = idlePower !== null && idlePower !== undefined;
+        const thermal = idleThm.packageTemp > 0;
+        if (!rapl && !thermal) {
+            this._skip('Power & thermal response', 'no readable RAPL counter and no temperature sensor');
+            return;
+        }
+
+        const readyFile = this._readyFile();
+        const proc = this._spawnWorker(['--cpu-cores', String(cores), '--duration', '10', '--ready-file', readyFile]);
+        let loadPower, loadThm;
+        try {
+            await this._waitReady(proc, readyFile);
+            await sleep(4000);
+            loadPower = await this._powerOver(3000);
+            loadThm = await this._thm.sample(false);
+        } finally {
+            await this._stopWorker(proc);
+        }
+        await sleep(6000);
+        const backPower = rapl ? await this._powerOver(2000) : null;
+
+        if (rapl) {
+            // Rises clearly under load and falls back most of the way after.
+            const rise = loadPower - idlePower;
+            const ok = rise >= 2 && backPower < idlePower + rise * 0.5;
+            this._results.push({ name: 'Package power follows load', passed: ok });
+            printResultRow('Package Power', `> +2 W`, `+${rise.toFixed(1)} W`, 'W', null, ok,
+                `idle ${idlePower.toFixed(1)} W, load ${loadPower.toFixed(1)} W, after ${backPower.toFixed(1)} W`);
+        } else {
+            this._skip('Package power follows load', 'RAPL energy counter not readable');
+        }
+        if (thermal) {
+            const rise = loadThm.packageTemp - idleThm.packageTemp;
+            const ok = rise >= 2;
+            this._results.push({ name: 'Package temperature follows load', passed: ok });
+            printResultRow('Package Temp', '> +2 °C', `+${rise.toFixed(1)} °C`, '°C', null, ok,
+                `idle ${idleThm.packageTemp.toFixed(1)} °C, load ${loadThm.packageTemp.toFixed(1)} °C`);
+        } else {
+            this._skip('Package temperature follows load', 'no temperature sensor');
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // 8. Battery readout matches upower
+    // --------------------------------------------------------------------------
+    async testBattery() {
+        printHeader('Battery Readout vs upower');
+        const bat = await this._bat.sample();
+        if (!bat.present) {
+            this._skip('Battery vs upower', 'no battery');
+            return;
+        }
+        const run = (argv) => {
+            try {
+                const [, out] = GLib.spawn_sync(null, argv, null, GLib.SpawnFlags.SEARCH_PATH, null);
+                return new TextDecoder().decode(out);
+            } catch (e) {
+                return '';
+            }
+        };
+        const device = run(['upower', '-e']).split('\n').find(l => /battery_/.test(l));
+        if (!device) {
+            this._skip('Battery vs upower', 'upower lists no battery device');
+            return;
+        }
+        const info = run(['upower', '-i', device.trim()]);
+        const field = (name) => {
+            const m = info.match(new RegExp(`^\\s*${name}:\\s*(.+)$`, 'm'));
+            return m ? m[1].trim() : null;
+        };
+        const states = {
+            'charging': 'charging', 'discharging': 'discharging', 'fully-charged': 'full',
+            'empty': 'empty', 'pending-charge': 'not charging', 'pending-discharge': 'not charging'
+        };
+        const pct = parseFloat(field('percentage'));
+        const rate = parseFloat(field('energy-rate'));
+        const state = states[field('state')] ?? 'unknown';
+        const checks = [
+            ['Percentage', `${pct}%`, `${bat.percent.toFixed(1)}%`, Math.abs(bat.percent - pct) <= 1],
+            ['State', state, bat.state, bat.state === state],
+            ['Energy rate', `${rate} W`, `${bat.energyRate.toFixed(2)} W`, Math.abs(bat.energyRate - rate) <= 0.5]
+        ];
+        let all = true;
+        for (const [name, want, got, ok] of checks) {
+            printResultRow(name, want, got, '', null, ok);
+            all = all && ok;
+        }
+        this._results.push({ name: 'Battery vs upower', passed: all });
+    }
+
     printSummary() {
         printHeader('Benchmark Test Results Summary');
         let allPassed = true;
         for (const res of this._results) {
-            const icon = res.passed ? `${GREEN}${BOLD}✓ PASS${RESET}` : `${RED}${BOLD}✗ FAIL${RESET}`;
-            print(`  ${icon} - ${res.name}`);
+            const icon = res.skipped ? `${YELLOW}${BOLD}- SKIP${RESET}`
+                : res.passed ? `${GREEN}${BOLD}✓ PASS${RESET}` : `${RED}${BOLD}✗ FAIL${RESET}`;
+            print(`  ${icon} - ${res.name}${res.skipped ? ` (${res.skipped})` : ''}`);
             if (!res.passed) allPassed = false;
         }
         print('\n' + '='.repeat(60));
@@ -577,16 +758,30 @@ async function main() {
         await suite.testDisk(mbs);
     } else if (mode === 'dynamic') {
         await suite.testDynamic();
+    } else if (mode === 'proc' || mode === 'processes') {
+        await suite.testProcesses(parseInt(ARGV[1] || '2', 10));
+    } else if (mode === 'diskread' || mode === 'read') {
+        await suite.testDiskRead(parseInt(ARGV[1] || '25', 10));
+    } else if (mode === 'sanity' || mode === 'power') {
+        await suite.testPowerThermal();
+    } else if (mode === 'battery') {
+        await suite.testBattery();
     } else if (mode === 'static') {
         await suite.testCpu(2);
         await suite.testMemory(500);
         await suite.testDisk(25);
+        await suite.testDiskRead(25);
+        await suite.testProcesses(2);
     } else {
-        // 'all' runs both static and dynamic suites
+        // 'all': static accuracy, dynamic steps, response and cross-checks
         await suite.testCpu(2);
         await suite.testMemory(500);
         await suite.testDisk(25);
+        await suite.testDiskRead(25);
+        await suite.testProcesses(2);
         await suite.testDynamic();
+        await suite.testPowerThermal();
+        await suite.testBattery();
     }
 
     const passed = suite.printSummary();
