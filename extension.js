@@ -20,6 +20,7 @@ import { DiskSampler } from './lib/disk.js';
 import { NetworkSampler } from './lib/network.js';
 import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
+import { runSubprocess } from './lib/utils.js';
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
@@ -55,24 +56,6 @@ function formatUptime(seconds) {
     if (d > 0) return `${d}d ${h}h`;
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
-}
-
-function runSubprocess(argv) {
-    return new Promise((resolve) => {
-        try {
-            const proc = new Gio.Subprocess({
-                argv,
-                flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
-            });
-            proc.init(null);
-            proc.communicate_utf8_async(null, null, (obj, res) => {
-                try {
-                    const [, stdout] = obj.communicate_utf8_finish(res);
-                    resolve(stdout || '');
-                } catch (_e) { resolve(''); }
-            });
-        } catch (_e) { resolve(''); }
-    });
 }
 
 // ─── Custom Cairo Widgets ─────────────────────────────────────────────────────
@@ -412,6 +395,11 @@ export default class ResourcePulseExtension extends Extension {
             this._monitorsChangedId = null;
         }
 
+        if (this._tooltipIdleId) {
+            GLib.source_remove(this._tooltipIdleId);
+            this._tooltipIdleId = null;
+        }
+
         if (this._tooltip) {
             this._tooltip.destroy();
             this._tooltip = null;
@@ -451,7 +439,13 @@ export default class ResourcePulseExtension extends Extension {
         this._tooltip.visible = true;
         this._tooltip.opacity = 0;
 
-        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+        if (this._tooltipIdleId) {
+            GLib.source_remove(this._tooltipIdleId);
+            this._tooltipIdleId = null;
+        }
+
+        this._tooltipIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._tooltipIdleId = null;
             if (!this._tooltip || !actor || !actor.get_stage()) return GLib.SOURCE_REMOVE;
             const [stageX, stageY] = actor.get_transformed_position();
             const [w, h] = actor.get_transformed_size();
@@ -473,6 +467,10 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _hideTooltip() {
+        if (this._tooltipIdleId) {
+            GLib.source_remove(this._tooltipIdleId);
+            this._tooltipIdleId = null;
+        }
         if (this._tooltip && this._tooltip.visible) {
             this._tooltip.ease({
                 opacity: 0,
@@ -536,8 +534,10 @@ export default class ResourcePulseExtension extends Extension {
             const pinned = this._settings?.get_strv('pinned-metrics') || ['cpu', 'memory'];
             const isOpen = this._menuOpen;
 
-            const isCpuTab = isOpen && this._activeTab === 'cpu';
-            const isMemTab = isOpen && this._activeTab === 'memory';
+            const isDetailedCpu = isOpen && this._activeTab === 'cpu';
+            const isDetailedMem = isOpen && this._activeTab === 'memory';
+            const isDetailedDsk = isOpen && (this._activeTab === 'disk' || this._activeTab === 'overview');
+            const isDetailedThm = isOpen && (this._activeTab === 'thermal' || this._activeTab === 'overview');
 
             const needCpu = isOpen || pinned.includes('cpu');
             const needMem = isOpen || pinned.includes('memory');
@@ -549,12 +549,12 @@ export default class ResourcePulseExtension extends Extension {
             const needPwr = isOpen || pinned.includes('power');
 
             const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
-                needCpu ? this._cpu.sample(isCpuTab) : Promise.resolve(this._lastCpu || { total: 0, cores: [] }),
+                needCpu ? this._cpu.sample(isDetailedCpu) : Promise.resolve(this._lastCpu || { total: 0, cores: [] }),
                 needMem ? this._mem.sample() : Promise.resolve(this._lastMem || { percent: 0, total: 0, used: 0 }),
                 needBat ? this._bat.sample() : Promise.resolve(this._lastBat || { present: false }),
-                needDsk ? this._dsk.sample() : Promise.resolve(this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 }),
+                needDsk ? this._dsk.sample(isDetailedDsk) : Promise.resolve(this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 }),
                 needNet ? this._net.sample() : Promise.resolve(this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} }),
-                needThm ? this._thm.sample() : Promise.resolve(this._lastThm || { packageTemp: 0, sensors: [], fans: [] }),
+                needThm ? this._thm.sample(isDetailedThm) : Promise.resolve(this._lastThm || { packageTemp: 0, sensors: [], fans: [] }),
                 needGpu ? this._gpu.sample() : Promise.resolve(this._lastGpu || { present: false, percent: 0 })
             ]);
 
@@ -570,59 +570,27 @@ export default class ResourcePulseExtension extends Extension {
             if (needPwr) this._lastPwr = pwr;
 
             let processes = [];
-            if (isOpen && (isCpuTab || isMemTab)) {
-                if (!this._prevProcStats) {
-                    this._prevProcStats = {};
-                    this._prevProcTime = 0;
-                }
-                const cmd = "awk -F '[()]' '{split($1, p, \" \"); pid=p[1]; name=$2; split($3, a, \" \"); ticks=a[12]+a[13]; rss=a[22]; print pid, ticks, rss, name}' /proc/[0-9]*/stat";
-                const stdout = await runSubprocess(['bash', '-c', cmd]);
-                if (stdout) {
-                    const now = GLib.get_monotonic_time();
-                    const dt = this._prevProcTime > 0 ? (now - this._prevProcTime) / 1000000.0 : 0;
-                    this._prevProcTime = now;
-
-                    const lines = stdout.trim().split('\n');
-                    let currentStats = {};
-                    let allProcs = [];
-
-                    for (const line of lines) {
-                        const parts = line.trim().split(/\s+/);
-                        if (parts.length >= 4) {
-                            const pid = parts[0];
-                            const ticks = parseInt(parts[1], 10);
-                            const rss = parseInt(parts[2], 10);
-                            const name = parts.slice(3).join(' ');
-
-                            currentStats[pid] = ticks;
-
-                            const memPct = mem.total > 0 ? ((rss * 4096) / mem.total) * 100 : 0;
-                            let cpuPct = 0;
-                            if (this._prevProcStats[pid] !== undefined && dt > 0) {
-                                const deltaTicks = ticks - this._prevProcStats[pid];
-                                cpuPct = Math.max(0, deltaTicks / dt);
-                            }
-
-                            if (isMemTab) {
-                                if (memPct > 0.1 || cpuPct > 0.5) {
-                                    allProcs.push({ pid, cpu: cpuPct, mem: memPct, comm: name });
-                                }
-                            } else {
-                                if (cpuPct > 0.1 || memPct > 1.0) {
-                                    allProcs.push({ pid, cpu: cpuPct, mem: memPct, comm: name });
+            if (isOpen && (isDetailedCpu || isDetailedMem)) {
+                try {
+                    const sortFlag = isDetailedMem ? '--sort=-pmem' : '--sort=-pcpu';
+                    const res = await runSubprocess(['ps', '-eo', 'pid,pcpu,pmem,comm', '--no-headers', sortFlag]);
+                    if (res.success && res.stdout) {
+                        const lines = res.stdout.trim().split('\n');
+                        for (let i = 0; i < Math.min(lines.length, 8); i++) {
+                            const parts = lines[i].trim().split(/\s+/);
+                            if (parts.length >= 4) {
+                                const pid = parts[0];
+                                const cpuPct = parseFloat(parts[1]) || 0;
+                                const memPct = parseFloat(parts[2]) || 0;
+                                const comm = parts.slice(3).join(' ');
+                                if (comm !== 'ps' && comm !== 'sh') {
+                                    processes.push({ pid, cpu: cpuPct, mem: memPct, comm });
                                 }
                             }
                         }
+                        processes = processes.slice(0, 5);
                     }
-                    this._prevProcStats = currentStats;
-
-                    if (isMemTab) {
-                        allProcs.sort((a, b) => b.mem - a.mem);
-                    } else {
-                        allProcs.sort((a, b) => b.cpu - a.cpu);
-                    }
-                    processes = allProcs.slice(0, 5);
-                }
+                } catch (e) {}
             }
 
             const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes };
@@ -1985,20 +1953,34 @@ export default class ResourcePulseExtension extends Extension {
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
             if (this._dskUsage) this._dskUsage.val.text = `${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`;
 
-            if (this._dskMountsBox && dsk.mounts) {
-                this._dskMountsBox.destroy_all_children();
-                dsk.mounts.forEach(m => {
-                    const row = new St.BoxLayout({ vertical: true, style: 'spacing: 2px;' });
-                    const headRow = new St.BoxLayout();
-                    headRow.add_child(new St.Label({ text: m.mount, style: 'font-size: 0.8em; color: #ffffff; font-weight: 500;', x_expand: true }));
-                    headRow.add_child(new St.Label({ text: `${formatBytes(m.used, useGiB)} / ${formatBytes(m.size, useGiB)} (${Math.round(m.percent)}%)`, style: 'font-size: 0.8em; color: #a0a0b8;' }));
-                    row.add_child(headRow);
+            if (this._menuOpen && this._activeTab === 'disk' && this._dskMountsBox && dsk.mounts) {
+                if (!this._dskMountRows) this._dskMountRows = [];
+                if (this._dskMountRows.length !== dsk.mounts.length) {
+                    this._dskMountsBox.destroy_all_children();
+                    this._dskMountRows = [];
+                    dsk.mounts.forEach(m => {
+                        const row = new St.BoxLayout({ vertical: true, style: 'spacing: 2px;' });
+                        const headRow = new St.BoxLayout();
+                        const mountLbl = new St.Label({ text: m.mount, style: 'font-size: 0.8em; color: #ffffff; font-weight: 500;', x_expand: true });
+                        const statLbl = new St.Label({ text: '', style: 'font-size: 0.8em; color: #a0a0b8;' });
+                        headRow.add_child(mountLbl);
+                        headRow.add_child(statLbl);
+                        row.add_child(headRow);
 
-                    const pbar = new ProgressBar(4, 0.96, 0.83, 0.18);
-                    pbar.setPercent(m.percent);
-                    row.add_child(pbar);
+                        const pbar = new ProgressBar(4, 0.96, 0.83, 0.18);
+                        row.add_child(pbar);
 
-                    this._dskMountsBox.add_child(row);
+                        this._dskMountsBox.add_child(row);
+                        this._dskMountRows.push({ mountLbl, statLbl, pbar });
+                    });
+                }
+                dsk.mounts.forEach((m, idx) => {
+                    const r = this._dskMountRows[idx];
+                    if (r) {
+                        r.mountLbl.text = m.mount;
+                        r.statLbl.text = `${formatBytes(m.used, useGiB)} / ${formatBytes(m.size, useGiB)} (${Math.round(m.percent)}%)`;
+                        r.pbar.setPercent(m.percent);
+                    }
                 });
             }
         }
@@ -2026,16 +2008,31 @@ export default class ResourcePulseExtension extends Extension {
             if (this._netSessionRx) this._netSessionRx.val.text = formatBytes(net.sessionRx || 0, useGiB);
             if (this._netSessionTx) this._netSessionTx.val.text = formatBytes(net.sessionTx || 0, useGiB);
 
-            if (this._netIfaceList && net.interfaces) {
-                this._netIfaceList.destroy_all_children();
-                for (const [ifaceName, ifaceData] of Object.entries(net.interfaces)) {
-                    if (ifaceData.rxRate > 100 || ifaceData.txRate > 100 || /^(wlan|eth|enp|wlp)/.test(ifaceName)) {
+            if (this._menuOpen && this._activeTab === 'network' && this._netIfaceList && net.interfaces) {
+                const activeIfaces = Object.entries(net.interfaces).filter(([name, iface]) =>
+                    iface.rxRate > 100 || iface.txRate > 100 || /^(wlan|eth|enp|wlp)/.test(name)
+                );
+                if (!this._netIfaceRows) this._netIfaceRows = [];
+                if (this._netIfaceRows.length !== activeIfaces.length) {
+                    this._netIfaceList.destroy_all_children();
+                    this._netIfaceRows = [];
+                    activeIfaces.forEach(() => {
                         const row = new St.BoxLayout({ style: 'padding: 2px 0;' });
-                        row.add_child(new St.Label({ text: ifaceName, style: 'font-size: 0.8em; color: #ffffff; font-weight: 500;', width: 80 }));
-                        row.add_child(new St.Label({ text: `↓ ${formatSpeed(ifaceData.rxRate)}   ↑ ${formatSpeed(ifaceData.txRate)}`, style: 'font-size: 0.8em; color: #a0a0b8;', x_expand: true }));
+                        const nameLbl = new St.Label({ style: 'font-size: 0.8em; color: #ffffff; font-weight: 500;', width: 80 });
+                        const statLbl = new St.Label({ style: 'font-size: 0.8em; color: #a0a0b8;', x_expand: true });
+                        row.add_child(nameLbl);
+                        row.add_child(statLbl);
                         this._netIfaceList.add_child(row);
-                    }
+                        this._netIfaceRows.push({ nameLbl, statLbl });
+                    });
                 }
+                activeIfaces.forEach(([name, iface], idx) => {
+                    const r = this._netIfaceRows[idx];
+                    if (r) {
+                        r.nameLbl.text = name;
+                        r.statLbl.text = `↓ ${formatSpeed(iface.rxRate)}   ↑ ${formatSpeed(iface.txRate)}`;
+                    }
+                });
             }
         }
 
@@ -2051,28 +2048,54 @@ export default class ResourcePulseExtension extends Extension {
                 this._thmSparkline.addSample(thm.packageTemp);
                 this._thmSparkline.setScaleLabel(`Temp: ${formatTemp(thm.packageTemp, tempUnit)}`);
             }
-            if (this._thmSensorsBox) {
-                this._thmSensorsBox.destroy_all_children();
-                if (thm.sensors && thm.sensors.length > 0) {
-                    thm.sensors.forEach(sensor => {
-                        const row = this._detailRow(sensor.label, formatTemp(sensor.temp, tempUnit));
-                        this._thmSensorsBox.add_child(row.row);
+            if (this._menuOpen && this._activeTab === 'thermal') {
+                if (this._thmSensorsBox && thm.sensors) {
+                    if (!this._thmSensorRows) this._thmSensorRows = [];
+                    if (this._thmSensorRows.length !== thm.sensors.length) {
+                        this._thmSensorsBox.destroy_all_children();
+                        this._thmSensorRows = [];
+                        if (thm.sensors.length > 0) {
+                            thm.sensors.forEach(sensor => {
+                                const row = this._detailRow(sensor.label, '');
+                                this._thmSensorsBox.add_child(row.row);
+                                this._thmSensorRows.push(row);
+                            });
+                        } else {
+                            const row = this._detailRow('No sensors found', '--');
+                            this._thmSensorsBox.add_child(row.row);
+                        }
+                    }
+                    thm.sensors.forEach((sensor, idx) => {
+                        const r = this._thmSensorRows[idx];
+                        if (r) {
+                            r.lbl.text = sensor.label;
+                            r.val.text = formatTemp(sensor.temp, tempUnit);
+                        }
                     });
-                } else {
-                    const row = this._detailRow('No sensors found', '--');
-                    this._thmSensorsBox.add_child(row.row);
                 }
-            }
-            if (this._thmFansCard && this._thmFansBox) {
-                this._thmFansBox.destroy_all_children();
-                if (thm.fans && thm.fans.length > 0) {
-                    this._thmFansCard.visible = true;
-                    thm.fans.forEach(fan => {
-                        const row = this._detailRow(fan.label, `${fan.rpm} RPM`);
-                        this._thmFansBox.add_child(row.row);
-                    });
-                } else {
-                    this._thmFansCard.visible = false;
+                if (this._thmFansCard && this._thmFansBox && thm.fans) {
+                    if (!this._thmFanRows) this._thmFanRows = [];
+                    if (thm.fans.length > 0) {
+                        this._thmFansCard.visible = true;
+                        if (this._thmFanRows.length !== thm.fans.length) {
+                            this._thmFansBox.destroy_all_children();
+                            this._thmFanRows = [];
+                            thm.fans.forEach(fan => {
+                                const row = this._detailRow(fan.label, '');
+                                this._thmFansBox.add_child(row.row);
+                                this._thmFanRows.push(row);
+                            });
+                        }
+                        thm.fans.forEach((fan, idx) => {
+                            const r = this._thmFanRows[idx];
+                            if (r) {
+                                r.lbl.text = fan.label;
+                                r.val.text = `${fan.rpm} RPM`;
+                            }
+                        });
+                    } else {
+                        this._thmFansCard.visible = false;
+                    }
                 }
             }
         }
