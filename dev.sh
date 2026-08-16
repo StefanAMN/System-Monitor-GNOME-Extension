@@ -101,7 +101,10 @@ ensure_installed() {
 # ------------------------------------------------------------------------------
 make_sandbox() {
     SANDBOX="$(mktemp -d /tmp/rp-ui-test.XXXXXX)"
-    mkdir -p "$SANDBOX/data/gnome-shell/extensions" "$SANDBOX/config" "$SANDBOX/shots"
+    mkdir -p "$SANDBOX/data/gnome-shell/extensions" "$SANDBOX/config" "$SANDBOX/shots" "$SANDBOX/run"
+    # Own runtime dir too: concurrent sandboxes otherwise race on shell
+    # files in /run/user/<uid> (seen as a shell-internal JS ERROR).
+    chmod 700 "$SANDBOX/run"
     ln -s "$SCRIPT_DIR" "$SANDBOX/data/gnome-shell/extensions/$UUID"
     LOG="$SANDBOX/shell.log"
 }
@@ -230,7 +233,7 @@ cmd_test_ci() {
     local SANDBOX LOG
     make_sandbox
 
-    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" \
+    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" \
     dbus-run-session -- bash -c '
         gnome-shell --headless --virtual-monitor 1280x720 > "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
@@ -259,18 +262,14 @@ cmd_test_ci() {
 # ------------------------------------------------------------------------------
 # Command: Drive the real UI in an isolated headless shell and scan its log
 # ------------------------------------------------------------------------------
-cmd_test_ui() {
-    log_title "Running Headless UI Test (tabs, re-enable cycle, log scan)"
-
-    check_syntax
-    compile_schemas
-
-    local SANDBOX LOG
+# Run the extension plus a test driver extension in an isolated headless
+# shell until the driver logs RP-UITEST DONE/FAIL or TIMEOUT seconds pass.
+run_driver() {
+    local DRIVER_DIR="$1" DRIVER_UUID="$2" TIMEOUT="$3"
     make_sandbox
-    ln -s "$SCRIPT_DIR/tests/ui-driver" "$SANDBOX/data/gnome-shell/extensions/rp-ui-driver@resource-pulse.test"
+    ln -s "$SCRIPT_DIR/tests/$DRIVER_DIR" "$SANDBOX/data/gnome-shell/extensions/$DRIVER_UUID"
 
-    # Private XDG dirs: no other user extensions, no writes to the real dconf.
-    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" RP_UITEST_SHOTS="$SANDBOX/shots" \
+    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" RP_UITEST_SHOTS="$SANDBOX/shots" \
     dbus-run-session -- bash -c '
         gnome-shell --headless --virtual-monitor 1280x720 > "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
@@ -278,23 +277,68 @@ cmd_test_ui() {
         sleep 3
         gnome-extensions enable "'"$UUID"'"
         sleep 1
-        gnome-extensions enable rp-ui-driver@resource-pulse.test
-        for _ in $(seq 1 150); do
+        gnome-extensions enable "'"$DRIVER_UUID"'"
+        for _ in $(seq 1 "'"$TIMEOUT"'"); do
             grep -qE "RP-UITEST (DONE|FAIL)" "'"$LOG"'" && break
             sleep 1
         done
         sleep 1
-    ' || true
+    ' 2> "$SANDBOX/session.log" || true
+}
 
-    local BAD
+# Verdict for a run_driver log: DONE and no bad lines.
+driver_passed() {
     BAD="$(grep -nE "$BAD_LOG_PATTERN" "$LOG" || true)"
-    if grep -q "RP-UITEST DONE" "$LOG" && [ -z "$BAD" ]; then
+    grep -q "RP-UITEST DONE" "$LOG" && [ -z "$BAD" ]
+}
+
+driver_failure_details() {
+    echo "$BAD" | head -n 40
+    grep -A12 "RP-UITEST FAIL" "$LOG" | head -n 30 || true
+    grep -q "RP-UITEST" "$LOG" || echo "  (driver never finished: timed out)"
+}
+
+cmd_test_ui() {
+    log_title "Running Headless UI Test (tabs, re-enable cycle, log scan)"
+
+    check_syntax
+    compile_schemas
+
+    local SANDBOX LOG BAD
+    run_driver ui-driver rp-ui-driver@resource-pulse.test 150
+
+    if driver_passed; then
         log_success "UI test passed${RP_KEEP:+ (screenshots: $SANDBOX/shots)}"
         finish_sandbox
     else
         log_error "UI test failed (log and screenshots kept: $SANDBOX)"
-        echo "$BAD" | head -n 40
-        grep -A12 "RP-UITEST FAIL" "$LOG" | head -n 30 || true
+        driver_failure_details
+        exit 1
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Command: Overhead and soak test (the extension's own cost inside the shell)
+# ------------------------------------------------------------------------------
+cmd_test_overhead() {
+    local SOAK="${1:-600}"
+    local WINDOW="${RP_OVERHEAD_WINDOW:-30}"
+    log_title "Running Overhead & Soak Test (${WINDOW}s windows, ${SOAK}s soak)"
+
+    check_syntax
+    compile_schemas
+
+    local SANDBOX LOG BAD
+    export RP_SOAK="$SOAK" RP_OVERHEAD_WINDOW="$WINDOW"
+    run_driver overhead-driver rp-overhead-driver@resource-pulse.test $(( WINDOW * 5 + SOAK + 120 ))
+
+    grep -o "RP-OVERHEAD .*" "$LOG" | sed 's/^RP-OVERHEAD /  /' || true
+    if driver_passed; then
+        log_success "Overhead and soak within budget"
+        finish_sandbox
+    else
+        log_error "Overhead / soak test failed (log kept: $SANDBOX)"
+        driver_failure_details
         exit 1
     fi
 }
@@ -373,7 +417,8 @@ cmd_help() {
     echo -e "  ${GREEN}test-headless [sec]${RESET} Enable in an isolated headless shell for [sec] (default 5) and scan its log"
     echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
-    echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk)"
+    echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 600) for leaks"
+    echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk, read, proc, power, battery)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
     echo -e "  ${GREEN}help${RESET}               Show this help message\n"
@@ -397,6 +442,9 @@ case "${1:-reload}" in
         ;;
     test-ui|ui)
         cmd_test_ui
+        ;;
+    test-overhead|overhead|soak)
+        cmd_test_overhead "${2:-600}"
         ;;
     benchmark|test-benchmark|bench)
         shift

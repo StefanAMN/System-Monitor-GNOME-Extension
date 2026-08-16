@@ -1,0 +1,6 @@
+{
+  "uuid": "rp-overhead-driver@resource-pulse.test",
+  "name": "Resource Pulse Overhead Test Driver",
+  "description": "Test-only: measures the shell's CPU and memory with Resource Pulse disabled, enabled, open, and over a long soak. Never installed for users.",
+  "shell-version": ["50"]
+}
