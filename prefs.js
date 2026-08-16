@@ -66,7 +66,7 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
             { key: 'disk', label: 'Disk Space and I/O' },
             { key: 'network', label: 'Network Throughput' },
             { key: 'thermal', label: 'Thermal Sensors and Fans' },
-            { key: 'gpu', label: 'GPU Status (NVIDIA/AMD)' }
+            { key: 'gpu', label: 'GPU Status (NVIDIA / AMD / Intel)' }
         ];
 
         availableMetrics.forEach(metric => {

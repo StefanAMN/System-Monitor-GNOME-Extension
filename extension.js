@@ -1537,23 +1537,119 @@ export default class ResourcePulseExtension extends Extension {
 
     _buildGpuDetails() {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+
+        // 1. Hardware Info & Model Card
+        this._gpuHwCard = new St.BoxLayout({
+            style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;',
+            vertical: true
+        });
+
+        const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
+
+        // Brand Chip Badge
+        this._gpuChipBox = new St.BoxLayout({
+            style: 'background-color: #107c41; border-radius: 6px; padding: 6px 10px;',
+            vertical: true
+        });
+        this._gpuChipLabel1 = new St.Label({ text: 'GEFORCE', style: 'font-size: 0.65em; color: #a0f0c8; font-weight: 300;' });
+        this._gpuChipLabel2 = new St.Label({ text: 'RTX', style: 'font-size: 0.9em; color: #ffffff; font-weight: bold; letter-spacing: 1px;' });
+        this._gpuChipBox.add_child(this._gpuChipLabel1);
+        this._gpuChipBox.add_child(this._gpuChipLabel2);
+        hwTop.add_child(this._gpuChipBox);
+
+        const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
+        this._gpuModelName = new St.Label({ text: 'Graphics Processor', style: 'font-size: 1.05em; font-weight: bold; color: #ffffff;' });
+        this._gpuDriverDesc = new St.Label({ text: 'Driver: --', style: 'font-size: 0.8em; color: #a0a0b8;' });
+        hwDesc.add_child(this._gpuModelName);
+        hwDesc.add_child(this._gpuDriverDesc);
+        hwTop.add_child(hwDesc);
+        this._gpuHwCard.add_child(hwTop);
+
+        // Hardware Sub Stats (Clock, Temp, Power)
+        const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
+
+        const clockBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        clockBox.add_child(new St.Label({ text: 'Clock', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._gpuHwClockVal = new St.Label({ text: '--', style: 'font-size: 0.95em; font-weight: bold; color: #ffffff;' });
+        clockBox.add_child(this._gpuHwClockVal);
+
+        const tempBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        tempBox.add_child(new St.Label({ text: 'Temperature', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._gpuHwTempVal = new St.Label({ text: '--', style: 'font-size: 0.95em; font-weight: bold; color: #ffffff;' });
+        tempBox.add_child(this._gpuHwTempVal);
+
+        const powerBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        powerBox.add_child(new St.Label({ text: 'Power', style: 'font-size: 0.75em; color: #a0a0b8;' }));
+        this._gpuHwPowerVal = new St.Label({ text: '--', style: 'font-size: 0.95em; font-weight: bold; color: #ffffff;' });
+        powerBox.add_child(this._gpuHwPowerVal);
+
+        hwStatsRow.add_child(clockBox);
+        hwStatsRow.add_child(tempBox);
+        hwStatsRow.add_child(powerBox);
+        this._gpuHwCard.add_child(hwStatsRow);
+        this._addClickAnimations(this._gpuHwCard);
+        box.add_child(this._gpuHwCard);
+
+        // 2. GPU Usage Sparkline Card
         const sparkCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        sparkCard.add_child(new St.Label({ text: 'GPU Usage', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
+        sparkCard.add_child(new St.Label({ text: 'GPU Utilization (%)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 4px;' }));
         this._gpuSparkline = new Sparkline(400, 100, 100, false, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._gpuSparkline.x_expand = true;
         sparkCard.add_child(this._gpuSparkline);
         box.add_child(sparkCard);
+
+        // 3. VRAM Card (if dedicated or shared VRAM reported)
+        this._gpuVramCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
+        const vramHead = new St.BoxLayout({ style: 'margin-bottom: 6px;', y_align: Clutter.ActorAlign.CENTER });
+        vramHead.add_child(new St.Label({ text: 'Video Memory (VRAM)', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+        this._gpuVramPctLbl = new St.Label({ text: '--%', style: 'font-size: 0.85em; font-weight: bold; color: #ffffff;' });
+        vramHead.add_child(this._gpuVramPctLbl);
+        this._gpuVramCard.add_child(vramHead);
+
+        this._gpuVramBar = new ProgressBar(6, 0.2, 0.82, 0.48);
+        this._gpuVramCard.add_child(this._gpuVramBar);
+
+        const vramStatsBox = new St.BoxLayout({ vertical: true, style: 'margin-top: 8px;' });
+        this._gpuVramUsed = this._detailRow('Used / Total');
+        vramStatsBox.add_child(this._gpuVramUsed.row);
+        this._gpuVramFree = this._detailRow('Free VRAM');
+        vramStatsBox.add_child(this._gpuVramFree.row);
+        this._gpuVramCard.add_child(vramStatsBox);
+        box.add_child(this._gpuVramCard);
+
+        // 4. Performance & Thermal Stats Card
         const statsCard = new St.BoxLayout({ style: 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px;', vertical: true });
-        statsCard.add_child(new St.Label({ text: 'Stats', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
-        this._gpuUsage = this._detailRow('Usage');
+        statsCard.add_child(new St.Label({ text: 'Performance & Sensors', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8; margin-bottom: 6px;' }));
+        this._gpuUsage = this._detailRow('Core Utilization');
         statsCard.add_child(this._gpuUsage.row);
-        this._gpuMem   = this._detailRow('VRAM');
-        statsCard.add_child(this._gpuMem.row);
+        this._gpuCoreClock = this._detailRow('Core Clock');
+        statsCard.add_child(this._gpuCoreClock.row);
         this._gpuTemp  = this._detailRow('Temperature');
         statsCard.add_child(this._gpuTemp.row);
+        this._gpuFan = this._detailRow('Fan Speed');
+        statsCard.add_child(this._gpuFan.row);
         this._gpuPower = this._detailRow('Power Draw');
         statsCard.add_child(this._gpuPower.row);
         box.add_child(statsCard);
+
+        // 5. Inactive / None Fallback Notice
+        this._gpuInactiveCard = new St.BoxLayout({
+            style: 'background-color: #1e1e1e; border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px;',
+            vertical: true,
+            visible: false
+        });
+        const inactTitle = new St.Label({
+            text: 'No Active GPU Detected',
+            style: 'font-size: 1.0em; font-weight: bold; color: #ffffff; margin-bottom: 6px;'
+        });
+        const inactMsg = new St.Label({
+            text: 'GPU telemetry requires NVIDIA proprietary drivers (nvidia-smi), AMD GPU sysfs (amdgpu), or Intel DRM driver (i915/xe).',
+            style: 'font-size: 0.8em; color: #a0a0b8;'
+        });
+        this._gpuInactiveCard.add_child(inactTitle);
+        this._gpuInactiveCard.add_child(inactMsg);
+        box.add_child(this._gpuInactiveCard);
+
         return box;
     }
 
@@ -1898,27 +1994,87 @@ export default class ResourcePulseExtension extends Extension {
             const gpu = data.gpu;
             const sc = this._summaryCards?.gpu;
             if (sc) {
-                sc.box.visible = gpu.present;
+                sc.box.visible = true;
                 if (gpu.present) {
                     sc.valueLabel.text = `${Math.round(gpu.percent)}%`;
                     sc.pbar.setPercent(gpu.percent);
                     sc.subLabel.visible = true;
-                    sc.subLabel.text = `${gpu.brand || 'GPU'} · ${formatTemp(gpu.temp, tempUnit)}`;
+                    const clockText = gpu.clock ? ` · ${Math.round(gpu.clock)} MHz` : '';
+                    sc.subLabel.text = `${gpu.brand || 'GPU'}${clockText}`;
+                } else {
+                    sc.valueLabel.text = 'N/A';
+                    sc.pbar.setPercent(0);
+                    sc.subLabel.visible = true;
+                    sc.subLabel.text = 'No GPU Detected';
                 }
             }
-            if (this._tabButtons?.gpu) {
-                this._tabButtons.gpu.visible = gpu.present;
+
+            if (this._gpuInactiveCard) {
+                this._gpuInactiveCard.visible = !gpu.present;
             }
-            if (gpu.present) {
-                if (this._gpuSparkline) {
-                    this._gpuSparkline.addSample(gpu.percent);
-                    this._gpuSparkline.setScaleLabel(`Cur: ${Math.round(gpu.percent)}%`);
+
+            // Update Model / Chip Badge
+            if (this._gpuModelName) this._gpuModelName.text = gpu.model || `${gpu.brand} Graphics`;
+            if (this._gpuDriverDesc) this._gpuDriverDesc.text = `Driver: ${gpu.driver || '--'}`;
+
+            if (this._gpuChipBox) {
+                const brand = (gpu.brand || '').toLowerCase();
+                if (brand.includes('nvidia')) {
+                    this._gpuChipBox.style = 'background-color: #76b900; border-radius: 6px; padding: 6px 10px;';
+                    this._gpuChipLabel1.text = 'NVIDIA';
+                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #223300; font-weight: bold;';
+                    this._gpuChipLabel2.text = 'GEFORCE';
+                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #000000; font-weight: bold; letter-spacing: 1px;';
+                } else if (brand.includes('amd')) {
+                    this._gpuChipBox.style = 'background-color: #d22630; border-radius: 6px; padding: 6px 10px;';
+                    this._gpuChipLabel1.text = 'AMD';
+                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #f9b8bb; font-weight: 300;';
+                    this._gpuChipLabel2.text = 'RADEON';
+                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #ffffff; font-weight: bold; letter-spacing: 1px;';
+                } else {
+                    this._gpuChipBox.style = 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;';
+                    this._gpuChipLabel1.text = 'intel';
+                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;';
+                    this._gpuChipLabel2.text = 'GRAPHICS';
+                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #ffffff; font-weight: bold; letter-spacing: 1px;';
                 }
-                if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
-                if (this._gpuMem)   this._gpuMem.val.text   = `${Math.round(gpu.memPercent)}% (${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)})`;
-                if (this._gpuTemp)  this._gpuTemp.val.text  = formatTemp(gpu.temp, tempUnit);
-                if (this._gpuPower) this._gpuPower.val.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
             }
+
+            // Quick Hardware Sub-Stats
+            const clockStr = gpu.clock ? (gpu.maxClock ? `${Math.round(gpu.clock)} / ${Math.round(gpu.maxClock)} MHz` : `${Math.round(gpu.clock)} MHz`) : '--';
+            if (this._gpuHwClockVal) this._gpuHwClockVal.text = clockStr;
+            if (this._gpuHwTempVal) this._gpuHwTempVal.text = gpu.temp > 0 ? formatTemp(gpu.temp, tempUnit) : '--';
+            if (this._gpuHwPowerVal) this._gpuHwPowerVal.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
+
+            // Sparkline
+            if (this._gpuSparkline) {
+                this._gpuSparkline.addSample(gpu.percent);
+                this._gpuSparkline.setScaleLabel(`Cur: ${Math.round(gpu.percent)}%`);
+            }
+
+            // VRAM Card
+            if (this._gpuVramCard) {
+                if (gpu.memTotal > 0) {
+                    this._gpuVramCard.visible = true;
+                    if (this._gpuVramPctLbl) this._gpuVramPctLbl.text = `${Math.round(gpu.memPercent)}%`;
+                    if (this._gpuVramBar) this._gpuVramBar.setPercent(gpu.memPercent);
+                    if (this._gpuVramUsed) {
+                        this._gpuVramUsed.val.text = `${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)} (${gpu.memPercent.toFixed(1)}%)`;
+                    }
+                    if (this._gpuVramFree) {
+                        this._gpuVramFree.val.text = formatBytes(gpu.memFree || (gpu.memTotal - gpu.memUsed), useGiB);
+                    }
+                } else {
+                    this._gpuVramCard.visible = false;
+                }
+            }
+
+            // Stats Card
+            if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
+            if (this._gpuCoreClock) this._gpuCoreClock.val.text = clockStr;
+            if (this._gpuTemp) this._gpuTemp.val.text = gpu.temp > 0 ? formatTemp(gpu.temp, tempUnit) : '--';
+            if (this._gpuFan) this._gpuFan.val.text = gpu.fanSpeed !== null ? `${gpu.fanSpeed} RPM` : '--';
+            if (this._gpuPower) this._gpuPower.val.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
         }
 
         // ── Top Processes (CPU & Memory tabs) ──
