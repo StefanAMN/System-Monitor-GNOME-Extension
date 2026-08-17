@@ -41,6 +41,8 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ## Testing
 
 ```bash
+# Shell and session logs go to files; add --show-logs (anywhere on the line) to stream them here:
+#   ./dev.sh test --show-logs
 ./dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
 ./dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
 RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
