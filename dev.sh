@@ -117,7 +117,15 @@ finish_sandbox() {
     if [ "${RP_KEEP:-0}" = "1" ]; then
         log_info "Sandbox kept: $SANDBOX"
     else
-        rm -rf "$SANDBOX"
+        # The document portal FUSE-mounts run/doc inside the private runtime
+        # dir and may still hold it while the session winds down.
+        local _
+        for _ in 1 2 3 4 5; do
+            mountpoint -q "$SANDBOX/run/doc" 2>/dev/null && fusermount3 -uz "$SANDBOX/run/doc" 2>/dev/null
+            rm -rf "$SANDBOX" 2>/dev/null && return 0
+            sleep 1
+        done
+        log_warn "Could not fully remove $SANDBOX"
     fi
 }
 
@@ -242,7 +250,7 @@ cmd_test_ci() {
         gnome-extensions enable "'"$UUID"'"
         sleep "'"$DURATION"'"
         gnome-extensions info "'"$UUID"'" > "'"$SANDBOX"'/info.txt" 2>&1 || true
-    ' || true
+    ' 2> "$SANDBOX/session.log" || true
 
     # ACTIVE only proves enable() did not throw; the log shows whether the
     # polling loop ran cleanly for DURATION seconds.
