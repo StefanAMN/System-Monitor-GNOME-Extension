@@ -8,7 +8,7 @@ import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime,
 import { RingBuffer } from '../lib/ringbuffer.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
-import { listDirAsync } from '../lib/utils.js';
+import { listDirAsync, runSubprocess } from '../lib/utils.js';
 import { parseNetDev, counterDelta } from '../lib/network.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp } from '../lib/thermal.js';
@@ -305,6 +305,23 @@ const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));
 (async () => {
     const fds = async () => (await listDirAsync('/proc/self/fd')).length;
+
+    // A helper that hangs (nvidia-smi with the card off the bus) is killed.
+    {
+        const t0 = GLib.get_monotonic_time();
+        const hung = await runSubprocess(['sleep', '30'], { timeoutMs: 200 });
+        const ms = (GLib.get_monotonic_time() - t0) / 1000;
+        ok(!hung.success && ms < 3000, `subprocess: hung child killed by the timeout (${ms.toFixed(0)} ms, success=${hung.success})`);
+        const handle = {};
+        const pending = runSubprocess(['sleep', '30'], { handle });
+        await sleep(50);
+        ok(typeof handle.cancel === 'function', 'subprocess: handle can cancel a running child');
+        handle.cancel();
+        const cancelled = await pending;
+        ok(!cancelled.success && handle.cancel === null, 'subprocess: cancelled child reports failure and clears the handle');
+        const quick = await runSubprocess(['echo', 'hi'], { timeoutMs: 5000 });
+        eq([quick.success, quick.stdout.trim()], [true, 'hi'], 'subprocess: a child that finishes in time is untouched');
+    }
     const sampler = new ProcessSampler();
     await sampler.sample(16e9);
     // Back-to-back samples (ms apart) must not turn one clock tick into a spike.
