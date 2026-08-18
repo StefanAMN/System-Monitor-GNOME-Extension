@@ -398,6 +398,7 @@ export default class ResourcePulseExtension extends Extension {
         this._indicatorBox = new St.BoxLayout({ style_class: 'resource-pulse-indicator-box' });
         this._indicator.add_child(this._indicatorBox);
         this._topBarWidgets = {};
+        this._stageReleaseId = null;
 
         // Dropdown container
         this._menuSection = new PopupMenu.PopupBaseMenuItem({ reactive: false, activate: false });
@@ -481,6 +482,10 @@ export default class ResourcePulseExtension extends Extension {
                 this._hideTooltip();
                 this._poll();
             } else {
+                if (this._stageReleaseId) {
+                    global.stage.disconnect(this._stageReleaseId);
+                    this._stageReleaseId = null;
+                }
                 if (this._dragGrab) {
                     this._dragGrab.dismiss();
                     this._dragGrab = null;
@@ -492,6 +497,12 @@ export default class ResourcePulseExtension extends Extension {
                 if (this._dragHoldTimerId) {
                     GLib.source_remove(this._dragHoldTimerId);
                     this._dragHoldTimerId = null;
+                }
+                if (this._activeCardDrag && this._draggedCardActor) {
+                    this._draggedCardActor.remove_style_class_name('resource-pulse-metric-card-dragging');
+                    this._draggedCardActor.remove_all_transitions();
+                    this._draggedCardActor.set_translation(0, 0, 0);
+                    this._draggedCardActor.set_scale(1.0, 1.0);
                 }
                 if (this._summaryCards) {
                     for (const k of Object.keys(this._summaryCards)) {
@@ -563,6 +574,11 @@ export default class ResourcePulseExtension extends Extension {
         if (this._tooltip) {
             this._tooltip.destroy();
             this._tooltip = null;
+        }
+
+        if (this._stageReleaseId) {
+            global.stage.disconnect(this._stageReleaseId);
+            this._stageReleaseId = null;
         }
 
         if (this._dragGrab) {
@@ -1776,7 +1792,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         });
     }
 
-    _handleCardDragMotion(draggedKey, currX, currY) {
+    _handleCardDragMotion(draggedKey, cardCenterX, cardCenterY) {
         if (!this._cardOrder || !this._summaryCards || !this._overviewGrid) return;
         const currentOrder = this._cardOrder;
         const currentIndex = currentOrder.indexOf(draggedKey);
@@ -1785,8 +1801,11 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const [gridX, gridY] = this._overviewGrid.get_transformed_position();
         const [gridW, gridH] = this._overviewGrid.get_transformed_size();
 
-        const colWidth = gridW > 0 ? gridW / 2 : 190;
-        const rowHeight = gridH > 0 ? gridH / 4 : 95;
+        const sampleCard = this._summaryCards[draggedKey]?.box;
+        const [cardW, cardH] = sampleCard ? sampleCard.get_size() : [0, 0];
+
+        const stepX = (gridW > cardW && cardW > 0) ? (gridW - cardW) : (gridW > 0 ? gridW / 2 : 190);
+        const stepY = (gridH > cardH && cardH > 0) ? (gridH - cardH) / 3 : (gridH > 0 ? gridH / 4 : 95);
 
         let targetIndex = currentIndex;
         let minDistance = Infinity;
@@ -1794,9 +1813,9 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         for (let i = 0; i < currentOrder.length; i++) {
             const col = i % 2;
             const row = Math.floor(i / 2);
-            const slotCenterX = gridX + (col + 0.5) * colWidth;
-            const slotCenterY = gridY + (row + 0.5) * rowHeight;
-            const dist = Math.hypot(currX - slotCenterX, currY - slotCenterY);
+            const slotCenterX = gridX + col * stepX + (cardW > 0 ? cardW / 2 : stepX / 2);
+            const slotCenterY = gridY + row * stepY + (cardH > 0 ? cardH / 2 : stepY / 2);
+            const dist = Math.hypot(cardCenterX - slotCenterX, cardCenterY - slotCenterY);
             if (dist < minDistance) {
                 minDistance = dist;
                 targetIndex = i;
@@ -1821,8 +1840,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             const deltaCol = (previewIdx % 2) - (i % 2);
             const deltaRow = Math.floor(previewIdx / 2) - Math.floor(i / 2);
 
-            const targetTx = deltaCol * colWidth;
-            const targetTy = deltaRow * rowHeight;
+            const targetTx = deltaCol * stepX;
+            const targetTy = deltaRow * stepY;
 
             box.ease({
                 translation_x: targetTx,
@@ -1843,6 +1862,10 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         let isDragging = false;
         let startX = 0, startY = 0;
         let holdTimerId = null;
+
+        let cardOrigX = 0, cardOrigY = 0;
+        let cardW = 0, cardH = 0;
+        let currentDeltaX = 0, currentDeltaY = 0;
 
         card.connect('enter-event', () => {
             if (!this._activeCardDrag) {
@@ -1882,9 +1905,30 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             if (isDragging) return;
             cancelHoldTimer();
             isDragging = true;
+            isCandidate = false;
             this._activeCardDrag = key;
             this._draggedCardActor = card;
             this._cardDragGrab = global.stage.grab(card);
+
+            // Normalize transitions and get unscaled layout coordinates
+            card.remove_all_transitions();
+            card.set_scale(1.0, 1.0);
+            card.set_translation(0, 0, 0);
+            [cardOrigX, cardOrigY] = card.get_transformed_position();
+            [cardW, cardH] = card.get_transformed_size();
+            currentDeltaX = 0;
+            currentDeltaY = 0;
+
+            // Safety net: stage-level button release listener
+            if (!this._stageReleaseId) {
+                this._stageReleaseId = global.stage.connect('button-release-event', (stage, ev) => {
+                    if (isDragging) {
+                        finishDrag(true);
+                        return Clutter.EVENT_STOP;
+                    }
+                    return Clutter.EVENT_PROPAGATE;
+                });
+            }
 
             card.add_style_class_name('resource-pulse-metric-card-dragging');
             if (card.get_parent()) {
@@ -1900,6 +1944,11 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 
         const finishDrag = (wasDrag) => {
             cancelHoldTimer();
+            if (this._stageReleaseId) {
+                global.stage.disconnect(this._stageReleaseId);
+                this._stageReleaseId = null;
+            }
+
             if (wasDrag && isDragging) {
                 if (this._cardDragGrab) {
                     this._cardDragGrab.dismiss();
@@ -1912,14 +1961,34 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 if (normalStyle) card.style = normalStyle;
                 if (gripIcon) gripIcon.style = 'icon-size: 13px; color: rgba(255,255,255,0.2);';
 
-                if (this._pendingPreviewOrder) {
-                    this._cardOrder = this._pendingPreviewOrder;
-                    this._pendingPreviewOrder = null;
-                }
+                const oldOrder = this._cardOrder || [];
+                const origIndex = oldOrder.indexOf(key);
+                const newOrder = this._pendingPreviewOrder || oldOrder;
+                const targetIndex = newOrder.indexOf(key);
+
+                this._cardOrder = newOrder;
+                this._pendingPreviewOrder = null;
                 this._previewTargetIndex = null;
 
-                // Reset translations on all cards and reattach to grid
+                const [gridW, gridH] = this._overviewGrid ? this._overviewGrid.get_transformed_size() : [0, 0];
+                const stepX = (gridW > cardW && cardW > 0) ? (gridW - cardW) : (gridW > 0 ? gridW / 2 : 190);
+                const stepY = (gridH > cardH && cardH > 0) ? (gridH - cardH) / 3 : (gridH > 0 ? gridH / 4 : 95);
+
+                const origCol = origIndex >= 0 ? origIndex % 2 : 0;
+                const origRow = origIndex >= 0 ? Math.floor(origIndex / 2) : 0;
+                const targetCol = targetIndex >= 0 ? targetIndex % 2 : 0;
+                const targetRow = targetIndex >= 0 ? Math.floor(targetIndex / 2) : 0;
+
+                const slotShiftX = (targetCol - origCol) * stepX;
+                const slotShiftY = (targetRow - origRow) * stepY;
+
+                // Relative to the new slot, compute the card's current visual offset to prevent jumping
+                const initialSnapTx = currentDeltaX - slotShiftX;
+                const initialSnapTy = currentDeltaY - slotShiftY;
+
+                // Reset preview translations on all other cards
                 for (const k of Object.keys(this._summaryCards)) {
+                    if (k === key) continue;
                     const b = this._summaryCards[k]?.box;
                     if (b) {
                         b.remove_all_transitions();
@@ -1927,9 +1996,12 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                     }
                 }
 
+                // Reattach all cards to grid in final order
                 this._attachCardsToGrid(this._cardOrder);
 
-                // Animate drop back to zero translation and 1.0 scale
+                // Seamless snap ease into destination slot
+                card.remove_all_transitions();
+                card.set_translation(initialSnapTx, initialSnapTy, 0);
                 card.ease({
                     translation_x: 0,
                     translation_y: 0,
@@ -1975,7 +2047,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             });
             this._dragHoldTimerId = holdTimerId;
 
-            return Clutter.EVENT_PROPAGATE;
+            return Clutter.EVENT_STOP;
         });
 
         card.connect('button-release-event', (actor, event) => {
@@ -2006,6 +2078,19 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         card.connect('event', (actor, event) => {
             const type = event.type();
             if (type === Clutter.EventType.MOTION || type === Clutter.EventType.TOUCH_UPDATE) {
+                if (type === Clutter.EventType.MOTION) {
+                    const state = event.get_state();
+                    // If button 1 is no longer held, finish drag immediately
+                    if ((state & Clutter.ModifierType.BUTTON1_MASK) === 0) {
+                        if (isDragging) {
+                            return finishDrag(true);
+                        }
+                        cancelHoldTimer();
+                        isCandidate = false;
+                        return Clutter.EVENT_PROPAGATE;
+                    }
+                }
+
                 const [currX, currY] = event.get_coords();
                 const dist = Math.hypot(currX - startX, currY - startY);
 
@@ -2014,15 +2099,41 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 }
 
                 if (isDragging) {
-                    const deltaX = currX - startX;
-                    const deltaY = currY - startY;
-                    card.set_translation(deltaX, deltaY, 0);
+                    const rawDeltaX = currX - startX;
+                    const rawDeltaY = currY - startY;
+
+                    let clampedDeltaX = rawDeltaX;
+                    let clampedDeltaY = rawDeltaY;
+
+                    if (this._overviewGrid) {
+                        const [gx, gy] = this._overviewGrid.get_transformed_position();
+                        const [gw, gh] = this._overviewGrid.get_transformed_size();
+                        if (gw > 0 && gh > 0 && cardW > 0 && cardH > 0) {
+                            const minDeltaX = gx - cardOrigX;
+                            const maxDeltaX = Math.max(minDeltaX, (gx + gw - cardW) - cardOrigX);
+                            const minDeltaY = gy - cardOrigY;
+                            const maxDeltaY = Math.max(minDeltaY, (gy + gh - cardH) - cardOrigY);
+
+                            clampedDeltaX = Math.max(minDeltaX, Math.min(rawDeltaX, maxDeltaX));
+                            clampedDeltaY = Math.max(minDeltaY, Math.min(rawDeltaY, maxDeltaY));
+                        }
+                    }
+
+                    currentDeltaX = clampedDeltaX;
+                    currentDeltaY = clampedDeltaY;
+                    card.set_translation(clampedDeltaX, clampedDeltaY, 0);
+
+                    // Compute center of clamped card for slot targeting
+                    const cardCenterX = cardOrigX + clampedDeltaX + (cardW > 0 ? cardW / 2 : 0);
+                    const cardCenterY = cardOrigY + clampedDeltaY + (cardH > 0 ? cardH / 2 : 0);
 
                     // Find hover target slot among cards
-                    this._handleCardDragMotion(key, currX, currY);
+                    this._handleCardDragMotion(key, cardCenterX, cardCenterY);
                     return Clutter.EVENT_STOP;
                 }
-            } else if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END || type === Clutter.EventType.TOUCH_CANCEL) {
+            } else if (type === Clutter.EventType.BUTTON_RELEASE ||
+                       type === Clutter.EventType.TOUCH_END ||
+                       type === Clutter.EventType.TOUCH_CANCEL) {
                 if (isDragging) {
                     return finishDrag(true);
                 }
