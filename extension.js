@@ -500,6 +500,7 @@ export default class ResourcePulseExtension extends Extension {
                 }
                 if (this._activeCardDrag && this._draggedCardActor) {
                     this._draggedCardActor.remove_style_class_name('resource-pulse-metric-card-dragging');
+                    this._draggedCardActor.remove_style_class_name('resource-pulse-metric-card-snapping');
                     this._draggedCardActor.remove_all_transitions();
                     this._draggedCardActor.set_translation(0, 0, 0);
                     this._draggedCardActor.set_scale(1.0, 1.0);
@@ -508,8 +509,11 @@ export default class ResourcePulseExtension extends Extension {
                     for (const k of Object.keys(this._summaryCards)) {
                         const b = this._summaryCards[k]?.box;
                         if (b) {
+                            b.remove_style_class_name('resource-pulse-metric-card-dragging');
+                            b.remove_style_class_name('resource-pulse-metric-card-snapping');
                             b.remove_all_transitions();
                             b.set_translation(0, 0, 0);
+                            b.set_scale(1.0, 1.0);
                         }
                     }
                 }
@@ -1846,8 +1850,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             box.ease({
                 translation_x: targetTx,
                 translation_y: targetTy,
-                duration: 160,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                duration: 220,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
             });
         }
     }
@@ -1883,8 +1887,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                     card.ease({
                         scale_x: 1.0,
                         scale_y: 1.0,
-                        duration: 100,
-                        mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                        duration: 120,
+                        mode: Clutter.AnimationMode.EASE_OUT_CUBIC
                     });
                 }
             }
@@ -1912,6 +1916,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 
             // Normalize transitions and get unscaled layout coordinates
             card.remove_all_transitions();
+            card.remove_style_class_name('resource-pulse-metric-card-snapping');
             card.set_scale(1.0, 1.0);
             card.set_translation(0, 0, 0);
             [cardOrigX, cardOrigY] = card.get_transformed_position();
@@ -1935,10 +1940,10 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 card.get_parent().set_child_above_sibling(card, null);
             }
             card.ease({
-                scale_x: 1.05,
-                scale_y: 1.05,
-                duration: 120,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                scale_x: 1.04,
+                scale_y: 1.04,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
             });
         };
 
@@ -1957,9 +1962,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 isDragging = false;
                 this._activeCardDrag = null;
                 this._draggedCardActor = null;
-                card.remove_style_class_name('resource-pulse-metric-card-dragging');
-                if (normalStyle) card.style = normalStyle;
-                if (gripIcon) gripIcon.style = 'icon-size: 13px; color: rgba(255,255,255,0.2);';
 
                 const oldOrder = this._cardOrder || [];
                 const origIndex = oldOrder.indexOf(key);
@@ -1986,20 +1988,58 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 const initialSnapTx = currentDeltaX - slotShiftX;
                 const initialSnapTy = currentDeltaY - slotShiftY;
 
-                // Reset preview translations on all other cards
+                // For all other cards, calculate their visual offset relative to their new slot
+                const otherCardOffsets = {};
                 for (const k of Object.keys(this._summaryCards)) {
                     if (k === key) continue;
                     const b = this._summaryCards[k]?.box;
-                    if (b) {
-                        b.remove_all_transitions();
-                        b.set_translation(0, 0, 0);
+                    if (!b) continue;
+
+                    const oldIdx = oldOrder.indexOf(k);
+                    const newIdx = this._cardOrder.indexOf(k);
+                    if (oldIdx !== -1 && newIdx !== -1) {
+                        const shiftCol = (newIdx % 2) - (oldIdx % 2);
+                        const shiftRow = Math.floor(newIdx / 2) - Math.floor(oldIdx / 2);
+                        const expectedTx = shiftCol * stepX;
+                        const expectedTy = shiftRow * stepY;
+                        otherCardOffsets[k] = {
+                            tx: b.translation_x - expectedTx,
+                            ty: b.translation_y - expectedTy
+                        };
+                    } else {
+                        otherCardOffsets[k] = { tx: 0, ty: 0 };
                     }
+                    b.remove_all_transitions();
                 }
 
                 // Reattach all cards to grid in final order
                 this._attachCardsToGrid(this._cardOrder);
 
-                // Seamless snap ease into destination slot
+                // Now ease all other cards seamlessly into (0, 0)
+                for (const k of Object.keys(this._summaryCards)) {
+                    if (k === key) continue;
+                    const b = this._summaryCards[k]?.box;
+                    const offset = otherCardOffsets[k];
+                    if (b && offset) {
+                        b.set_translation(offset.tx, offset.ty, 0);
+                        if (Math.abs(offset.tx) > 0.5 || Math.abs(offset.ty) > 0.5) {
+                            b.ease({
+                                translation_x: 0,
+                                translation_y: 0,
+                                duration: 260,
+                                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+                            });
+                        } else {
+                            b.set_translation(0, 0, 0);
+                        }
+                    }
+                }
+
+                // Transition dragged card styling to snapping state
+                card.remove_style_class_name('resource-pulse-metric-card-dragging');
+                card.add_style_class_name('resource-pulse-metric-card-snapping');
+
+                // Seamless snap ease into destination slot with silky cubic deceleration
                 card.remove_all_transitions();
                 card.set_translation(initialSnapTx, initialSnapTy, 0);
                 card.ease({
@@ -2007,8 +2047,13 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                     translation_y: 0,
                     scale_x: 1.0,
                     scale_y: 1.0,
-                    duration: 180,
-                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                    duration: 260,
+                    mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+                    onComplete: () => {
+                        card.remove_style_class_name('resource-pulse-metric-card-snapping');
+                        if (normalStyle) card.style = normalStyle;
+                        if (gripIcon) gripIcon.style = 'icon-size: 13px; color: rgba(255,255,255,0.2);';
+                    }
                 });
 
                 // Finalize order in GSettings
