@@ -1850,7 +1850,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             box.ease({
                 translation_x: targetTx,
                 translation_y: targetTy,
-                duration: 220,
+                duration: 300,
                 mode: Clutter.AnimationMode.EASE_OUT_CUBIC
             });
         }
@@ -2026,7 +2026,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                             b.ease({
                                 translation_x: 0,
                                 translation_y: 0,
-                                duration: 260,
+                                duration: 360,
                                 mode: Clutter.AnimationMode.EASE_OUT_CUBIC
                             });
                         } else {
@@ -2047,7 +2047,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                     translation_y: 0,
                     scale_x: 1.0,
                     scale_y: 1.0,
-                    duration: 260,
+                    duration: 360,
                     mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
                     onComplete: () => {
                         card.remove_style_class_name('resource-pulse-metric-card-snapping');
