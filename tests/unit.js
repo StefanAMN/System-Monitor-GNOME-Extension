@@ -12,7 +12,7 @@ import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync, runSubprocess } from '../lib/utils.js';
 import { parseNetDev, counterDelta } from '../lib/network.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
-import { sensorLabel, parseMilliCelsius, pickPackageTemp } from '../lib/thermal.js';
+import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../lib/thermal.js';
 import { raplWatts } from '../lib/power.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
@@ -213,6 +213,9 @@ docker0: 1 2 3
     eq(pickPackageTemp([{ label: 'NVMe', temp: 40 }, { label: 'Core 1', temp: 52 }]), 52, 'thermal: then first core');
     eq(pickPackageTemp([{ label: 'acpitz', temp: 40 }, { label: 'NVMe', temp: 61 }]), 61, 'thermal: then hottest');
     eq(pickPackageTemp([]), 0, 'thermal: no sensor');
+    eq(primarySensor([{ label: 'Core 0' }, { label: 'CPU Package', isPackage: true }]).label, 'CPU Package', 'thermal: primary sensor is the package');
+    eq(primarySensor([{ label: 'NVMe' }, { label: 'Core 1' }]).label, 'Core 1', 'thermal: else the first core');
+    eq(primarySensor([{ label: 'Motherboard' }, { label: 'NVMe' }]), null, 'thermal: no primary sensor without package or core');
 }
 
 // ── collectors: power (RAPL) ──
@@ -343,6 +346,32 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const quick = await runSubprocess(['echo', 'hi'], { timeoutMs: 5000 });
         eq([quick.success, quick.stdout.trim()], [true, 'hi'], 'subprocess: a child that finishes in time is untouched');
     }
+    // Top bar (fast) and Thermal tab (detailed) must report the same figure,
+    // also on machines with neither a package nor a core sensor.
+    {
+        const dir = GLib.dir_make_tmp('rp-thermal-XXXXXX');
+        const write = (name, text) => {
+            GLib.file_set_contents(`${dir}/${name}`, text);
+            return `${dir}/${name}`;
+        };
+        const thm = new ThermalSampler();
+        thm._lastDiscovery = GLib.get_monotonic_time();
+        thm._discoveredFans = [];
+        thm._discoveredSensors = [
+            { path: write('board', '40000\n'), label: 'Motherboard', isPackage: false },
+            { path: write('nvme', '61000\n'), label: 'NVMe Composite', isPackage: false }
+        ];
+        const fast = await thm.sample(false);
+        const full = await thm.sample(true);
+        eq([fast.packageTemp, full.packageTemp], [61, 61], 'thermal: top bar and tab agree without a package sensor (hottest)');
+        thm._discoveredSensors.push({ path: write('pkg', '52000\n'), label: 'CPU Package', isPackage: true });
+        const fastPkg = await thm.sample(false);
+        eq([fastPkg.packageTemp, fastPkg.detailed, (await thm.sample(true)).packageTemp], [52, false, 52],
+            'thermal: with a package sensor the top bar reads only that one');
+        for (const name of ['board', 'nvme', 'pkg']) GLib.unlink(`${dir}/${name}`);
+        GLib.rmdir(dir);
+    }
+
     const sampler = new ProcessSampler();
     await sampler.sample(16e9);
     // Back-to-back samples (ms apart) must not turn one clock tick into a spike.
