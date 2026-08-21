@@ -4,7 +4,7 @@ Instructions for any AI coding agent (Claude Code, Cursor, Codex CLI, etc.) work
 
 ## Project
 
-**Resource Pulse** — a GNOME Shell 50 extension (Ubuntu 26.04, Wayland-only) that monitors CPU, memory, battery, power, disk, network, and thermal stats. It shows a user-configurable subset in the top bar and a full dashboard in a dropdown panel. Full functional spec lives in `docs/spec.md` (paste the original design prompt there if it isn't already).
+**Resource Pulse** — a GNOME Shell 50 extension (Ubuntu 26.04, Wayland-only) that monitors CPU, memory, battery, power, disk, network, thermal and GPU stats. It shows a user-configurable subset in the top bar and a full dashboard in a dropdown panel. The original functional spec is `docs/spec.md`; `PLAN.md` tracks milestones and how each was verified.
 
 ## Environment
 
@@ -15,27 +15,37 @@ Instructions for any AI coding agent (Claude Code, Cursor, Codex CLI, etc.) work
 ## Repo layout
 
 ```
-extension.js              Entry point (Extension subclass)
+extension.js              Entry point (Extension subclass): polling engine, indicator, dashboard
 prefs.js                  Preferences window (ExtensionPreferences subclass)
 metadata.json
 stylesheet.css
-schemas/                  GSettings schema (.gschema.xml + compiled .gschemas.compiled)
-lib/                      One module per metric domain: cpu.js, memory.js, battery.js,
-                           power.js, disk.js, network.js, thermal.js, gpu.js
-icons/                    Symbolic SVG icons
-docs/                     Spec, design notes, test checklist
+dev.sh                    Build, sandboxed test and benchmark commands (./dev.sh help)
+schemas/                  GSettings schema (.gschema.xml; gschemas.compiled is generated, not committed)
+lib/                      Collectors, one per metric domain (cpu.js, memory.js, battery.js, power.js,
+                           disk.js, network.js, thermal.js, gpu.js, process.js) and pure helpers
+                           (format.js, present.js, stats.js, ringbuffer.js, utils.js, raplfix.js)
+ui/                       Cairo widgets (widgets.js)
+icons/                    Bundled symbolic SVG icons, for names no icon theme provides
+tests/                    unit.js (plain gjs), ui-driver/ and overhead-driver/ (run inside an
+                           isolated headless shell), benchmark_runner.js
+docs/                     spec.md (original product spec)
 ```
 
 ## Build / test / run
 
 - Compile schemas after any change under `schemas/`:
   `glib-compile-schemas schemas/`
-- Package for install: `gnome-extensions pack --extra-source=lib --extra-source=icons`
+- Package for install: `./dev.sh pack` (`gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons`)
 - Dev install (symlink into place, then reload):
   `ln -sfn "$(pwd)" ~/.local/share/gnome-shell/extensions/resource-pulse@yourdomain.example`
   then `Alt+F2 → r` in a nested Wayland test session, or fully log out/in for a real test.
 - Lint JS with ESLint if a config is present (`.eslintrc*`); run it before committing and fix warnings rather than suppressing them.
-- There is no headless unit-test harness for GNOME Shell UI code — validate logic-only modules (e.g. `/proc` parsers in `lib/*.js`) with plain `gjs` test scripts where feasible, and note any manual verification steps you couldn't automate in the commit message or PR description.
+- Tests, none of which touch the running session:
+  - `./dev.sh test-unit` — parsers, deltas and pure helpers under plain `gjs`. Put logic in `lib/` as pure functions so it can be tested here.
+  - `./dev.sh test-headless 10` — enables the extension in an isolated headless shell and fails on any error in its log.
+  - `./dev.sh test-ui` — drives the panel and menu in that isolated shell with real pointer events (`tests/ui-driver`), in light and dark; `RP_KEEP=1` keeps screenshots of every tab. Anything the user clicks, drags or hovers is verified here, not by calling the handler directly.
+  - `./dev.sh test-overhead` — the extension's own CPU cost and a leak soak.
+- Note in the commit message or PR description any verification you could not run (other GPU vendors, hardware this machine lacks).
 
 ## Coding conventions
 

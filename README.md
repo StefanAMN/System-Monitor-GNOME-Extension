@@ -1,6 +1,6 @@
 # Resource Pulse GNOME Shell Extension
 
-Resource Pulse is a modern system resource monitoring extension for GNOME Shell 50.1 (ESM-based, Wayland-only). It displays a compact, customizable summary of pinned metrics in the top bar, and reveals a detailed dashboard panel with live Cairo-based graphical charts (progress rings and sparkline history charts) when clicked.
+Resource Pulse is a modern system resource monitoring extension for GNOME Shell 50.1 (ESM-based, Wayland-only). It displays a compact, customizable summary of pinned metrics in the top bar, and reveals a detailed dashboard panel with live Cairo-based charts (history graphs and progress bars) when clicked.
 
 ## Features
 
@@ -20,6 +20,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ├── stylesheet.css        # CSS styles for custom layouts and dashboard cards
 ├── metadata.json         # Extension metadata
 ├── schemas/              # GSettings schema definition
+├── docs/spec.md          # Original product spec (PLAN.md tracks milestones and verification)
 ├── icons/                # Bundled symbolic icons (thermal, CPU fallback)
 ├── ui/
 │   └── widgets.js        # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
@@ -30,6 +31,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   ├── ringbuffer.js     # Fixed-capacity history buffer
 │   ├── format.js         # Unit formatting
 │   ├── present.js        # Pure presentation decisions (n/a, icons, scales, hover)
+│   ├── stats.js          # Time-weighted running mean / peak (power session stats)
 │   ├── raplfix.js        # The single privileged (pkexec) action
 │   └── utils.js          # Async file, directory and subprocess helpers
 └── tests/
@@ -52,6 +54,18 @@ RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of e
 ./dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```
+
+## Known limits
+
+- **One battery, one GPU**: the first battery and the first GPU found are shown.
+- **GPU**: Intel, AMD and NVIDIA are supported, but only the Intel path has been run on real hardware. Integrated GPUs report no dedicated memory, temperature or fan; those fields read `--`.
+- **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; Preferences → Advanced has a one-time fix. On battery it is the battery's discharge rate.
+- **Temperature**: the top bar shows the CPU package sensor, else the first core, else the hottest sensor.
+- **Process CPU**: 100% means one full core, as in `top`. The list needs two samples, so it stays dimmed for about half a second after the tab opens.
+- **Units**: rates are decimal (1 MB/s = 1 000 000 bytes/s). Memory follows the GB / GiB setting.
+- **Session figures** (network totals, power average and peak) start over when the extension is disabled, which GNOME does on every screen lock.
+- **Top bar room**: with all eight metrics pinned on a narrow display (1280 px) the labels are ellipsized. Pin fewer, or use compact mode.
+- **Language**: the interface is English only.
 
 ## Installation & Deployment
 
