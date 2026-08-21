@@ -372,6 +372,23 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         GLib.rmdir(dir);
     }
 
+    // A baseline older than the caller allows is dropped instead of turning
+    // the rates into an average over the gap.
+    {
+        const ps = new ProcessSampler();
+        await ps.sample(16e9, false, 5, 10);
+        await sleep(300);
+        const steady = await ps.sample(16e9, false, 5, 10);
+        ok(!steady.warmingUp, 'proc baseline: consecutive samples are not warm-up');
+        ps._prevTime -= 60 * 1000000;
+        for (const prev of ps._prev.values()) prev.time -= 60 * 1000000;
+        const stale = await ps.sample(16e9, false, 5, 10);
+        ok(stale.warmingUp && stale.top.every(p => p.cpu === 0), 'proc baseline: a minute-old baseline is dropped (warm-up, no rates)');
+        await sleep(300);
+        ok(!(await ps.sample(16e9, false, 5, 10)).warmingUp, 'proc baseline: next sample has rates again');
+        ps.destroy();
+    }
+
     const sampler = new ProcessSampler();
     await sampler.sample(16e9);
     // Back-to-back samples (ms apart) must not turn one clock tick into a spike.

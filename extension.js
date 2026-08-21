@@ -1540,12 +1540,17 @@ export default class ResourcePulseExtension extends Extension {
 
             let processes = [];
             let procSort = null;
+            let procWarmingUp = false;
             if (isDetailedCpu || isDetailedMem) {
+                // A baseline older than a couple of intervals (the menu sat
+                // on another tab) would turn the rates into long averages.
                 const procResult = await this._guarded('processes', deadline,
-                    () => this._proc.sample(mem.total, isDetailedMem), null);
+                    () => this._proc.sample(mem.total, isDetailedMem, 5, 2.5 * this._sampleSeconds), null);
                 if (gen !== this._gen) return;
                 // null: the sampler was destroyed or is still reading.
-                if (procResult) {
+                // CPU rates need two readings; memory is valid from the first.
+                procWarmingUp = !!procResult?.warmingUp && isDetailedCpu;
+                if (procResult && !procWarmingUp) {
                     processes = procResult.top;
                     procSort = isDetailedMem ? 'memory' : 'cpu';
                 }
@@ -1558,6 +1563,8 @@ export default class ResourcePulseExtension extends Extension {
             if (tick || this._recordPending) this._recordHistory(data, need, now);
             this._lastData = data;
             this._render(data);
+            // Fetch the second reading now instead of at the next tick.
+            if (procWarmingUp) this._deferPoll(MIN_RESAMPLE_US);
         } catch (e) {
             console.error(`ResourcePulse poll error: ${e.message}`);
         } finally {
