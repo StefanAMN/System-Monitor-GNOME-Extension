@@ -1458,18 +1458,107 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         }
     }
 
-    _launchSystemMonitor() {
+    _launchSystemMonitor(targetView = null) {
         try {
-            const apps = ['gnome-system-monitor', 'resources', 'mission-center'];
-            for (const appName of apps) {
-                const app = Shell.AppSystem.get_default().lookup_app(`${appName}.desktop`);
+            const context = global.create_app_launch_context(0, -1);
+
+            // 1. If a specific tab/view is requested, try launching with appropriate commandline flags
+            if (targetView) {
+                if (GLib.find_program_in_path('resources')) {
+                    const appInfo = Gio.AppInfo.create_from_commandline(`resources -t ${targetView}`, null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+                if (GLib.find_program_in_path('gnome-system-monitor')) {
+                    const flag = targetView === 'processes' ? '-p' : '-s';
+                    const appInfo = Gio.AppInfo.create_from_commandline(`gnome-system-monitor ${flag}`, null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+                if (GLib.find_program_in_path('mission-center')) {
+                    const appInfo = Gio.AppInfo.create_from_commandline('mission-center', null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+            }
+
+            // 2. Try activating via Shell.AppSystem using known system monitor desktop IDs
+            const candidateAppIds = [
+                'net.nokyan.Resources.desktop',
+                'org.gnome.SystemMonitor.desktop',
+                'io.missioncenter.MissionCenter.desktop',
+                'gnome-system-monitor.desktop',
+                'resources.desktop',
+                'mission-center.desktop',
+                'org.kde.plasma-systemmonitor.desktop',
+                'mate-system-monitor.desktop',
+                'xfce4-taskmanager.desktop'
+            ];
+
+            const appSys = Shell.AppSystem.get_default();
+            for (const appId of candidateAppIds) {
+                const app = appSys.lookup_app(appId);
                 if (app) {
                     app.activate();
                     return;
                 }
             }
-            const context = global.create_app_launch_context(0, -1);
-            Gio.AppInfo.create_from_commandline('gnome-system-monitor', null, Gio.AppInfoCreateFlags.NONE).launch([], context);
+
+            // 3. Search all installed applications for system resource/monitor desktop apps
+            const allApps = appSys.get_installed ? appSys.get_installed() : [];
+            for (const app of allApps) {
+                const id = app.get_id() || '';
+                if (/resource|system-monitor|mission-center|taskmanager/i.test(id)) {
+                    app.activate();
+                    return;
+                }
+            }
+
+            // 4. Try launching available GUI binaries from PATH
+            const candidateBinaries = [
+                'resources',
+                'gnome-system-monitor',
+                'mission-center',
+                'plasma-systemmonitor',
+                'mate-system-monitor',
+                'xfce4-taskmanager'
+            ];
+
+            for (const bin of candidateBinaries) {
+                if (GLib.find_program_in_path(bin)) {
+                    const appInfo = Gio.AppInfo.create_from_commandline(bin, null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+            }
+
+            // 5. Fallback to terminal-based system monitors
+            const termMonitors = ['htop', 'btop', 'top'];
+            for (const tbin of termMonitors) {
+                if (GLib.find_program_in_path(tbin)) {
+                    const terminals = ['ptyxis', 'gnome-terminal', 'kgx', 'x-terminal-emulator', 'kitty', 'alacritty'];
+                    for (const term of terminals) {
+                        if (GLib.find_program_in_path(term)) {
+                            const termCmd = `${term} -- ${tbin}`;
+                            const appInfo = Gio.AppInfo.create_from_commandline(termCmd, null, Gio.AppInfoCreateFlags.NONE);
+                            if (appInfo) {
+                                appInfo.launch([], context);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            console.warn('Resource Pulse: No supported system monitor application found on system.');
         } catch (e) {
             console.error(`Failed to launch System Monitor: ${e.message}`);
         }
@@ -2715,7 +2804,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const showAllBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.07); border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
         showAllBtn.child.style = 'font-size: 0.75em; color: #a0a0b8;';
         showAllBtn.connect('clicked', () => {
-            this._launchSystemMonitor();
+            this._launchSystemMonitor('processes');
             this._indicator.menu.close();
         });
         this._addClickAnimations(showAllBtn);
@@ -2806,7 +2895,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         const memShowAllBtn = new St.Button({ style: 'background-color: rgba(255,255,255,0.07); border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
         memShowAllBtn.child.style = 'font-size: 0.75em; color: #a0a0b8;';
         memShowAllBtn.connect('clicked', () => {
-            this._launchSystemMonitor();
+            this._launchSystemMonitor('processes');
             this._indicator.menu.close();
         });
         this._addClickAnimations(memShowAllBtn);
@@ -3631,7 +3720,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
                 item.add_child(statLbl);
 
                 item.connect('button-press-event', () => {
-                    this._launchSystemMonitor();
+                    this._launchSystemMonitor('processes');
                     this._indicator.menu.close();
                     return Clutter.EVENT_STOP;
                 });
