@@ -104,6 +104,12 @@ cmd_reload() {
 
     echo -e "\n${BOLD}Current status:${RESET}"
     gnome-extensions info "$UUID" | sed 's/^/  /'
+
+    echo -e "\n${YELLOW}${BOLD}Note on GNOME Shell (Wayland) ESM caching:${RESET}"
+    echo -e "  • CSS stylesheets and GSettings changes reload immediately."
+    echo -e "  • JavaScript files (${BOLD}*.js${RESET}) are cached by the GJS/SpiderMonkey runtime for the lifetime of the shell process."
+    echo -e "  • To test JS updates immediately without logging out: ${GREEN}./dev.sh test${RESET} (opens isolated window)"
+    echo -e "  • To apply JS updates to your main desktop session: log out and log back in."
 }
 
 # ------------------------------------------------------------------------------
