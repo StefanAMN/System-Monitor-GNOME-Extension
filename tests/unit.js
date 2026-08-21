@@ -9,7 +9,7 @@ import { RingBuffer } from '../lib/ringbuffer.js';
 import { RunningStats } from '../lib/stats.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
-import { listDirAsync, runSubprocess } from '../lib/utils.js';
+import { listDirAsync, runSubprocess, readFileAsync, noteReadError } from '../lib/utils.js';
 import { parseNetDev, counterDelta } from '../lib/network.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../lib/thermal.js';
@@ -358,6 +358,23 @@ const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));
 (async () => {
     const fds = async () => (await listDirAsync('/proc/self/fd')).length;
+
+    // Optional reads: "not there" is silent, any other failure is logged once.
+    {
+        const failure = async path => readFileAsync(path).then(() => null, e => e);
+        const dir = GLib.dir_make_tmp('rp-read-XXXXXX');
+        ok(noteReadError(await failure(`${dir}/absent`)) === false, 'read errors: a missing file is not reported');
+        GLib.file_set_contents(`${dir}/secret`, 'x');
+        GLib.chmod(`${dir}/secret`, 0);
+        const denied = await failure(`${dir}/secret`);
+        if (denied) {
+            eq([noteReadError(denied), noteReadError(denied)], [true, false], 'read errors: permission denied is reported, once');
+        } else {
+            print('  (running as root: permission-denied case not exercised)');
+        }
+        GLib.unlink(`${dir}/secret`);
+        GLib.rmdir(dir);
+    }
 
     // A helper that hangs (nvidia-smi with the card off the bus) is killed.
     {
