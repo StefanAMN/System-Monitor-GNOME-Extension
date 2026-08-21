@@ -20,7 +20,7 @@ import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale } from './lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
@@ -39,7 +39,7 @@ const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrit
 
 const WATT_SCALE = { autoScale: true, maxVal: 10, formatValue: v => `${v < 10 ? v.toFixed(1) : Math.round(v)}W` };
 const MBS_SCALE = { autoScale: true, maxVal: 1, formatValue: v => (v < 10 ? v.toFixed(1) : `${Math.round(v)}`) };
-const KBS_SCALE = { autoScale: true, maxVal: 10, formatValue: v => (v >= 1024 ? `${(v / 1024).toFixed(1)}M` : `${Math.round(v)}K`) };
+const KBS_SCALE = { autoScale: true, maxVal: 10, formatValue: v => (v >= 1000 ? `${(v / 1000).toFixed(1)}M` : `${Math.round(v)}K`) };
 // Per-history axis: unit of the stored samples and the floor of the auto scale.
 const SPARK_SCALES = {
     batRate: WATT_SCALE,
@@ -66,7 +66,7 @@ export default class ResourcePulseExtension extends Extension {
         this._proc = new ProcessSampler();
         // Bars without a natural maximum scale to the recent peak.
         this._pwrScale = new PeakScale(15);            // watts
-        this._netScale = new PeakScale(1024 * 1024);   // bytes/s
+        this._netScale = new PeakScale(1000000);       // bytes/s
         this._pwr = new PowerSampler();
         this._pwrStats = new RunningStats();
         this._dsk = new DiskSampler();
@@ -1388,7 +1388,7 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _recordHistory(data, need, now) {
-        const MB = 1024 * 1024;
+        const MB = 1000000;
         if (need.cpu) this._pushHistory('cpu', data.cpu.total, now);
         if (need.mem) this._pushHistory('mem', data.mem.percent, now);
         if (need.bat && data.bat.present) {
@@ -1402,8 +1402,8 @@ export default class ResourcePulseExtension extends Extension {
             this._pushHistory('dskWrite', data.dsk.writeRate / MB, now);
         }
         if (need.net) {
-            this._pushHistory('netRx', data.net.total.rxRate / 1024, now);
-            this._pushHistory('netTx', data.net.total.txRate / 1024, now);
+            this._pushHistory('netRx', data.net.total.rxRate / 1000, now);
+            this._pushHistory('netTx', data.net.total.txRate / 1000, now);
         }
         if (need.thm) this._pushHistory('thm', data.thm.packageTemp, now);
         if (need.gpu && data.gpu.present) this._pushHistory('gpu', data.gpu.percent, now);
@@ -1752,13 +1752,7 @@ export default class ResourcePulseExtension extends Extension {
                 ? 'Temperature not available\nNo readable hwmon or thermal-zone sensor was found.'
                 : `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
         }
-        if (data.gpu) {
-            if (data.gpu.present) {
-                this._tooltipTexts['gpu'] = `${data.gpu.brand || 'GPU'}: ${Math.round(data.gpu.percent)}%\nVRAM: ${Math.round(data.gpu.memPercent)}% · Temp: ${formatTemp(data.gpu.temp, tempUnit)}`;
-            } else {
-                this._tooltipTexts['gpu'] = 'GPU not available\nNo supported GPU was detected.';
-            }
-        }
+        if (data.gpu) this._tooltipTexts['gpu'] = gpuTooltip(data.gpu, tempUnit);
 
         // 2. Update top bar text & icons
         const batWidget = this._topBarWidgets['battery'];
@@ -3366,8 +3360,8 @@ export default class ResourcePulseExtension extends Extension {
         if (data.dsk) {
             const dsk = data.dsk;
             const diskPct = dsk.diskPercent || 0;
-            const readMB  = dsk.readRate  / (1024 * 1024);
-            const writeMB = dsk.writeRate / (1024 * 1024);
+            const readMB  = dsk.readRate  / 1000000;
+            const writeMB = dsk.writeRate / 1000000;
             const totalMB = readMB + writeMB;
 
             const sc = this._summaryCards?.disk;
