@@ -20,7 +20,7 @@ import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, PeakScale } from './lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, sanitizeMetricList, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
@@ -394,6 +394,11 @@ export default class ResourcePulseExtension extends Extension {
 
     _hasKey(key) {
         return !!(this._settings && this._settings.settings_schema && this._settings.settings_schema.has_key(key));
+    }
+
+    /** Pinned metrics as stored, minus unknown keys and duplicates. */
+    _pinnedMetrics() {
+        return sanitizeMetricList(this._settings.get_strv('pinned-metrics'));
     }
 
     _getStrv(key, fallback = []) {
@@ -822,7 +827,7 @@ export default class ResourcePulseExtension extends Extension {
             btn.add_child(bBox);
 
             btn.connect('clicked', () => {
-                let current = this._settings.get_strv('pinned-metrics');
+                let current = this._pinnedMetrics();
                 if (current.includes(m.key)) {
                     current = current.filter(k => k !== m.key);
                 } else {
@@ -1136,7 +1141,7 @@ export default class ResourcePulseExtension extends Extension {
         if (!this._settings || !this._settingsPage) return;
 
         // Pinned
-        const pinned = this._settings.get_strv('pinned-metrics');
+        const pinned = this._pinnedMetrics();
         for (const [key, btn] of Object.entries(this._pinButtons || {})) {
             this._updatePinButtonState(key, pinned.includes(key));
         }
@@ -1467,7 +1472,7 @@ export default class ResourcePulseExtension extends Extension {
         this._pollInFlight = true;
         this._lastPollTime = now;
         try {
-            const pinned = this._getStrv('pinned-metrics', ['cpu', 'memory']);
+            const pinned = this._pinnedMetrics();
             const isOpen = this._menuOpen;
             const tab = this._activeTab;
 
@@ -1632,7 +1637,7 @@ export default class ResourcePulseExtension extends Extension {
         this._indicatorBox.destroy_all_children();
         this._topBarWidgets = {};
 
-        const pinned = this._settings.get_strv('pinned-metrics') || [];
+        const pinned = this._pinnedMetrics();
         const compact = this._settings.get_boolean('compact-label');
         const templateOpts = {
             batFmt: this._settings.get_string('battery-top-format'),
@@ -1837,7 +1842,7 @@ export default class ResourcePulseExtension extends Extension {
         try {
             this._settings.set_strv('overview-card-order', this._cardOrder);
 
-            let pinned = this._settings.get_strv('pinned-metrics');
+            let pinned = this._pinnedMetrics();
             if (pinned && pinned.length > 1) {
                 pinned.sort((a, b) => this._cardOrder.indexOf(a) - this._cardOrder.indexOf(b));
                 this._settings.set_strv('pinned-metrics', pinned);

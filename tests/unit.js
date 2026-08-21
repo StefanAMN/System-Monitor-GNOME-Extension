@@ -16,7 +16,7 @@ import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, Thermal
 import { raplWatts } from '../lib/power.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, sanitizeMetricList, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
 
 let failed = 0;
 let passed = 0;
@@ -333,6 +333,24 @@ docker0: 1 2 3
     eq(hoverIndex(100, 30, 590, 60, 0), -1, 'hover: empty history');
     eq(hoverIndex(100, 30, 0, 60, 10), -1, 'hover: zero-width graph');
     eq([agoLabel(0, 2), agoLabel(7, 2), agoLabel(30, 2), agoLabel(40, 2)], ['now', '14s ago', '1m ago', '1m 20s ago'], 'hover: age label');
+}
+
+// ── settings: stored values are validated ──
+{
+    eq(sanitizeMetricList(['cpu', 'bogus', 'cpu', 'gpu', '']), ['cpu', 'gpu'], 'pinned: unknown keys and duplicates dropped, order kept');
+    eq(sanitizeMetricList(undefined), [], 'pinned: nothing stored');
+
+    // Needs schemas/gschemas.compiled (./dev.sh test-unit compiles it).
+    // Only the schema is inspected; no setting is read or written.
+    const here = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
+    const source = Gio.SettingsSchemaSource.new_from_directory(`${here}/../schemas`, Gio.SettingsSchemaSource.get_default(), false);
+    const schema = source.lookup('org.gnome.shell.extensions.resource-pulse', false);
+    const allowed = (key, value) => schema.get_key(key).range_check(GLib.Variant.new_string(value));
+    ok(!allowed('unit-temp', 'K') && !allowed('unit-mem', 'TB') && !allowed('battery-top-format', 'x') && !allowed('network-top-format', 'x'),
+        'schema: enumerated string keys reject values the UI does not know');
+    ok(allowed('unit-temp', 'F') && allowed('unit-mem', 'GiB') && allowed('battery-top-format', 'percent-time') && allowed('network-top-format', 'both'),
+        'schema: every value the UI writes is accepted');
+    ok(!schema.has_key('density-mode'), 'schema: the unused density-mode key is gone');
 }
 
 // ── live: process churn, bounded state, no fd leak ──
