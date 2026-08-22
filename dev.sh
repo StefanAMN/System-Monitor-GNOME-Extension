@@ -44,10 +44,10 @@ compile_schemas() {
 check_syntax() {
     log_info "Verifying JavaScript syntax..."
     if command -v node >/dev/null 2>&1; then
-        node -c "$SCRIPT_DIR/extension.js"
-        if [ -f "$SCRIPT_DIR/prefs.js" ]; then
-            node -c "$SCRIPT_DIR/prefs.js"
-        fi
+        local f
+        for f in "$SCRIPT_DIR"/*.js "$SCRIPT_DIR"/lib/*.js "$SCRIPT_DIR"/ui/*.js "$SCRIPT_DIR"/tests/ui-driver/*.js; do
+            [ -f "$f" ] && node --check "$f"
+        done
         log_success "JavaScript syntax verified."
     elif command -v gjs >/dev/null 2>&1; then
         gjs -c "import('$SCRIPT_DIR/extension.js').catch(() => {});" >/dev/null 2>&1 || true
@@ -220,6 +220,52 @@ cmd_test_ci() {
 }
 
 # ------------------------------------------------------------------------------
+# Command: Drive the real UI in an isolated headless shell and scan its log
+# ------------------------------------------------------------------------------
+cmd_test_ui() {
+    log_title "Running Headless UI Test (tabs, re-enable cycle, log scan)"
+
+    check_syntax
+    compile_schemas
+
+    local SANDBOX
+    SANDBOX="$(mktemp -d /tmp/rp-ui-test.XXXXXX)"
+    local EXT_DIR="$SANDBOX/data/gnome-shell/extensions"
+    mkdir -p "$EXT_DIR" "$SANDBOX/config"
+    ln -s "$SCRIPT_DIR" "$EXT_DIR/$UUID"
+    ln -s "$SCRIPT_DIR/tests/ui-driver" "$EXT_DIR/rp-ui-driver@resource-pulse.test"
+    local LOG="$SANDBOX/shell.log"
+
+    # Private XDG dirs: no other user extensions, no writes to the real dconf.
+    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" \
+    dbus-run-session -- bash -c '
+        gnome-shell --headless --virtual-monitor 1280x720 > "'"$LOG"'" 2>&1 &
+        SHELL_PID=$!
+        trap "kill $SHELL_PID 2>/dev/null; wait $SHELL_PID 2>/dev/null" EXIT INT TERM
+        sleep 3
+        gnome-extensions enable "'"$UUID"'"
+        sleep 1
+        gnome-extensions enable rp-ui-driver@resource-pulse.test
+        for _ in $(seq 1 90); do
+            grep -qE "RP-UITEST (DONE|FAIL)" "'"$LOG"'" && break
+            sleep 1
+        done
+        sleep 1
+    ' || true
+
+    local BAD
+    BAD="$(grep -nE "RP-UITEST FAIL|JS ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove" "$LOG" || true)"
+    if grep -q "RP-UITEST DONE" "$LOG" && [ -z "$BAD" ]; then
+        log_success "UI test passed (log: $LOG)"
+    else
+        log_error "UI test failed (log: $LOG)"
+        echo "$BAD" | head -n 40
+        grep -A12 "RP-UITEST FAIL" "$LOG" | head -n 30 || true
+        exit 1
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # Command: Show current extension status & journal logs
 # ------------------------------------------------------------------------------
 cmd_status() {
@@ -273,6 +319,7 @@ cmd_help() {
     echo -e "  ${GREEN}reload, reenable${RESET}   (Default) Compile schemas, verify symlink, and re-enable in current session"
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Run a headless automated test in isolated environment (default 5s)"
+    echo -e "  ${GREEN}test-ui${RESET}            Drive every menu tab + a disable/enable cycle headlessly and scan the shell log"
     echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
@@ -291,6 +338,9 @@ case "${1:-reload}" in
         ;;
     test-headless|test-ci|verify|check)
         cmd_test_ci "${2:-5}"
+        ;;
+    test-ui|ui)
+        cmd_test_ui
         ;;
     benchmark|test-benchmark|bench)
         shift
