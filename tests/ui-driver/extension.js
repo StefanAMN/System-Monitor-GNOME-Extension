@@ -283,6 +283,39 @@ async function stepperClamps(rp) {
     await sleep(400);
 }
 
+// A focused overview card opens its page on Return and on Space, sent as
+// real key events through the compositor.
+let keyboard = null;
+async function pressKey(keyval) {
+    if (!keyboard) {
+        keyboard = Clutter.get_default_backend().get_default_seat()
+            .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    }
+    keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.PRESSED);
+    await sleep(60);
+    keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.RELEASED);
+    await sleep(600);
+}
+
+async function keyboardOpensCards(rp) {
+    rp._indicator.menu.open();
+    await sleep(600);
+    for (const [key, keyval] of [['cpu', Clutter.KEY_Return], ['memory', Clutter.KEY_space]]) {
+        rp._activeTab = 'overview';
+        rp._updateTabVisibility();
+        await sleep(500);
+        const card = rp._summaryCards[key].box;
+        card.grab_key_focus();
+        check(card.has_style_class_name('rp-hover'), `keyboard: focused ${key} card is not highlighted`);
+        await pressKey(keyval);
+        check(rp._activeTab === key, `keyboard: key on the focused ${key} card left the tab at '${rp._activeTab}'`);
+    }
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
 // cost its own metric only: the others keep updating and it is not started
 // again while the first call is outstanding.
@@ -362,6 +395,7 @@ async function run() {
     }
 
     await stepperClamps(ext.stateObj);
+    await keyboardOpensCards(ext.stateObj);
     await stuckCollector(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.
