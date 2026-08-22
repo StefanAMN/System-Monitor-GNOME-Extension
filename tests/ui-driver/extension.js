@@ -316,6 +316,31 @@ async function keyboardOpensCards(rp) {
     await sleep(400);
 }
 
+// The temperature threshold is stored in °C and shown in the chosen unit.
+async function thresholdFollowsUnit(rp) {
+    rp._settings.set_int('threshold-temp', 80);
+    rp._settings.set_string('unit-temp', 'F');
+    rp._indicator.menu.open();
+    rp._activeTab = 'settings';
+    rp._updateTabVisibility();
+    rp._refreshSettingsUI();
+    await sleep(600);
+    check(rp._tempThreshLbl.text === '176°F', `threshold: 80 °C shown as '${rp._tempThreshLbl.text}' with °F selected`);
+    ensureActorVisibleInScrollView(rp._scrollView, rp._tempThreshInc);
+    await sleep(600);
+    await clickActor(rp._tempThreshInc);
+    check(rp._settings.get_int('threshold-temp') === 85 && rp._tempThreshLbl.text === '185°F',
+        `threshold: after + stored ${rp._settings.get_int('threshold-temp')}, label '${rp._tempThreshLbl.text}'`);
+    rp._settings.reset('threshold-temp');
+    rp._settings.reset('unit-temp');
+    rp._refreshSettingsUI();
+    check(rp._tempThreshLbl.text === '80°C', `threshold: back in °C shows '${rp._tempThreshLbl.text}'`);
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
 // cost its own metric only: the others keep updating and it is not started
 // again while the first call is outstanding.
@@ -396,6 +421,7 @@ async function run() {
 
     await stepperClamps(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
+    await thresholdFollowsUnit(ext.stateObj);
     await stuckCollector(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.
