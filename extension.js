@@ -2519,7 +2519,7 @@ export default class ResourcePulseExtension extends Extension {
         this._attachCardsToGrid(this._cardOrder);
 
         // Hardware Info Card
-        this._hwCard = new St.BoxLayout({ style_class: 'rp-surface rp-interactive', style: 'border-radius: 12px; padding: 12px; margin-top: 10px;', vertical: true, x_expand: true });
+        this._hwCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px; margin-top: 10px;', vertical: true, x_expand: true });
 
         const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
 
@@ -3100,7 +3100,7 @@ export default class ResourcePulseExtension extends Extension {
         const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
 
         this._gpuHwCard = new St.BoxLayout({
-            style_class: 'rp-surface rp-interactive', style: 'border-radius: 12px; padding: 12px;',
+            style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;',
             vertical: true,
             x_expand: true
         });
