@@ -33,6 +33,10 @@ async function cycleTabs(rp, pass) {
     }
 
     check(rp._summaryCards.cpu.valueLabel.text !== '--%', `pass ${pass}: cpu card never updated`);
+    // 60 s of history at most, however many on-demand polls were fired.
+    check(rp._hist.cpu.length >= 3, `pass ${pass}: cpu history not recorded (${rp._hist.cpu.length})`);
+    check(rp._hist.cpu.length <= 12, `pass ${pass}: on-demand polls leaked into history (${rp._hist.cpu.length})`);
+    check(rp._hist.cpu.capacity === 60, 'history capacity changed');
     check(rp._dskMountRows?.length > 0, `pass ${pass}: no disk mount rows`);
     check(rp._dskMountRows[0].statLbl.text !== '', `pass ${pass}: disk mount row not populated`);
     if (rp._lastThm?.sensors?.length > 0) {
