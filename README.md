@@ -96,6 +96,10 @@ gnome-extensions enable resource-pulse@yourdomain.example
 
 To bundle the extension for upload or sharing:
 ```bash
-gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons
+gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons --extra-source=LICENSE
 ```
 This generates `resource-pulse@yourdomain.example.shell-extension.zip`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
