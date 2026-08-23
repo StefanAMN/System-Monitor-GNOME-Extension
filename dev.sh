@@ -6,7 +6,7 @@
 set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-UUID="resource-pulse@yourdomain.example"
+UUID="resource-pulse@stefanamn.github.io"
 EXTENSIONS_BASE="$HOME/.local/share/gnome-shell/extensions"
 TARGET_DIR="$EXTENSIONS_BASE/$UUID"
 
@@ -223,7 +223,7 @@ cmd_test_dedicated() {
         # This script talks to the terminal (fd 3); session services started
         # by the bus inherit the log file as stdout/stderr instead.
         exec 1>&3 3>&-
-        UUID="resource-pulse@yourdomain.example"
+        UUID="resource-pulse@stefanamn.github.io"
         HOST_WL="'"$HOST_WL"'"
         HOST_DISP="'"$HOST_DISP"'"
         LOG="'"$LOG"'"
