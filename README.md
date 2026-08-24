@@ -64,7 +64,7 @@ RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of e
 - **Process CPU**: 100% means one full core, as in `top`. The list needs two samples, so it stays dimmed for about half a second after the tab opens.
 - **Units**: rates are decimal (1 MB/s = 1 000 000 bytes/s). Memory follows the GB / GiB setting.
 - **Session figures** (network totals, power average and peak) start over when the extension is disabled, which GNOME does on every screen lock.
-- **Top bar room**: with all eight metrics pinned on a narrow display (1280 px) the labels are ellipsized. Pin fewer, or use compact mode.
+- **Top bar room**: when the pinned metrics do not fit beside the clock, the last-pinned ones show only their icon (the value is in the hover tooltip) until there is room again. Pin the metrics you most want to read first.
 - **Language**: the interface is English only.
 
 ## Installation & Deployment
