@@ -56,7 +56,9 @@ function descendantPids(pid) {
             while ((info = en.next_file(null)))
                 children += ` ${readText(`/proc/${p}/task/${info.get_name()}/children`) || ''}`;
             en.close(null);
-        } catch (e) {}
+        } catch (_e) {
+            // The process, or one of its threads, exited while being listed.
+        }
         for (const c of children.trim().split(/\s+/).filter(Boolean).map(Number)) {
             out.push(c);
             stack.push(c);
@@ -138,7 +140,7 @@ export class BenchmarkSuite {
             }
             throw new Error(`workload worker did not start (${this._scriptPath})${output ? `:\n${output}` : ''}`);
         } finally {
-            try { GLib.unlink(readyFile); } catch (e) {}
+            GLib.unlink(readyFile); // returns -1 if it was never created
         }
     }
 
@@ -150,11 +152,15 @@ export class BenchmarkSuite {
         if (proc.get_if_exited()) return;
         try {
             proc.send_signal(15); // SIGTERM allows Python cleanup() handler to terminate workers
-        } catch (e) {}
+        } catch (_e) {
+            // Already exited.
+        }
         await sleep(300);
         try {
             proc.force_exit();
-        } catch (e) {}
+        } catch (_e) {
+            // Already exited.
+        }
         await sleep(800); // Allow OS and drives to settle
     }
 
@@ -401,7 +407,6 @@ export class BenchmarkSuite {
             }
         };
 
-        let lastSampleTime = GLib.get_monotonic_time();
         const samplingLoop = async () => {
             while (running) {
                 if (GLib.get_monotonic_time() > deadline) {
@@ -486,7 +491,6 @@ export class BenchmarkSuite {
                 print(`    Phase [${pr.name}]: Baseline verified.`);
             } else if (pr.name === 'HIGH_LOAD') {
                 const lastSample = pr.samples[pr.samples.length - 1] || {};
-                const deltaCpu = (lastSample.cpu || 0) - baseCpu;
                 const deltaMem = (lastSample.memUsedMb || 0) - baseMemMb;
                 const writeRate = lastSample.writeMbS || 0;
                 const latencyStr = pr.latencyMs ? `${pr.latencyMs.toFixed(0)} ms` : '< 1000 ms';

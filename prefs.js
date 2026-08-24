@@ -24,7 +24,7 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
             if (w.constructor.name === 'HeaderBar' || w.constructor.$gtype?.name === 'AdwHeaderBar') return w;
             let child = w.get_first_child();
             while (child) {
-                let res = findHeaderBar(child);
+                const res = findHeaderBar(child);
                 if (res) return res;
                 child = child.get_next_sibling();
             }
