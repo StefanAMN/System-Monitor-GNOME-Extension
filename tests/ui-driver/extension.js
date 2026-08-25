@@ -46,6 +46,29 @@ async function cycleTabs(rp, pass) {
     if (rp._procWidgets?.length > 0)
         check(rp._procWidgets[0].nameLbl.text !== '', `pass ${pass}: process row not populated`);
 
+    // Disk card and top bar must mean the same thing: space used on '/'.
+    const rootPct = `${Math.round(rp._lastDsk.mounts[0].percent)}%`;
+    check(rp._summaryCards.disk.valueLabel.text === rootPct,
+        `pass ${pass}: disk card shows ${rp._summaryCards.disk.valueLabel.text}, root usage is ${rootPct}`);
+    check(rp._summaryCards.disk.subLabel.text.startsWith('used on /'), `pass ${pass}: disk card not labelled`);
+
+    // A metric the machine cannot provide reads "n/a" with a reason, never 0.
+    const real = rp._lastData;
+    rp._render(Object.assign({}, real, {
+        pwr: { raplSupported: false, packagePower: null, systemPower: null },
+        thm: { packageTemp: 0, sensors: [], fans: [] }
+    }));
+    check(rp._summaryCards.power.valueLabel.text === 'n/a', `pass ${pass}: unreadable power shown as ${rp._summaryCards.power.valueLabel.text}`);
+    check(rp._summaryCards.thermal.valueLabel.text === 'n/a', `pass ${pass}: missing thermal shown as ${rp._summaryCards.thermal.valueLabel.text}`);
+    check(/not available/.test(rp._tooltipTexts.power), `pass ${pass}: power tooltip has no reason`);
+    rp._render(real);
+    check(rp._summaryCards.thermal.valueLabel.text !== 'n/a' || real.thm.sensors.length === 0, `pass ${pass}: thermal did not recover`);
+
+    // A process snapshot sorted for the other tab is dimmed, not presented as current.
+    rp._activeTab = 'cpu';
+    rp._render(Object.assign({}, real, { processes: [], procSort: null }));
+    check(rp._procList.opacity < 255, `pass ${pass}: stale process list not dimmed`);
+
     // Quick click on a card (press + release) must leave no dangling timer id.
     rp._activeTab = 'overview';
     rp._updateTabVisibility();

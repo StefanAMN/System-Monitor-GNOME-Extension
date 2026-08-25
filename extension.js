@@ -20,6 +20,7 @@ import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
+import { powerReadout, thermalUnavailable } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
 import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
@@ -1421,15 +1422,17 @@ export default class ResourcePulseExtension extends Extension {
             if (need.pwr) this._lastPwr = pwr;
 
             let processes = [];
+            let procSort = null;
             if (isDetailedCpu || isDetailedMem) {
                 processes = (await this._proc.sample(mem.total, isDetailedMem)).top;
                 if (gen !== this._gen) return;
+                procSort = isDetailedMem ? 'memory' : 'cpu';
             } else if (!isOpen) {
                 // Deltas across a closed menu would be averages over minutes.
                 this._proc.reset();
             }
 
-            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes };
+            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes, procSort };
             if (tick || this._recordPending) this._recordHistory(data, need, now);
             this._lastData = data;
             this._render(data);
@@ -1535,6 +1538,8 @@ export default class ResourcePulseExtension extends Extension {
             const availStr = formatBytes(data.mem.available, useGiB);
             this._tooltipTexts['memory'] = `Used: ${usedStr} / ${totalStr}\nAvailable: ${availStr}\nSwap: ${Math.round(data.mem.swapPercent || 0)}%`;
         }
+        if (data.bat && !data.bat.present)
+            this._tooltipTexts['battery'] = 'Battery not available\nNo battery was detected.';
         if (data.bat && data.bat.present) {
             const state = batteryStateLabel(data.bat.state);
             let timeStr = '';
@@ -1543,12 +1548,17 @@ export default class ResourcePulseExtension extends Extension {
             this._tooltipTexts['battery'] = `Battery: ${data.bat.percent.toFixed(1)}% (${state}${timeStr})\nHealth: ${data.bat.health.toFixed(1)}% · Rate: ${(data.bat.energyRate || 0).toFixed(1)}W`;
         }
         if (data.pwr) {
-            const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : 'n/a on AC';
-            this._tooltipTexts['power'] = `System Draw: ${sys}\nCPU Package: ${data.pwr.packagePower ? data.pwr.packagePower.toFixed(1) + 'W' : '--'}`;
+            const readout = powerReadout(data.pwr);
+            if (readout.value === null) {
+                this._tooltipTexts['power'] = `Power draw not available\n${readout.reason}`;
+            } else {
+                const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : 'n/a on AC';
+                this._tooltipTexts['power'] = `System Draw: ${sys}\nCPU Package: ${data.pwr.packagePower !== null ? data.pwr.packagePower.toFixed(1) + 'W' : 'n/a'}`;
+            }
         }
         if (data.dsk && data.dsk.mounts && data.dsk.mounts.length > 0) {
             const root = data.dsk.mounts[0];
-            this._tooltipTexts['disk'] = `Root: ${Math.round(root.percent)}% (${formatBytes(root.free, useGiB)} free)\nI/O: ↓ ${formatSpeed(data.dsk.readRate || 0)}  ↑ ${formatSpeed(data.dsk.writeRate || 0)}`;
+            this._tooltipTexts['disk'] = `Space used on /: ${Math.round(root.percent)}% (${formatBytes(root.free, useGiB)} free)\nBusy: ${Math.round(data.dsk.diskPercent || 0)}% · Read ${formatSpeed(data.dsk.readRate || 0)} · Write ${formatSpeed(data.dsk.writeRate || 0)}`;
         }
         if (data.net && data.net.total) {
             const sessRx = formatBytes(data.net.sessionRx || 0, useGiB);
@@ -1557,13 +1567,15 @@ export default class ResourcePulseExtension extends Extension {
         }
         if (data.thm) {
             const fanInfo = data.thm.fans && data.thm.fans.length > 0 ? `\nFan: ${data.thm.fans[0].rpm} RPM` : '';
-            this._tooltipTexts['thermal'] = `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
+            this._tooltipTexts['thermal'] = thermalUnavailable(data.thm)
+                ? 'Temperature not available\nNo readable hwmon or thermal-zone sensor was found.'
+                : `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
         }
         if (data.gpu) {
             if (data.gpu.present) {
                 this._tooltipTexts['gpu'] = `${data.gpu.brand || 'GPU'}: ${Math.round(data.gpu.percent)}%\nVRAM: ${Math.round(data.gpu.memPercent)}% · Temp: ${formatTemp(data.gpu.temp, tempUnit)}`;
             } else {
-                this._tooltipTexts['gpu'] = 'GPU: Offline / None';
+                this._tooltipTexts['gpu'] = 'GPU not available\nNo supported GPU was detected.';
             }
         }
 
@@ -1572,6 +1584,7 @@ export default class ResourcePulseExtension extends Extension {
             const widget = this._topBarWidgets[key];
             if (!widget.label) return;
 
+            // '--' = not sampled yet, 'n/a' = this machine cannot provide it.
             let text = '--';
             if (key === 'cpu' && data.cpu) text = `${Math.round(data.cpu.total)}%`;
             else if (key === 'memory' && data.mem) text = `${Math.round(data.mem.percent)}%`;
@@ -1587,9 +1600,11 @@ export default class ResourcePulseExtension extends Extension {
                 widget.icon.icon_name = data.bat.state === 'charging'
                     ? 'battery-good-charging-symbolic' : 'battery-good-symbolic';
             }
+            else if (key === 'battery' && data.bat && data.bat.present === false && data.bat.state)
+                text = 'n/a';
             else if (key === 'power' && data.pwr) {
-                const draw = data.pwr.systemPower !== null ? data.pwr.systemPower : (data.pwr.packagePower || 0);
-                text = draw > 0 ? `${draw.toFixed(1)}W` : '0W';
+                const readout = powerReadout(data.pwr);
+                text = readout.value === null ? 'n/a' : `${readout.value.toFixed(1)}W`;
             }
             else if (key === 'disk' && data.dsk && data.dsk.mounts.length > 0)
                 text = `${Math.round(data.dsk.mounts[0].percent)}%`;
@@ -1602,8 +1617,9 @@ export default class ResourcePulseExtension extends Extension {
                     text = `↓ ${formatSpeed(data.net.total.rxRate)}`;
                 }
             }
-            else if (key === 'thermal' && data.thm) text = formatTemp(data.thm.packageTemp, tempUnit);
-            else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : 'N/A';
+            else if (key === 'thermal' && data.thm)
+                text = thermalUnavailable(data.thm) ? 'n/a' : formatTemp(data.thm.packageTemp, tempUnit);
+            else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : 'n/a';
 
             widget.label.text = text;
 
@@ -2791,7 +2807,7 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._dskRead.row);
         this._dskWrite = this._detailRow('Write rate');
         statsCard.add_child(this._dskWrite.row);
-        this._dskUsage = this._detailRow('Active Utilization');
+        this._dskUsage = this._detailRow('Busy (active time)');
         statsCard.add_child(this._dskUsage.row);
         box.add_child(statsCard);
 
@@ -3118,8 +3134,9 @@ export default class ResourcePulseExtension extends Extension {
             const hasDraw = pwr.raplSupported || pwr.systemPower !== null;
             const sc = this._summaryCards?.power;
             
-            const draw = pwr.systemPower !== null ? pwr.systemPower : (pwr.packagePower || 0);
-            const drawStr = draw > 0 ? `${draw.toFixed(1)} W` : '0.0 W';
+            const readout = powerReadout(pwr);
+            const draw = readout.value ?? 0;
+            const drawStr = readout.value === null ? 'n/a' : `${draw.toFixed(1)} W`;
 
             const bat = data.bat;
             const isCharging = bat && bat.present && bat.state === 'charging' && bat.energyRate > 0;
@@ -3132,8 +3149,7 @@ export default class ResourcePulseExtension extends Extension {
                 if (isCharging) {
                     sc.subLabel.text = `Charging (+${bat.energyRate.toFixed(1)} W)`;
                 } else {
-                    sc.subLabel.text = pwr.systemPower !== null ? 'On Battery'
-                        : pwr.raplSupported ? 'AC · CPU package only' : 'AC Connected';
+                    sc.subLabel.text = readout.value === null ? 'Energy counters not readable' : readout.source;
                 }
             }
             if (hasDraw) {
@@ -3174,10 +3190,12 @@ export default class ResourcePulseExtension extends Extension {
 
             const sc = this._summaryCards?.disk;
             if (sc) {
-                sc.valueLabel.text = `${Math.round(diskPct)}%`;
-                sc.pbar.setPercent(diskPct);
+                // Same figure as the top bar: space used on the root filesystem.
+                const root = dsk.mounts && dsk.mounts[0];
+                sc.valueLabel.text = root ? `${Math.round(root.percent)}%` : 'n/a';
+                sc.pbar.setPercent(root ? root.percent : 0);
                 sc.subLabel.visible = true;
-                sc.subLabel.text = `Read: ${readMB.toFixed(1)} MB/s · Write: ${writeMB.toFixed(1)} MB/s`;
+                sc.subLabel.text = `used on / · busy ${Math.round(diskPct)}% · ${formatSpeed(dsk.readRate + dsk.writeRate)}`;
             }
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
@@ -3263,8 +3281,11 @@ export default class ResourcePulseExtension extends Extension {
             const thm = data.thm;
             const sc = this._summaryCards?.thermal;
             if (sc) {
-                sc.valueLabel.text = formatTemp(thm.packageTemp, tempUnit);
-                sc.pbar.setPercent(Math.min(100, (thm.packageTemp / 100) * 100)); // normalized to 100C
+                const missing = thermalUnavailable(thm);
+                sc.valueLabel.text = missing ? 'n/a' : formatTemp(thm.packageTemp, tempUnit);
+                sc.pbar.setPercent(missing ? 0 : Math.min(100, thm.packageTemp)); // 100 °C full scale
+                sc.subLabel.visible = missing;
+                if (missing) sc.subLabel.text = 'No sensor found';
             }
             if (this._menuOpen && this._activeTab === 'thermal') {
                 if (this._thmSensorsBox && thm.sensors) {
@@ -3331,7 +3352,7 @@ export default class ResourcePulseExtension extends Extension {
                     const clockText = gpu.clock ? ` · ${Math.round(gpu.clock)} MHz` : '';
                     sc.subLabel.text = `${gpu.brand || 'GPU'}${clockText}`;
                 } else {
-                    sc.valueLabel.text = 'N/A';
+                    sc.valueLabel.text = 'n/a';
                     sc.pbar.setPercent(0);
                     sc.subLabel.visible = true;
                     sc.subLabel.text = 'No GPU Detected';
@@ -3405,11 +3426,17 @@ export default class ResourcePulseExtension extends Extension {
         for (const spark of this._sparklines) spark.refresh();
 
         // ── Top Processes (CPU & Memory tabs) ──
-        if (this._menuOpen && data.processes && data.processes.length > 0) {
-            if (this._activeTab === 'cpu' && this._procList) {
-                this._renderProcessListUI(this._procList, '_procWidgets', data.processes, false);
-            } else if (this._activeTab === 'memory' && this._memProcList) {
-                this._renderProcessListUI(this._memProcList, '_memProcWidgets', data.processes, true);
+        // A snapshot sorted for the other tab (or taken before the tab was
+        // opened) is not shown as if it were current: the list is dimmed
+        // until a sample for this tab arrives.
+        if (this._menuOpen && (this._activeTab === 'cpu' || this._activeTab === 'memory')) {
+            const isMemory = this._activeTab === 'memory';
+            const list = isMemory ? this._memProcList : this._procList;
+            const fresh = data.procSort === this._activeTab && data.processes.length > 0;
+            if (list) {
+                if (fresh)
+                    this._renderProcessListUI(list, isMemory ? '_memProcWidgets' : '_procWidgets', data.processes, isMemory);
+                list.opacity = fresh ? 255 : 110;
             }
         }
     }
