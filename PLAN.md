@@ -61,3 +61,27 @@ Still open:
 - `lib/thermal.js` detailed read (~55 ms) and `lib/gpu.js` were not optimised.
 
 Resume / re-verify: `./dev.sh test-unit && ./dev.sh test-ui`.
+
+---
+
+# UI pass (approved 2026-10-02, branch `audit-fixes`)
+
+Presentation-layer work in `extension.js`, `ui/widgets.js`, `stylesheet.css`; two collector touches (process grouping, interface filter). No new timers or polls.
+
+Owner decisions: group processes **by name** (no extra reads); **full light-theme support** while dark keeps the colourful tinted cards; sparkline **hover readout** is in; **no pause function**.
+
+| # | Milestone | Proof |
+|---|-----------|-------|
+| U1 | Disk "used" vs "busy" labelled consistently; unavailable metrics show "n/a" with reason instead of 0 / stale; process list cleared when stale | headless assertions on label text; unit test |
+| U2 | Top bar: tabular figures + stable width per metric; battery icon follows level / charging | unit tests for width template and icon mapping; headless run |
+| U3 | Power and network bars scale to a decaying observed peak (no fixed 45 W / 10 MB/s) | unit test of peak tracker |
+| U4 | Show every non-virtual network interface | unit test with fixture names |
+| U5 | Process list: memory in bytes; rows grouped by name | unit tests; live comparison with `ps`; sampler re-timed |
+| U6 | Inline colours -> CSS classes, light variant following the shell colour scheme, dark keeps tinted cards | headless run in light and dark with log scan; **appearance needs owner's eyes** |
+| U7 | Lazy detail pages; closing prefs does not reopen the menu; sparkline hover readout | open-to-render timing before/after; headless tab + disable/enable cycle |
+
+Edge cases: pinned metric whose hardware is absent; colour-scheme switch while the menu is open; hover on an empty sparkline; grouped process whose members exit between samples.
+
+## UI state
+
+(updated as milestones land)
