@@ -120,6 +120,24 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(thermalUnavailable({ packageTemp: 51, sensors: [{}], fans: [] }), false, 'thermal: reading present');
 }
 
+{
+    eq(batteryIconName(4, 'discharging'), 'battery-level-0-symbolic', 'battery icon: nearly empty');
+    eq(batteryIconName(47, 'discharging'), 'battery-level-50-symbolic', 'battery icon: rounds to nearest step');
+    eq(batteryIconName(90, 'charging'), 'battery-level-90-charging-symbolic', 'battery icon: charging');
+    eq(batteryIconName(100, 'full'), 'battery-level-100-charged-symbolic', 'battery icon: full');
+    eq(batteryIconName(80, 'not charging'), 'battery-level-80-symbolic', 'battery icon: plugged but held at 80%');
+    eq(batteryIconName(NaN, 'unknown'), 'battery-missing-symbolic', 'battery icon: absent');
+    eq(batteryIconName(130, 'discharging'), 'battery-level-100-symbolic', 'battery icon: clamps');
+
+    const longest = (key, opts, samples) => samples.every(t => t.length <= labelTemplate(key, opts).length);
+    ok(longest('cpu', {}, ['0%', '9%', '100%', 'n/a', '--']), 'template: cpu covers every value');
+    ok(longest('power', {}, ['0.0W', '14.2W', '120.5W', 'n/a']), 'template: power');
+    ok(longest('thermal', { tempUnit: 'F' }, [formatTemp(105, 'F'), 'n/a']), 'template: thermal F');
+    ok(longest('network', { netFmt: 'download' }, [`↓ ${formatSpeed(0)}`, `↓ ${formatSpeed(1023.9 * 1024)}`, `↓ ${formatSpeed(999.9 * 1024 ** 3)}`]), 'template: network single');
+    ok(longest('network', { netFmt: 'both' }, [`↓${formatSpeed(1023.9 * 1024)} ↑${formatSpeed(1023.9 * 1024)}`]), 'template: network both');
+    ok(longest('battery', { batFmt: 'percent-time' }, ['100% · 12h 59m']), 'template: battery with time');
+}
+
 // ── live: process churn, bounded state, no fd leak ──
 const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));

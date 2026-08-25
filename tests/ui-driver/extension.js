@@ -69,6 +69,21 @@ async function cycleTabs(rp, pass) {
     rp._render(Object.assign({}, real, { processes: [], procSort: null }));
     check(rp._procList.opacity < 255, `pass ${pass}: stale process list not dimmed`);
 
+    // Top-bar labels keep their width whatever the value.
+    for (const [key, w] of Object.entries(rp._topBarWidgets)) {
+        if (!w.label) continue;
+        const widths = [];
+        for (const text of ['9%', '100%', 'n/a']) {
+            w.label.text = text;
+            widths.push(w.label.get_preferred_width(-1)[1]);
+        }
+        check(widths[0] > 0 && widths.every(x => x === widths[0]), `pass ${pass}: top-bar ${key} width changes with value (${widths})`);
+    }
+    if (rp._topBarWidgets.battery && rp._lastBat?.present)
+        check(/^battery-level-\d+/.test(rp._topBarWidgets.battery.icon.icon_name),
+            `pass ${pass}: battery icon is ${rp._topBarWidgets.battery.icon.icon_name}`);
+    rp._render(real);
+
     // Quick click on a card (press + release) must leave no dangling timer id.
     rp._activeTab = 'overview';
     rp._updateTabVisibility();

@@ -18,6 +18,11 @@
     font-size: 0.85em;
     font-weight: bold;
     margin-left: 1px;
+    font-feature-settings: "tnum";
+}
+
+.resource-pulse-label-warn {
+    color: #e01b24;
 }
 
 /* ── Dropdown Menu Container ──────────────────────────────────────────────── */
