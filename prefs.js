@@ -3,6 +3,7 @@ import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 import GLib from 'gi://GLib';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
 
 export default class ResourcePulsePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -239,7 +240,7 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
 
         const powerFixRow = new Adw.ActionRow({
             title: 'Enable CPU Power Monitoring',
-            subtitle: 'Fixes 0W reading by granting permission to Intel/AMD RAPL sensors (Requires Admin)'
+            subtitle: `Fixes 0W reading by granting read access to Intel/AMD RAPL sensors (requires admin). ${RAPL_FIX_WARNING}`
         });
         
         const powerFixButton = new Gtk.Button({
@@ -250,13 +251,7 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
         
         powerFixButton.connect('clicked', () => {
             try {
-                const script = `
-echo 'SUBSYSTEM=="powercap", ACTION=="add", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj"' | tee /etc/udev/rules.d/99-powercap-read.rules
-udevadm control --reload-rules
-udevadm trigger
-chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
-`;
-                const proc = Gio.Subprocess.new(['pkexec', 'bash', '-c', script], Gio.SubprocessFlags.NONE);
+                const proc = Gio.Subprocess.new(RAPL_FIX_ARGV, Gio.SubprocessFlags.NONE);
                 proc.wait_check_async(null, (obj, res) => {
                     try {
                         obj.wait_check_finish(res);

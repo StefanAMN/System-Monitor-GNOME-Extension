@@ -5,30 +5,39 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ## Features
 
 - **Pinnable Top Bar Icons**: CPU %, Memory %, Battery %, Power Draw (W), Disk %, Network speed, Temperature, and GPU %.
-- **Cairo-based Charts**: Circular rings for CPU/Memory/GPU utilization, live sparklines for history (~60 samples), and a custom battery glyph indicating level and charging status.
-- **Top Processes Card**: Monitors the top CPU/Memory consumers only when the dropdown is open to minimize CPU overhead.
+- **Cairo-based Charts**: Live sparklines backed by fixed 60-sample ring buffers, with real time-span and unit labels, plus progress bars for utilization.
+- **Top Processes Card**: Current per-process CPU (delta of `/proc/[pid]/stat` ticks, 100% = one core) and resident memory, sampled only while the CPU or Memory tab is open.
 - **Libadwaita Preferences**: Access update intervals (1-10s), display modes, temperature/memory units, and warning thresholds.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
 ## File Structure
 
 ```
-├── extension.js          # Core Extension logic, indicator, menu, Cairo widgets
+├── extension.js          # Extension lifecycle, polling engine, indicator and dashboard
 ├── prefs.js              # Preferences UI using Libadwaita window pages
 ├── stylesheet.css        # CSS styles for custom layouts and dashboard cards
 ├── metadata.json         # Extension metadata
 ├── schemas/              # GSettings schema definition
-│   └── org.gnome.shell.extensions.resource-pulse.gschema.xml
-└── lib/                  # Samplers for each metric domain
-    ├── cpu.js
-    ├── memory.js
-    ├── battery.js
-    ├── power.js
-    ├── disk.js
-    ├── network.js
-    ├── thermal.js
-    └── gpu.js
-├── icons/                # Symbolic SVG icons
+├── ui/
+│   └── widgets.js        # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
+├── lib/                  # Collectors (no UI code) and pure helpers
+│   ├── cpu.js  memory.js  battery.js  power.js
+│   ├── disk.js  network.js  thermal.js  gpu.js
+│   ├── process.js        # Per-process CPU / memory from /proc/[pid]/stat
+│   ├── ringbuffer.js     # Fixed-capacity history buffer
+│   ├── format.js         # Unit formatting
+│   ├── raplfix.js        # The single privileged (pkexec) action
+│   └── utils.js          # Async file, directory and subprocess helpers
+└── tests/
+    ├── unit.js           # ./dev.sh test-unit  (plain gjs)
+    └── ui-driver/        # ./dev.sh test-ui    (isolated headless shell)
+```
+
+## Testing
+
+```bash
+./dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
+./dev.sh test-ui     # drives every tab and a disable/enable cycle in a headless shell, fails on any JS error in the log
 ```
 
 ## Installation & Deployment
@@ -60,6 +69,6 @@ gnome-extensions enable resource-pulse@yourdomain.example
 
 To bundle the extension for upload or sharing:
 ```bash
-gnome-extensions pack --extra-source=lib --extra-source=icons
+gnome-extensions pack --extra-source=lib --extra-source=ui
 ```
 This generates `resource-pulse@yourdomain.example.shell-extension.zip`.

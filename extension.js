@@ -19,6 +19,7 @@ import { NetworkSampler } from './lib/network.js';
 import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
+import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
 import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
@@ -968,6 +969,9 @@ export default class ResourcePulseExtension extends Extension {
         const permInfo = new St.BoxLayout({ vertical: true, x_expand: true });
         permInfo.add_child(new St.Label({ text: 'Enable CPU Power Monitoring', style_class: 'resource-pulse-setting-label' }));
         permInfo.add_child(new St.Label({ text: 'Fixes 0W reading by granting read permission to RAPL sensors (Requires Admin)', style_class: 'resource-pulse-setting-desc' }));
+        const permWarn = new St.Label({ text: RAPL_FIX_WARNING, style_class: 'resource-pulse-setting-desc' });
+        permWarn.clutter_text.line_wrap = true;
+        permInfo.add_child(permWarn);
         this._settingsPowerFixStatus = new St.Label({ text: '', style_class: 'resource-pulse-status-label', visible: false });
         this._settingsPowerFixStatus.style = 'margin-top: 4px;';
         permInfo.add_child(this._settingsPowerFixStatus);
@@ -1133,13 +1137,7 @@ export default class ResourcePulseExtension extends Extension {
             statusLabel.visible = true;
         }
         try {
-            const script = `
-echo 'SUBSYSTEM=="powercap", ACTION=="add", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj"' | tee /etc/udev/rules.d/99-powercap-read.rules
-udevadm control --reload-rules
-udevadm trigger
-chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
-`;
-            const proc = Gio.Subprocess.new(['pkexec', 'bash', '-c', script], Gio.SubprocessFlags.NONE);
+            const proc = Gio.Subprocess.new(RAPL_FIX_ARGV, Gio.SubprocessFlags.NONE);
             proc.wait_check_async(null, (obj, res) => {
                 let failure = null;
                 try {
