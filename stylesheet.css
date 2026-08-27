@@ -8,7 +8,6 @@
 }
 
 .resource-pulse-divider {
-    color: rgba(255, 255, 255, 0.2);
     font-weight: 300;
     font-size: 1.0em;
     padding: 0 1px;
@@ -132,26 +131,6 @@
     border-radius: 12px;
     padding: 12px;
     transition-duration: 150ms;
-}
-
-.resource-pulse-metric-card-dragging {
-    border: 1.5px solid rgba(53, 132, 228, 0.95) !important;
-    background-color: rgba(35, 45, 65, 0.95) !important;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
-    transition-duration: 150ms;
-}
-
-.resource-pulse-metric-card-snapping {
-    border: 1.5px solid rgba(53, 132, 228, 0.5) !important;
-    background-color: rgba(30, 40, 58, 0.95) !important;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-    transition-duration: 360ms;
-}
-
-.resource-pulse-card-placeholder {
-    border: 1.5px dashed rgba(53, 132, 228, 0.5) !important;
-    background-color: rgba(53, 132, 228, 0.08) !important;
-    border-radius: 12px;
 }
 
 .resource-pulse-secondary-grid {
@@ -280,28 +259,28 @@
 /* ── Tints for Cards ──────────────────────────────────────────────────────── */
 
 .tint-cpu { background-color: #1f2937; border: 1px solid rgba(53, 132, 228, 0.4); }
-.tint-cpu:hover { background-color: #26354a; border-color: rgba(53, 132, 228, 0.9); }
+.tint-cpu.rp-hover { background-color: #26354a; border-color: rgba(53, 132, 228, 0.9); }
 
 .tint-memory { background-color: #1e1a2e; border: 1px solid rgba(145, 65, 172, 0.4); }
-.tint-memory:hover { background-color: #292240; border-color: rgba(145, 65, 172, 0.9); }
+.tint-memory.rp-hover { background-color: #292240; border-color: rgba(145, 65, 172, 0.9); }
 
 .tint-battery { background-color: #192820; border: 1px solid rgba(46, 194, 126, 0.4); }
-.tint-battery:hover { background-color: #20382b; border-color: rgba(46, 194, 126, 0.9); }
+.tint-battery.rp-hover { background-color: #20382b; border-color: rgba(46, 194, 126, 0.9); }
 
 .tint-power { background-color: #22200a; border: 1px solid rgba(246, 211, 45, 0.35); }
-.tint-power:hover { background-color: #2d2b0e; border-color: rgba(246, 211, 45, 0.9); }
+.tint-power.rp-hover { background-color: #2d2b0e; border-color: rgba(246, 211, 45, 0.9); }
 
 .tint-disk { background-color: #22200a; border: 1px solid rgba(246, 211, 45, 0.35); }
-.tint-disk:hover { background-color: #2d2b0e; border-color: rgba(246, 211, 45, 0.9); }
+.tint-disk.rp-hover { background-color: #2d2b0e; border-color: rgba(246, 211, 45, 0.9); }
 
 .tint-network { background-color: #22100f; border: 1px solid rgba(224, 27, 36, 0.35); }
-.tint-network:hover { background-color: #2f1615; border-color: rgba(224, 27, 36, 0.9); }
+.tint-network.rp-hover { background-color: #2f1615; border-color: rgba(224, 27, 36, 0.9); }
 
 .tint-thermal { background-color: #221608; border: 1px solid rgba(255, 120, 0, 0.35); }
-.tint-thermal:hover { background-color: #2f1f0b; border-color: rgba(255, 120, 0, 0.9); }
+.tint-thermal.rp-hover { background-color: #2f1f0b; border-color: rgba(255, 120, 0, 0.9); }
 
 .tint-gpu { background-color: #0b2014; border: 1px solid rgba(51, 209, 122, 0.35); }
-.tint-gpu:hover { background-color: #10301e; border-color: rgba(51, 209, 122, 0.9); }
+.tint-gpu.rp-hover { background-color: #10301e; border-color: rgba(51, 209, 122, 0.9); }
 
 /* ── Progress Bars ────────────────────────────────────────────────────────── */
 
@@ -613,3 +592,212 @@
     font-weight: 600;
 }
 
+
+/* ── Semantic colour utilities (dark is the default) ──────────────────────── */
+
+.rp-fg { color: #ffffff; }
+.rp-fg-dim { color: #a0a0b8; }
+.rp-fg-muted { color: #8c8c94; }
+.rp-fg-faint { color: rgba(255, 255, 255, 0.4); }
+.rp-grip { color: rgba(255, 255, 255, 0.2); }
+.rp-hover .rp-grip { color: rgba(255, 255, 255, 0.6); }
+
+.rp-surface {
+    background-color: #242424;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.rp-surface.rp-hover {
+    background-color: #2a2a2a;
+    border-color: rgba(255, 255, 255, 0.18);
+}
+.rp-base {
+    background-color: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.rp-chip-bg { background-color: rgba(255, 255, 255, 0.06); }
+
+.rp-c-cpu { color: #3584e4; }
+.rp-c-memory { color: #9141ac; }
+.rp-c-battery { color: #2ec27e; }
+.rp-c-power, .rp-c-disk { color: #f6d32d; }
+.rp-c-network { color: #e01b24; }
+.rp-c-thermal { color: #ff7800; }
+.rp-c-gpu { color: #33d17a; }
+.rp-c-settings { color: #3584e4; }
+
+.resource-pulse-tooltip {
+    background-color: rgba(30, 30, 30, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.82em;
+    color: #ffffff;
+    font-weight: 500;
+}
+
+/* Cairo widgets read these through the theme node. */
+.resource-pulse-sparkline { color: #ffffff; }
+.resource-pulse-progress-track { color: rgba(0, 0, 0, 0.3); }
+
+/* ── Card drag states (after the tints so they win) ───────────────────────── */
+
+.resource-pulse-metric-card-dragging {
+    border: 1.5px solid rgba(53, 132, 228, 0.95) !important;
+    background-color: rgba(35, 45, 65, 0.95) !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    transition-duration: 150ms;
+}
+
+.resource-pulse-metric-card-snapping {
+    border: 1.5px solid rgba(53, 132, 228, 0.5) !important;
+    background-color: rgba(30, 40, 58, 0.95) !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    transition-duration: 360ms;
+}
+
+.resource-pulse-card-placeholder {
+    border: 1.5px dashed rgba(53, 132, 228, 0.5) !important;
+    background-color: rgba(53, 132, 228, 0.08) !important;
+    border-radius: 12px;
+}
+
+
+/* ── Light variant ────────────────────────────────────────────────────────── */
+/* Applied by adding .rp-light to the menu box when the shell style is light. */
+
+.resource-pulse-popup.rp-light {
+    background-color: #f6f5f4 !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+}
+.rp-light .resource-pulse-menu-section { background-color: #f6f5f4; }
+
+.rp-light .rp-fg,
+.rp-light .resource-pulse-overview-title,
+.rp-light .resource-pulse-icon-button,
+.rp-light .resource-pulse-card-value,
+.rp-light .resource-pulse-secondary-value,
+.rp-light .resource-pulse-hw-name,
+.rp-light .resource-pulse-hw-stat-value,
+.rp-light .resource-pulse-detail-header-title,
+.rp-light .resource-pulse-detail-value,
+.rp-light .resource-pulse-proc-icon,
+.rp-light .resource-pulse-process-name,
+.rp-light .resource-pulse-process-stat,
+.rp-light .resource-pulse-sysmon-label,
+.rp-light .resource-pulse-setting-label,
+.rp-light .resource-pulse-stepper-btn { color: #241f31 !important; }
+
+.rp-light .rp-fg-dim,
+.rp-light .resource-pulse-card-title,
+.rp-light .resource-pulse-secondary-title,
+.rp-light .resource-pulse-hw-stats,
+.rp-light .resource-pulse-detail-label,
+.rp-light .resource-pulse-toggle-btn { color: #5e5c64 !important; }
+
+.rp-light .rp-fg-muted,
+.rp-light .resource-pulse-card-status,
+.rp-light .resource-pulse-secondary-subtext,
+.rp-light .resource-pulse-hw-stat-title,
+.rp-light .resource-pulse-setting-desc { color: #77767b !important; }
+
+.rp-light .rp-fg-faint { color: rgba(0, 0, 0, 0.4); }
+.rp-light .rp-grip { color: rgba(0, 0, 0, 0.22); }
+.rp-light .rp-hover .rp-grip { color: rgba(0, 0, 0, 0.6); }
+
+.rp-light .rp-surface,
+.rp-light .resource-pulse-settings-card,
+.rp-light .resource-pulse-sysmon-button {
+    background-color: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+}
+.rp-light .rp-surface.rp-hover,
+.rp-light .resource-pulse-sysmon-button:hover,
+.rp-light .resource-pulse-sysmon-button:focus {
+    background-color: #fafafa;
+    border-color: rgba(0, 0, 0, 0.22);
+}
+.rp-light .rp-base {
+    background-color: #f6f5f4;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.rp-light .rp-chip-bg,
+.rp-light .resource-pulse-icon-button,
+.rp-light .resource-pulse-process-icon-box,
+.rp-light .resource-pulse-pill-button { background-color: rgba(0, 0, 0, 0.06); }
+.rp-light .resource-pulse-icon-button:hover,
+.rp-light .resource-pulse-pill-button:hover { background-color: rgba(0, 0, 0, 0.12); }
+.rp-light .resource-pulse-process-item:hover,
+.rp-light .resource-pulse-process-item:focus { background-color: rgba(0, 0, 0, 0.06); }
+
+.rp-light .resource-pulse-card,
+.rp-light .resource-pulse-hw-card {
+    background-color: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.rp-light .resource-pulse-hw-stat-col { background-color: rgba(0, 0, 0, 0.05); }
+
+.rp-light .resource-pulse-toggle-btn,
+.rp-light .resource-pulse-stepper-btn {
+    background-color: rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.10);
+}
+.rp-light .resource-pulse-toggle-btn:hover,
+.rp-light .resource-pulse-stepper-btn:hover { background-color: rgba(0, 0, 0, 0.12); }
+.rp-light .resource-pulse-toggle-btn.active {
+    background-color: #3584e4;
+    border-color: #3584e4;
+    color: #ffffff !important;
+}
+.rp-light .resource-pulse-action-btn:insensitive {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: #9a9996;
+}
+.rp-light .resource-pulse-settings-card-title { color: #1c71d8; }
+.rp-light .resource-pulse-status-label { color: #26a269; }
+
+/* Tinted cards: same hues, pastel instead of near-black. */
+.rp-light .tint-cpu { background-color: #e4eefb; border: 1px solid rgba(53, 132, 228, 0.45); }
+.rp-light .tint-cpu.rp-hover { background-color: #d4e4f9; border-color: rgba(53, 132, 228, 0.9); }
+.rp-light .tint-memory { background-color: #f2e7f6; border: 1px solid rgba(145, 65, 172, 0.45); }
+.rp-light .tint-memory.rp-hover { background-color: #e9d6f0; border-color: rgba(145, 65, 172, 0.9); }
+.rp-light .tint-battery { background-color: #e1f5eb; border: 1px solid rgba(38, 162, 105, 0.5); }
+.rp-light .tint-battery.rp-hover { background-color: #ceefde; border-color: rgba(38, 162, 105, 0.9); }
+.rp-light .tint-power,
+.rp-light .tint-disk { background-color: #fdf6d6; border: 1px solid rgba(229, 165, 10, 0.6); }
+.rp-light .tint-power.rp-hover,
+.rp-light .tint-disk.rp-hover { background-color: #fbeeb4; border-color: rgba(229, 165, 10, 1.0); }
+.rp-light .tint-network { background-color: #fce5e6; border: 1px solid rgba(224, 27, 36, 0.4); }
+.rp-light .tint-network.rp-hover { background-color: #f9d0d2; border-color: rgba(224, 27, 36, 0.9); }
+.rp-light .tint-thermal { background-color: #ffedda; border: 1px solid rgba(255, 120, 0, 0.5); }
+.rp-light .tint-thermal.rp-hover { background-color: #ffe0c2; border-color: rgba(255, 120, 0, 0.9); }
+.rp-light .tint-gpu { background-color: #e1f7eb; border: 1px solid rgba(38, 162, 105, 0.5); }
+.rp-light .tint-gpu.rp-hover { background-color: #ccf1dc; border-color: rgba(38, 162, 105, 0.9); }
+
+.rp-light .resource-pulse-metric-card-dragging {
+    border: 1.5px solid rgba(53, 132, 228, 0.95) !important;
+    background-color: #dbe8fa !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.rp-light .resource-pulse-metric-card-snapping {
+    border: 1.5px solid rgba(53, 132, 228, 0.5) !important;
+    background-color: #e6effb !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+}
+
+/* Accent colours darkened for contrast on white (yellow especially). */
+.rp-light .rp-c-cpu, .rp-light .rp-c-settings, .rp-light .resource-pulse-cpu-details-value { color: #1c71d8; }
+.rp-light .rp-c-memory { color: #813d9c; }
+.rp-light .rp-c-battery { color: #26a269; }
+.rp-light .rp-c-power, .rp-light .rp-c-disk { color: #b5830a; }
+.rp-light .rp-c-network { color: #c01c28; }
+.rp-light .rp-c-thermal { color: #c64600; }
+.rp-light .rp-c-gpu { color: #26a269; }
+
+.rp-light .resource-pulse-sparkline { background-color: rgba(0, 0, 0, 0.04); color: #241f31; -rp-darken: 0.8; }
+.rp-light .resource-pulse-progress-track { background-color: rgba(0, 0, 0, 0.08); color: rgba(0, 0, 0, 0.06); -rp-darken: 0.8; }
+
+.resource-pulse-tooltip.rp-light {
+    background-color: rgba(250, 250, 250, 0.97);
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    color: #241f31;
+}

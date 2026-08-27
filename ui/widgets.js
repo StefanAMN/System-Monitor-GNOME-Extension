@@ -3,6 +3,22 @@ import St from 'gi://St';
 import GObject from 'gi://GObject';
 import Cairo from 'cairo';
 
+/**
+ * Colours a Cairo widget should paint with, taken from its CSS so light and
+ * dark variants need no code: `color` for text/grid/track and the custom
+ * `-rp-darken` factor (1 = unchanged) applied to series colours.
+ */
+function themeColors(actor) {
+    const node = actor.get_theme_node();
+    const c = node.get_foreground_color();
+    const [found, factor] = node.lookup_double('-rp-darken', false);
+    return {
+        fg: [c.red / 255, c.green / 255, c.blue / 255],
+        fgAlpha: c.alpha / 255,
+        darken: found ? factor : 1
+    };
+}
+
 export const ResizeHandle = GObject.registerClass({
     GTypeName: 'ResourcePulseResizeHandle',
 }, class ResizeHandle extends St.DrawingArea {
@@ -160,6 +176,7 @@ export const Sparkline = GObject.registerClass({
         }, options);
         this.connect('repaint', this._draw.bind(this));
         this.connect('notify::mapped', () => this.refresh());
+        this.connect('style-changed', () => this.refresh());
     }
 
     refresh() {
@@ -179,7 +196,6 @@ export const Sparkline = GObject.registerClass({
         cr.save();
 
         const opt = this.options;
-        const color = opt.color;
         const hist = this.history;
         const padL = opt.paddingLeft || 0;
         const padR = opt.paddingRight || 0;
@@ -196,9 +212,15 @@ export const Sparkline = GObject.registerClass({
         }
         if (!(max > 0)) max = 1;
 
+        // Axis and grid take the themed text colour; series colours are
+        // darkened by the theme's -rp-darken factor on light backgrounds.
+        const { fg, darken } = themeColors(this);
+        const gridAlpha = darken < 1 ? 0.14 : 0.08;
+        const color = [opt.color[0] * darken, opt.color[1] * darken, opt.color[2] * darken, opt.color[3]];
+
         if (opt.showGrid) {
             cr.setLineWidth(1);
-            cr.setSourceRGBA(1, 1, 1, 0.08); // Grid color
+            cr.setSourceRGBA(fg[0], fg[1], fg[2], gridAlpha);
 
             // Border
             cr.rectangle(padL, padT, graphW, graphH);
@@ -221,14 +243,14 @@ export const Sparkline = GObject.registerClass({
 
                 const lbl = opt.formatValue(ratio * max);
                 const extents = cr.textExtents(lbl);
-                cr.setSourceRGBA(1, 1, 1, 0.6);
+                cr.setSourceRGBA(fg[0], fg[1], fg[2], 0.65);
                 cr.moveTo(padL - extents.width - 6, y + extents.height / 2 - 1);
                 cr.showText(lbl);
-                cr.setSourceRGBA(1, 1, 1, 0.08); // Reset grid color
+                cr.setSourceRGBA(fg[0], fg[1], fg[2], gridAlpha);
             }
 
             // X-axis labels: real time span on the left, "now" on the right
-            cr.setSourceRGBA(1, 1, 1, 0.6);
+            cr.setSourceRGBA(fg[0], fg[1], fg[2], 0.65);
             if (this.spanLabel) {
                 const extL = cr.textExtents(this.spanLabel);
                 cr.moveTo(padL, padT + graphH + extL.height + 4);
@@ -285,6 +307,9 @@ export const ProgressBar = GObject.registerClass({
         this.pct = 0;
         this.r = r; this.g = g; this.b = b;
         this.connect('repaint', this._draw.bind(this));
+        this.connect('style-changed', () => {
+            if (this.is_mapped()) this.queue_repaint();
+        });
         this.connect('notify::mapped', () => {
             if (this.is_mapped()) this.queue_repaint();
         });
@@ -308,14 +333,15 @@ export const ProgressBar = GObject.registerClass({
         cr.save();
         
         // Track
-        cr.setSourceRGBA(0, 0, 0, 0.3);
+        const { fg, fgAlpha, darken } = themeColors(this);
+        cr.setSourceRGBA(fg[0], fg[1], fg[2], fgAlpha);
         cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
         cr.arc(w - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
         cr.fill();
 
         // Fill
         const fillW = Math.max(h, w * (this.pct / 100));
-        cr.setSourceRGBA(this.r, this.g, this.b, 1.0);
+        cr.setSourceRGBA(this.r * darken, this.g * darken, this.b * darken, 1.0);
         cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
         cr.arc(fillW - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
         cr.fill();
