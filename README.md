@@ -46,6 +46,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ```bash
 # Shell and session logs go to files; add --show-logs (anywhere on the line) to stream them here:
 #   ./dev.sh test --show-logs
+npm ci && ./dev.sh lint   # ESLint (development dependency only; the extension has no npm dependencies)
 ./dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
 ./dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
 RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
@@ -54,6 +55,8 @@ RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of e
 ./dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```
+
+Every push and pull request runs the lint and the unit tests on GitHub Actions (`.github/workflows/ci.yml`). The UI tests need GNOME Shell and are run locally.
 
 ## Known limits
 
