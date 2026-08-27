@@ -52,6 +52,7 @@ npm ci && ./dev.sh lint   # ESLint (development dependency only; the extension h
 RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
 ./dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
 ./dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 10 min leak soak
+./dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 45-49 in Fedora containers (needs docker; ./dev.sh test-compat 46 for one)
 ./dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```
