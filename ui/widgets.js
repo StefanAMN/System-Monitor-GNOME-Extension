@@ -1,6 +1,7 @@
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import Cairo from 'cairo';
 
 import { hoverIndex, agoLabel } from '../lib/present.js';
@@ -21,10 +22,41 @@ function themeColors(actor) {
     };
 }
 
+/**
+ * Give an actor a pointer cursor for as long as the pointer is over it.
+ * GNOME Shell 50 has a per-actor cursor (Clutter.CursorType); on 45-49 the
+ * display cursor is switched on hover instead. Meta.Cursor took the CSS-style
+ * names (NWSE_RESIZE) in 48; before that the same cursors were SE_RESIZE and
+ * SW_RESIZE.
+ * @param {St.Widget} actor a widget with track_hover
+ * @param {'NWSE_RESIZE'|'NESW_RESIZE'} name
+ */
+function setHoverCursor(actor, name) {
+    if (Clutter.CursorType) {
+        actor.set_cursor_type(Clutter.CursorType[name]);
+        return;
+    }
+    const legacy = { NWSE_RESIZE: 'SE_RESIZE', NESW_RESIZE: 'SW_RESIZE' };
+    const cursor = Meta.Cursor[name] ?? Meta.Cursor[legacy[name]];
+    if (cursor === undefined) return;
+    let shown = false;
+    const update = () => {
+        const want = actor.hover && actor.mapped;
+        if (want === shown) return;
+        shown = want;
+        global.display.set_cursor(want ? cursor : Meta.Cursor.DEFAULT);
+    };
+    actor.connect('notify::hover', update);
+    actor.connect('notify::mapped', update);
+    actor.connect('destroy', () => {
+        if (shown) global.display.set_cursor(Meta.Cursor.DEFAULT);
+    });
+}
+
 export const ResizeHandle = GObject.registerClass({
     GTypeName: 'ResourcePulseResizeHandle',
 }, class ResizeHandle extends St.DrawingArea {
-    _init(corner = 'se', size = 32, cursor = Clutter.CursorType.DEFAULT) {
+    _init(corner = 'se', size = 32) {
         super._init({
             style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${corner}`,
             reactive: true,
@@ -33,7 +65,7 @@ export const ResizeHandle = GObject.registerClass({
             width: size,
             height: size
         });
-        this.set_cursor_type(cursor);
+        setHoverCursor(this, corner === 'se' ? 'NWSE_RESIZE' : 'NESW_RESIZE');
         this._corner = corner;
         this._hovered = false;
         this._active = false;
