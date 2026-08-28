@@ -1710,7 +1710,13 @@ export default class ResourcePulseExtension extends Extension {
                     // Via CSS so St widens minimum and natural size together;
                     // setting only the Clutter min-width aborts the shell.
                     const style = `min-width: ${width}px;`;
-                    if (width > 0 && label.style !== style) label.style = style;
+                    if (width > 0 && label.style !== style) {
+                        label.style = style;
+                        // The reserved width is part of what the panel is
+                        // asked for; styling happens during layout, so
+                        // re-fit after it.
+                        this._queueFitTopBar();
+                    }
                 });
                 box.add_child(label);
             }
@@ -1730,7 +1736,7 @@ export default class ResourcePulseExtension extends Extension {
             this._topBarWidgets[key] = { box, label, icon };
         });
         this._applyTopBarCollapse();
-        this._queueFitTopBar();
+        this._fitTopBar();
     }
 
     /** Pinned metrics that have a text label, in pinned order. */
@@ -1747,9 +1753,10 @@ export default class ResourcePulseExtension extends Extension {
         });
     }
 
+    /** Fit after the current layout pass; for use from allocation signals. */
     _queueFitTopBar() {
         if (this._fitIdleId || !this._indicator) return;
-        this._fitIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+        this._fitIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
             this._fitIdleId = 0;
             this._fitTopBar();
             return GLib.SOURCE_REMOVE;
@@ -1767,8 +1774,12 @@ export default class ResourcePulseExtension extends Extension {
         const right = Main.panel._rightBox;
         const center = Main.panel._centerBox;
         const labels = this._topBarLabels();
-        if (!this._indicator || !right || !center || labels.length === 0 ||
-            !center.has_allocation() || !Main.panel.has_allocation()) return;
+        if (!this._indicator || !right || !center || labels.length === 0) return;
+        // Not has_allocation(): that is false whenever a relayout is pending,
+        // which is exactly when this runs. The last allocation is what is
+        // wanted, as long as the panel has been laid out at all.
+        const panelWidth = Main.panel.allocation.get_width();
+        if (panelWidth <= 0 || center.allocation.get_width() <= 0) return;
 
         // The panel places its centre box at x = side width and gives each
         // side at most that much. Both figures are read from the centre's
@@ -1776,7 +1787,7 @@ export default class ResourcePulseExtension extends Extension {
         // The side is further limited to what is left beside the centre
         // (they differ when a dock shifts the work area).
         const rtl = Main.panel.get_text_direction() === Clutter.TextDirection.RTL;
-        const beside = rtl ? center.allocation.x1 : Main.panel.allocation.get_width() - center.allocation.x2;
+        const beside = rtl ? center.allocation.x1 : panelWidth - center.allocation.x2;
         const room = Math.floor(Math.min(center.allocation.x1, beside));
         const wanted = () => right.get_preferred_width(-1)[1];
 
@@ -1907,7 +1918,7 @@ export default class ResourcePulseExtension extends Extension {
         });
         // A value that grew wider changes what the panel is asked for
         // without changing what it is given, so no signal reports it.
-        this._queueFitTopBar();
+        this._fitTopBar();
     }
 
     // ── Overview Page ─────────────────────────────────────────────────────────

@@ -371,6 +371,10 @@ async function topBarFits(rp) {
     const [bx, by] = box.get_transformed_position();
     // The tooltip is composed when the pointer enters; a poll may change
     // the value right after, so compare with the value at that moment.
+    // Two motions: the first event of a just-created virtual pointer only
+    // places it, and enters nothing on shells before 50.
+    pointer.notify_absolute_motion(GLib.get_monotonic_time(), 300, 400);
+    await sleep(300);
     const values = [rp._topBarWidgets[collapsedKey].label.text];
     pointer.notify_absolute_motion(GLib.get_monotonic_time(), bx + box.width / 2, by + box.height / 2);
     await sleep(150);
@@ -391,7 +395,7 @@ async function topBarFits(rp) {
     rp._settings.set_strv('pinned-metrics', ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu']);
     await sleep(1500);
     s = state();
-    check(s.wanted <= s.got + 1 && s.ellipsized.length === 0, `top bar: after re-pinning all 8 wants ${s.wanted}px, gets ${s.got}px`);
+    check(s.wanted <= s.got + 1 && s.ellipsized.length === 0, `top bar: after re-pinning all 8 wants ${s.wanted}px, gets ${s.got}px (${s.shown.length} labels shown, ${rp._topBarCollapsed} collapsed, fit ${rp._fitIdleId ? 'pending' : 'idle'})`);
 }
 
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
