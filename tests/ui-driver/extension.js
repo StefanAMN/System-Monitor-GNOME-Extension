@@ -532,7 +532,11 @@ export default class Driver extends Extension {
         started = true;
         run().then(
             () => console.log('RP-UITEST DONE'),
-            e => console.log(`RP-UITEST FAIL: ${e.message}\n${e.stack}`));
+            async e => {
+                // What the screen looked like when it went wrong.
+                await shot('failure').catch(() => {});
+                console.log(`RP-UITEST FAIL: ${e.message}\n${e.stack}`);
+            });
     }
 
     disable() {}
