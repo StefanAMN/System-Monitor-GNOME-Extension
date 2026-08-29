@@ -23,7 +23,7 @@ import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
-import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
+import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
 
 // ─── Polling / history constants ─────────────────────────────────────────────
 
@@ -1544,6 +1544,8 @@ export default class ResourcePulseExtension extends Extension {
                 this._indicatorBox.add_child(new St.Label({
                     text: '|',
                     style_class: 'resource-pulse-divider',
+                    // Faint in whatever colour the panel uses (light or dark).
+                    opacity: 110,
                     y_align: Clutter.ActorAlign.CENTER
                 }));
             }
@@ -1568,7 +1570,12 @@ export default class ResourcePulseExtension extends Extension {
                 // Measured with the label's real font once it is styled.
                 const template = labelTemplate(key, templateOpts);
                 label.connect('style-changed', () => {
-                    const [width] = label.clutter_text.create_pango_layout(template).get_pixel_size();
+                    // The handler can run before St pushes the themed font
+                    // into the ClutterText, so take the font from the theme
+                    // node; measuring with the stale one over-reserved.
+                    const layout = label.clutter_text.create_pango_layout(template);
+                    layout.set_font_description(label.get_theme_node().get_font());
+                    const [width] = layout.get_pixel_size();
                     // Via CSS so St widens minimum and natural size together;
                     // setting only the Clutter min-width aborts the shell.
                     const style = `min-width: ${width}px;`;
@@ -1687,11 +1694,11 @@ export default class ResourcePulseExtension extends Extension {
                 text = `${Math.round(data.dsk.mounts[0].percent)}%`;
             else if (key === 'network' && data.net) {
                 if (netFmt === 'both') {
-                    text = `↓${formatSpeed(data.net.total.rxRate)} ↑${formatSpeed(data.net.total.txRate)}`;
+                    text = `↓${formatSpeedCompact(data.net.total.rxRate)} ↑${formatSpeedCompact(data.net.total.txRate)}`;
                 } else if (netFmt === 'upload') {
-                    text = `↑ ${formatSpeed(data.net.total.txRate)}`;
+                    text = `↑ ${formatSpeedCompact(data.net.total.txRate)}`;
                 } else {
-                    text = `↓ ${formatSpeed(data.net.total.rxRate)}`;
+                    text = `↓ ${formatSpeedCompact(data.net.total.rxRate)}`;
                 }
             }
             else if (key === 'thermal' && data.thm)
@@ -2151,9 +2158,11 @@ export default class ResourcePulseExtension extends Extension {
                     this._handleCardDragMotion(key, cardCenterX, cardCenterY);
                     return Clutter.EVENT_STOP;
                 }
-            } else if (type === Clutter.EventType.BUTTON_RELEASE ||
-                       type === Clutter.EventType.TOUCH_END ||
+            } else if (type === Clutter.EventType.TOUCH_END ||
                        type === Clutter.EventType.TOUCH_CANCEL) {
+                // BUTTON_RELEASE is deliberately not handled here: Clutter
+                // emits 'event' before 'button-release-event', so clearing
+                // isCandidate at this point made every quick click a no-op.
                 if (isDragging) {
                     return finishDrag(true);
                 }
