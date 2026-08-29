@@ -9,7 +9,7 @@ import { RingBuffer } from '../lib/ringbuffer.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync } from '../lib/utils.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale } from '../lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
 
 let failed = 0;
 let passed = 0;
@@ -168,6 +168,19 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     }).map(([name]) => name);
     eq(shown, ['eno1', 'wwan0', 'usb0', 'wlp43s0', 'tailscale0'], 'interfaces: every physical one, virtual only when active');
     eq(visibleInterfaces(undefined), [], 'interfaces: none');
+}
+
+{
+    // 60-slot graph, 590 px wide starting at x=30: 10 px per sample, newest at x=620.
+    eq(hoverIndex(620, 30, 590, 60, 60), 59, 'hover: right edge is the newest sample');
+    eq(hoverIndex(30, 30, 590, 60, 60), 0, 'hover: left edge is the oldest when full');
+    eq(hoverIndex(604, 30, 590, 60, 60), 57, 'hover: snaps to the nearest sample');
+    eq(hoverIndex(620, 30, 590, 60, 5), 4, 'hover: partly filled history is right-aligned');
+    eq(hoverIndex(300, 30, 590, 60, 5), -1, 'hover: no sample that far back yet');
+    eq(hoverIndex(700, 30, 590, 60, 60), -1, 'hover: right of the graph');
+    eq(hoverIndex(100, 30, 590, 60, 0), -1, 'hover: empty history');
+    eq(hoverIndex(100, 30, 0, 60, 10), -1, 'hover: zero-width graph');
+    eq([agoLabel(0, 2), agoLabel(7, 2), agoLabel(30, 2), agoLabel(40, 2)], ['now', '14s ago', '1m ago', '1m 20s ago'], 'hover: age label');
 }
 
 // ── live: process churn, bounded state, no fd leak ──

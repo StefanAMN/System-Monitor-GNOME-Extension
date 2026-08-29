@@ -3,6 +3,8 @@ import St from 'gi://St';
 import GObject from 'gi://GObject';
 import Cairo from 'cairo';
 
+import { hoverIndex, agoLabel } from '../lib/present.js';
+
 /**
  * Colours a Cairo widget should paint with, taken from its CSS so light and
  * dark variants need no code: `color` for text/grid/track and the custom
@@ -174,9 +176,38 @@ export const Sparkline = GObject.registerClass({
             autoScale: false,
             formatValue: v => `${Math.round(v)}%`
         }, options);
+        this.sampleSeconds = 0;
+        this._hoverX = -1;
         this.connect('repaint', this._draw.bind(this));
         this.connect('notify::mapped', () => this.refresh());
         this.connect('style-changed', () => this.refresh());
+
+        // Readout of the sample under the pointer, on the gridded (detail)
+        // graphs only; the small card graphs sit on draggable cards.
+        if (this.options.showGrid) {
+            this.reactive = true;
+            this.connect('motion-event', (actor, event) => {
+                const [stageX, stageY] = event.get_coords();
+                const [ok, x] = this.transform_stage_point(stageX, stageY);
+                this._setHoverX(ok ? x : -1);
+                return Clutter.EVENT_PROPAGATE;
+            });
+            this.connect('leave-event', () => {
+                this._setHoverX(-1);
+                return Clutter.EVENT_PROPAGATE;
+            });
+        }
+    }
+
+    _setHoverX(x) {
+        if (this._hoverX !== x) {
+            this._hoverX = x;
+            this.refresh();
+        }
+    }
+
+    setSampleSeconds(seconds) {
+        this.sampleSeconds = seconds;
     }
 
     refresh() {
@@ -292,6 +323,42 @@ export const Sparkline = GObject.registerClass({
                 else cr.lineTo(x, y);
             }
             cr.stroke();
+        }
+
+        const hover = this._hoverX >= 0 ? hoverIndex(this._hoverX, padL, graphW, hist.capacity, n) : -1;
+        if (hover >= 0) {
+            const step = graphW / (hist.capacity - 1);
+            const raw = hist.get(hover);
+            const x = padL + graphW - (n - 1 - hover) * step;
+            const y = padT + graphH - (Math.min(max, Math.max(0, raw)) / max) * graphH;
+
+            cr.setLineWidth(1);
+            cr.setSourceRGBA(fg[0], fg[1], fg[2], 0.35);
+            cr.moveTo(x, padT);
+            cr.lineTo(x, padT + graphH);
+            cr.stroke();
+            cr.setSourceRGBA(color[0], color[1], color[2], 1);
+            cr.arc(x, y, 3, 0, 2 * Math.PI);
+            cr.fill();
+
+            const ago = this.sampleSeconds > 0 ? ` · ${agoLabel(n - 1 - hover, this.sampleSeconds)}` : '';
+            const text = `${opt.formatValue(raw)}${ago}`;
+            cr.setFontSize(10);
+            cr.selectFontFace('Sans', Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
+            const ext = cr.textExtents(text);
+            const boxW = ext.width + 10;
+            const boxH = ext.height + 8;
+            // Keep the label inside the graph, flipping to the left of the cursor near the right edge.
+            let bx = x + 8;
+            if (bx + boxW > padL + graphW) bx = x - 8 - boxW;
+            if (bx < padL) bx = padL;
+            const by = padT + 2;
+            cr.setSourceRGBA(1 - fg[0], 1 - fg[1], 1 - fg[2], 0.85);
+            cr.rectangle(bx, by, boxW, boxH);
+            cr.fill();
+            cr.setSourceRGBA(fg[0], fg[1], fg[2], 0.95);
+            cr.moveTo(bx + 5, by + boxH - 4);
+            cr.showText(text);
         }
 
         cr.restore();
