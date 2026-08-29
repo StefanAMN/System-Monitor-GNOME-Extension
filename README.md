@@ -7,6 +7,8 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **Pinnable Top Bar Icons**: CPU %, Memory %, Battery %, Power Draw (W), Disk %, Network speed, Temperature, and GPU %.
 - **Cairo-based Charts**: Live sparklines backed by fixed 60-sample ring buffers, with real time-span and unit labels, plus progress bars for utilization.
 - **Top Processes Card**: Current per-process CPU (delta of `/proc/[pid]/stat` ticks, 100% = one core) and resident memory, sampled only while the CPU or Memory tab is open.
+- **Light and Dark**: The dashboard follows the shell's style variant; all colours live in `stylesheet.css` (`.rp-light` overrides).
+- **Honest Readouts**: Metrics the machine cannot provide read `n/a` with the reason in the tooltip; "Disk %" always means space used on `/`.
 - **Libadwaita Preferences**: Access update intervals (1-10s), display modes, temperature/memory units, and warning thresholds.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
@@ -26,6 +28,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   ├── process.js        # Per-process CPU / memory from /proc/[pid]/stat
 │   ├── ringbuffer.js     # Fixed-capacity history buffer
 │   ├── format.js         # Unit formatting
+│   ├── present.js        # Pure presentation decisions (n/a, icons, scales, hover)
 │   ├── raplfix.js        # The single privileged (pkexec) action
 │   └── utils.js          # Async file, directory and subprocess helpers
 └── tests/
@@ -37,7 +40,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 
 ```bash
 ./dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
-./dev.sh test-ui     # drives every tab and a disable/enable cycle in a headless shell, fails on any JS error in the log
+./dev.sh test-ui     # drives every tab and a disable/enable cycle in a headless shell, switches light/dark, saves screenshots of every tab, fails on any JS error in the log
 ```
 
 ## Installation & Deployment
