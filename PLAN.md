@@ -225,3 +225,102 @@ D1–D6 are done and committed on `audit-fixes` (not merged, not pushed).
 - Intermediate commits `c9fe012` and `7b00a39` were split out of one tested tree and not tested on their own.
 
 Still open from the audit: GPU tab `--` values on Intel, truncated settings rows, widgets updated while the menu is closed, first battery / GPU only, no tests for `prefs.js`, drag or resize, dead CSS and inline styles. Translations are not wanted for now.
+
+---
+
+# Settings page redesign (2026-10-12, branch `settings-redesign`) — PLAN ONLY, awaiting owner approval
+
+Owner's request: the in-menu settings page feels overcrowded and is hard to read because its rows and controls vary in size. No code has been changed for this section.
+
+## What is wrong today (dark-settings screenshot, 380 px panel)
+
+- Rows are 36 px or 43 px high depending on whether they have a description.
+- Five control shapes and many widths: square stepper buttons, an `ON`/`OFF` pill (46 px), `°C`/`°F` (two 36 px pills), `% Only`/`% + Time` (~140 px), three network pills (~190 px). Their left edges are ragged and they squeeze the labels: "Network Top Bar…" and "Frequency of data sampling (1 to 10 s…" are ellipsized.
+- The pinned grid is eight pills that touch each other; with everything pinned it is one blue block, and state is shown by colour alone.
+- Five boxed cards with blue upper-case titles, each with 14 px padding inside the page's 16 px: rows get about 310 of 380 px, and the page is roughly two panel heights long.
+- Three small text sizes (0.75 / 0.78 / 0.85 em).
+- Settings and one-off actions are mixed: the RAPL fix carries a three-line warning permanently, even on machines where power already works.
+- The top bar now hides labels in reverse pinned order, but nothing shows what that order is.
+- The preferences window (`prefs.js`) repeats the same settings with different labels and step sizes (thresholds step 1 there, 5 here).
+
+## Design
+
+One row template, one control column, fewer boxes.
+
+- **Row**: fixed height (44 px), title on the left on one line, control in a fixed-width column on the right (132 px), so every control starts and ends at the same x. A description line only where it says something the title does not; titles shortened so none can be ellipsized at the minimum panel width.
+- **Three controls, one height (28 px) and one corner radius**:
+  switch (the shell's own `PopupMenu.Switch`) for on/off; segmented control with equal-width segments filling the column for 2–3 choices; stepper `−  value  +` filling the column for numbers.
+- **Sections instead of cards**: a dim section heading and a thin separator, no nested boxes.
+  1. *Top bar*: pinned metrics, compact mode, tooltips, battery format, network format.
+  2. *Units and refresh*: update interval, temperature unit, memory unit.
+  3. *Alerts*: CPU, memory, temperature thresholds.
+  4. *Panel*: reset size; "Enable CPU power monitoring" only when power is in fact unreadable, with its warning shown when the row is activated, not permanently.
+- **Pinned metrics**: a 2 × 4 grid of equal tiles with 8 px gaps, icon + name; a pinned tile shows its position (1, 2, 3…) so the collapse order of the top bar is visible. Reordering by drag is not in this plan.
+- **Type and colour**: two sizes (row title, secondary). Accent colour only for the selected state.
+- **One description of the settings** (`lib/settingsmodel.js`: key, title, kind, choices or range and step) used to build this page, so labels, order and step sizes have one source. `prefs.js` can be built from it later (S5).
+
+Sketch (380 px):
+
+```
+ ‹  Settings
+ TOP BAR
+ [▣ CPU      1] [▣ Memory   2]
+ [▣ Battery  3] [▣ Power     ]
+ [▣ Disk      ] [▣ Network   ]
+ [▣ Thermal   ] [▣ GPU       ]
+ Compact (icons only)              ( ●)
+ Tooltips                          (● )
+ Battery shows            [  %  | % + time ]
+ Network shows            [ ↓ | ↑ | ↓↑ ]
+ ─────────────────────────────────────────
+ UNITS AND REFRESH
+ Update every             [ −   2 s   + ]
+ Temperature              [  °C  |  °F  ]
+ Memory                   [  GB  | GiB  ]
+ ─────────────────────────────────────────
+ ALERTS  · values above these turn red
+ CPU                      [ −   90%   + ]
+ Memory                   [ −   90%   + ]
+ Temperature              [ −   80°C  + ]
+ ─────────────────────────────────────────
+ PANEL
+ Size  420 × 560                 [ Reset ]
+```
+
+Expected length: about 850 px instead of about 1150 px (1.5 panel heights instead of 2).
+
+## Milestones
+
+| # | Milestone | Layer | Proof |
+|---|-----------|-------|-------|
+| S0 | Baseline: full-page screenshots of the current settings page (dark, light), kept for comparison | Test | files in the sandbox, shown to the owner next to the result |
+| S1 | `lib/settingsmodel.js`: pure list of settings (key, title, kind, choices / range / step) checked against the schema | Engine | unit test: every key exists in the schema, every choice is accepted by it, ranges equal the schema's |
+| S2 | Row template and the three controls as widgets in `ui/`, styled by CSS classes (no inline styles on this page) | UI | `test-ui`: each control changes its GSettings key when clicked with the virtual pointer, and follows the key when it changes elsewhere |
+| S3 | Page rebuilt from the model: sections, pin tiles with order numbers, conditional power row | UI | `test-ui`: all rows have the same height; all controls share left and right edges (allocation boxes); no label on the page is ellipsized at the default and at the minimum panel width; page height at most 900 px; dark and light screenshots |
+| S4 | Keyboard: Tab reaches every control, Left / Right change a segmented control or stepper, Space toggles a switch | UI | `test-ui` with the virtual keyboard |
+| S5 | Optional: `prefs.js` built from the same model | UI | not automatable today (nothing drives `prefs.js`); manual check, stated as such |
+| S6 | Optional, main panel: see below | UI | per item |
+
+All of S2–S4 also run through `./dev.sh test-compat` (46–49). Overhead: the page is built on first open and does no polling, so the sampling cost is unchanged; `test-overhead` is rerun once at the end.
+
+## Main panel (optional, S6)
+
+Seen in the same screenshots, smaller than the settings problem:
+
+- Overview cards are 102–115 px high depending on content; give all eight one template (title, value, one detail line, bar) so the grid is even.
+- The reorder grip is drawn on every card all the time; show it on hover or keyboard focus only.
+- GPU tab on Intel shows `--` for five of six values; hide rows and header fields the GPU does not report.
+- Detail-page titles name units inconsistently ("CPU Usage", "Charge Level History (%)", "GPU Utilization (%)").
+
+## Edge cases to hold
+
+- Minimum panel width and the widest translation-free labels ("Temperature", "% + time") must fit without ellipsis.
+- A setting changed from the preferences window while the page is open must update the control.
+- `threshold-*` values that are not a multiple of the step (set from preferences) still clamp to the schema range.
+- No battery / no RAPL / no GPU: rows that do not apply are hidden, not disabled with a placeholder.
+
+## Decisions needed from the owner
+
+1. Keep every setting in the menu (this plan), or keep only the top-bar and unit settings there and send thresholds, interval and the RAPL fix to the preferences window behind a "More settings…" row. Recommendation: keep everything, as planned above; the page already drops to 1.5 panel heights.
+2. S5 (preferences window from the same model): include or leave for later. Recommendation: later.
+3. S6 (main panel items): which, if any. Recommendation: the even card grid and the GPU rows.
