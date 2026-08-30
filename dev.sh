@@ -43,16 +43,28 @@ compile_schemas() {
 # ------------------------------------------------------------------------------
 check_syntax() {
     log_info "Verifying JavaScript syntax..."
-    if command -v node >/dev/null 2>&1; then
-        local f
-        for f in "$SCRIPT_DIR"/*.js "$SCRIPT_DIR"/lib/*.js "$SCRIPT_DIR"/ui/*.js "$SCRIPT_DIR"/tests/ui-driver/*.js; do
-            [ -f "$f" ] && node --check "$f"
-        done
-        log_success "JavaScript syntax verified."
-    elif command -v gjs >/dev/null 2>&1; then
-        gjs -c "import('$SCRIPT_DIR/extension.js').catch(() => {});" >/dev/null 2>&1 || true
-        log_success "GJS validation passed."
+    if ! command -v node >/dev/null 2>&1; then
+        # gjs cannot parse a module without also loading its gi:// and
+        # resource:// imports, so there is no honest fallback.
+        log_warn "node not found: JavaScript syntax NOT checked."
+        return 0
     fi
+    local f failed=0
+    # Every file here is an ES module. 'node --check file.js' parses .js as
+    # CommonJS first and, on import/export syntax, exits 0 without checking
+    # anything; reading from stdin as a module is a real parse.
+    for f in "$SCRIPT_DIR"/*.js "$SCRIPT_DIR"/lib/*.js "$SCRIPT_DIR"/ui/*.js \
+             "$SCRIPT_DIR"/tests/*.js "$SCRIPT_DIR"/tests/ui-driver/*.js; do
+        [ -f "$f" ] || continue
+        if ! node --input-type=module --check < "$f" 2> >(sed "s|^\[stdin\]|${f#"$SCRIPT_DIR"/}|" >&2); then
+            failed=1
+        fi
+    done
+    if [ "$failed" -ne 0 ]; then
+        log_error "JavaScript syntax errors found."
+        exit 1
+    fi
+    log_success "JavaScript syntax verified."
 }
 
 # ------------------------------------------------------------------------------
