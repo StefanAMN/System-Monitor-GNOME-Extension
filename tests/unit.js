@@ -7,6 +7,7 @@ import System from 'system';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../lib/format.js';
 import { RingBuffer } from '../lib/ringbuffer.js';
 import { RunningStats } from '../lib/stats.js';
+import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned } from '../lib/settingsmodel.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync, runSubprocess, readFileAsync, noteReadError } from '../lib/utils.js';
@@ -351,6 +352,39 @@ docker0: 1 2 3
     ok(allowed('unit-temp', 'F') && allowed('unit-mem', 'GiB') && allowed('battery-top-format', 'percent-time') && allowed('network-top-format', 'both'),
         'schema: every value the UI writes is accepted');
     ok(!schema.has_key('density-mode'), 'schema: the unused density-mode key is gone');
+
+    // The settings model (menu page and preferences window are built from
+    // it) must describe exactly what the schema stores.
+    const rows = allSettingRows();
+    eq(rows.filter(r => !schema.has_key(r.key)).map(r => r.key), [], 'settings model: every row is a schema key');
+    eq(rows.filter(r => !['pins', 'switch', 'choice', 'number'].includes(r.kind)).map(r => r.key), [], 'settings model: known kinds only');
+    const typeOf = key => schema.get_key(key).get_value_type().dup_string();
+    eq(rows.filter(r => typeOf(r.key) !== { pins: 'as', switch: 'b', choice: 's', number: 'i' }[r.kind]).map(r => r.key), [],
+        'settings model: each kind matches the type of its key');
+    for (const row of rows.filter(r => r.kind === 'choice')) {
+        ok(row.choices.every(([value]) => allowed(row.key, value)), `settings model: schema accepts every choice of ${row.key}`);
+        const [, offered] = schema.get_key(row.key).get_range().deepUnpack();
+        eq(row.choices.map(([value]) => value).sort(), offered.deepUnpack().sort(), `settings model: ${row.key} offers every value the schema allows`);
+    }
+    for (const row of rows.filter(r => r.kind === 'number')) {
+        const [kind, limits] = schema.get_key(row.key).get_range().deepUnpack();
+        eq([kind, ...limits.deepUnpack()], ['range', row.min, row.max], `settings model: ${row.key} has the schema's range`);
+        ok(row.step > 0 && (row.max - row.min) % row.step === 0, `settings model: ${row.key} steps land on both ends of its range`);
+    }
+    eq(new Set(rows.map(r => r.key)).size, rows.length, 'settings model: no key appears twice');
+    eq(SETTINGS_SECTIONS.map(s => s.id), ['topbar', 'units', 'alerts'], 'settings model: sections');
+    eq(METRICS.map(m => m.key), schema.get_key('overview-card-order').get_default_value().deepUnpack().slice().sort((a, b) =>
+        METRICS.findIndex(m => m.key === a) - METRICS.findIndex(m => m.key === b)), 'settings model: the metrics are the schema\'s cards');
+
+    const cpuRow = rows.find(r => r.key === 'threshold-cpu');
+    const tempRow = rows.find(r => r.key === 'threshold-temp');
+    const pollRow = rows.find(r => r.key === 'poll-interval');
+    eq([formatSettingValue(cpuRow, 90), formatSettingValue(pollRow, 2), formatSettingValue(tempRow, 80), formatSettingValue(tempRow, 80, 'F')],
+        ['90%', '2 s', '80°C', '176°F'], 'settings model: values as shown');
+    eq([stepSettingValue(cpuRow, 90, 1), stepSettingValue(cpuRow, 98, 1), stepSettingValue(cpuRow, 100, 1), stepSettingValue(cpuRow, 52, -1), stepSettingValue(pollRow, 1, -1)],
+        [95, 100, 100, 50, 1], 'settings model: a step clamps to the range, also from an off-grid value');
+    eq(pinPositions(['memory', 'cpu']), { cpu: 2, memory: 1, battery: 0, power: 0, disk: 0, network: 0, thermal: 0, gpu: 0 }, 'pins: positions follow the pinned order');
+    eq([togglePinned(['cpu', 'memory'], 'gpu'), togglePinned(['cpu', 'memory'], 'cpu')], [['cpu', 'memory', 'gpu'], ['memory']], 'pins: toggling appends or removes');
 }
 
 // ── live: process churn, bounded state, no fd leak ──
