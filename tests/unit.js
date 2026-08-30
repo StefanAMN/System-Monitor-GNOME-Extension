@@ -14,7 +14,7 @@ import { listDirAsync, runSubprocess, readFileAsync, noteReadError } from '../li
 import { parseNetDev, counterDelta } from '../lib/network.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../lib/thermal.js';
-import { raplWatts } from '../lib/power.js';
+import { raplWatts, PowerSampler } from '../lib/power.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, sanitizeMetricList, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
@@ -451,6 +451,36 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
             'thermal: with a package sensor the top bar reads only that one');
         for (const name of ['board', 'nvme', 'pkg']) GLib.unlink(`${dir}/${name}`);
         GLib.rmdir(dir);
+    }
+
+    // Energy counters that exist but may not be read are reported as
+    // blocked (the permission fix applies), unlike a machine without any.
+    {
+        const root = GLib.dir_make_tmp('rp-powercap-XXXXXX');
+        eq((await new PowerSampler(root).sample()).raplBlocked, false, 'power: no energy domains is not "blocked"');
+        const zone = `${root}/intel-rapl:0`;
+        GLib.mkdir_with_parents(zone, 0o755);
+        GLib.file_set_contents(`${zone}/name`, 'package-0\n');
+        GLib.file_set_contents(`${zone}/energy_uj`, '1000000\n');
+        GLib.file_set_contents(`${zone}/max_energy_range_uj`, '262143328850\n');
+        const mode = bits => Gio.File.new_for_path(`${zone}/energy_uj`)
+            .set_attribute_uint32('unix::mode', bits, Gio.FileQueryInfoFlags.NONE, null);
+        mode(0o000);
+        const pwr = new PowerSampler(root);
+        const denied = await pwr.sample();
+        // root reads the file whatever its mode: the check cannot run there.
+        if (GLib.file_test('/proc/self', GLib.FileTest.EXISTS) && Gio.Credentials.new().get_unix_user() === 0)
+            print('SKIP power: unreadable counters cannot be simulated as root');
+        else
+            eq([denied.raplSupported, denied.raplBlocked, denied.packagePower], [false, true, null], 'power: unreadable counters are reported as blocked');
+        mode(0o644);
+        eq((await pwr.sample()).raplBlocked, denied.raplBlocked, 'power: the probe is cached between samples');
+        pwr.forgetProbe();
+        const granted = await pwr.sample();
+        eq([granted.raplSupported, granted.raplBlocked], [true, false], 'power: after forgetProbe() readable counters are picked up at once');
+        for (const name of ['name', 'energy_uj', 'max_energy_range_uj']) GLib.unlink(`${zone}/${name}`);
+        GLib.rmdir(zone);
+        GLib.rmdir(root);
     }
 
     // A baseline older than the caller allows is dropped instead of turning
