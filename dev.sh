@@ -79,14 +79,42 @@ ensure_installed() {
             ln -sfn "$SCRIPT_DIR" "$TARGET_DIR"
         fi
     elif [ -d "$TARGET_DIR" ]; then
-        log_info "Replacing standalone copy at $TARGET_DIR with direct repo symlink..."
-        rm -rf "$TARGET_DIR"
+        # A real directory may be an installed release or local edits: keep it.
+        local BACKUP
+        # Outside extensions/, or the shell would try to load the backup too.
+        BACKUP="$(dirname "$EXTENSIONS_BASE")/$UUID.backup-$(date +%Y%m%d-%H%M%S)"
+        log_warn "Moving existing copy at $TARGET_DIR to $BACKUP"
+        mv "$TARGET_DIR" "$BACKUP"
         ln -sfn "$SCRIPT_DIR" "$TARGET_DIR"
         log_success "Symlinked $TARGET_DIR -> $SCRIPT_DIR"
     else
         log_info "Creating extension symlink $TARGET_DIR -> $SCRIPT_DIR..."
         ln -sfn "$SCRIPT_DIR" "$TARGET_DIR"
         log_success "Symlinked $TARGET_DIR -> $SCRIPT_DIR"
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Helper: isolated headless shell sandbox
+#   Private XDG data/config dirs: only this extension (and the test driver)
+#   is installed, nothing is written to the user's real dconf.
+# ------------------------------------------------------------------------------
+make_sandbox() {
+    SANDBOX="$(mktemp -d /tmp/rp-ui-test.XXXXXX)"
+    mkdir -p "$SANDBOX/data/gnome-shell/extensions" "$SANDBOX/config" "$SANDBOX/shots"
+    ln -s "$SCRIPT_DIR" "$SANDBOX/data/gnome-shell/extensions/$UUID"
+    LOG="$SANDBOX/shell.log"
+}
+
+# Lines in a shell log that mean this extension misbehaved.
+BAD_LOG_PATTERN="RP-UITEST FAIL|JS ERROR|Clutter-ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove"
+
+# Remove a sandbox after a pass unless RP_KEEP=1; failures are always kept.
+finish_sandbox() {
+    if [ "${RP_KEEP:-0}" = "1" ]; then
+        log_info "Sandbox kept: $SANDBOX"
+    else
+        rm -rf "$SANDBOX"
     fi
 }
 
@@ -171,7 +199,8 @@ cmd_test_dedicated() {
         sleep 0.5
 
         # Check if mutter-devkit was auto-spawned; if not, launch it on the host display
-        MDK_PID=$(pgrep -f "mutter-devkit" | head -n 1 || true)
+        # Only a devkit spawned by this shell; another session may have one too.
+        MDK_PID=$(pgrep -n -P "$SHELL_PID" -f "mutter-devkit" || true)
         if [ -z "$MDK_PID" ] && [ -x "/usr/libexec/mutter-devkit" ]; then
             echo -e "\033[34m[TEST-ENV]\033[0m Launching Mutter Devkit window on host display ($HOST_WL)..."
             WAYLAND_DISPLAY="$HOST_WL" DISPLAY="$HOST_DISP" /usr/libexec/mutter-devkit &
@@ -197,38 +226,34 @@ cmd_test_ci() {
 
     check_syntax
     compile_schemas
-    ensure_installed
 
+    local SANDBOX LOG
+    make_sandbox
+
+    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" \
     dbus-run-session -- bash -c '
-        UUID="resource-pulse@yourdomain.example"
-        DURATION="'"$DURATION"'"
-        
-        gnome-shell --headless --virtual-monitor 1280x720 > /tmp/rp-test-shell.log 2>&1 &
+        gnome-shell --headless --virtual-monitor 1280x720 > "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
-        
-        cleanup() {
-            kill "$SHELL_PID" 2>/dev/null || true
-            wait "$SHELL_PID" 2>/dev/null || true
-        }
-        trap cleanup EXIT INT TERM
+        trap "kill $SHELL_PID 2>/dev/null; wait $SHELL_PID 2>/dev/null" EXIT INT TERM
+        sleep 3
+        gnome-extensions enable "'"$UUID"'"
+        sleep "'"$DURATION"'"
+        gnome-extensions info "'"$UUID"'" > "'"$SANDBOX"'/info.txt" 2>&1 || true
+    ' || true
 
-        sleep 2
-        gnome-extensions enable "$UUID"
-        sleep "$DURATION"
-
-        INFO="$(gnome-extensions info "$UUID" 2>/dev/null || true)"
-        if echo "$INFO" | grep -q "State: ACTIVE"; then
-            echo -e "\033[32m[TEST-PASS]\033[0m Extension loaded and ACTIVE in isolated GNOME Shell 50 session!"
-            exit 0
-        else
-            echo -e "\033[31m[TEST-FAIL]\033[0m Extension failed to activate. Info:"
-            echo "$INFO"
-            echo "--- Recent Shell Output ---"
-            tail -n 30 /tmp/rp-test-shell.log
-            exit 1
-        fi
-    '
-    log_success "Automated verification completed successfully!"
+    # ACTIVE only proves enable() did not throw; the log shows whether the
+    # polling loop ran cleanly for DURATION seconds.
+    local BAD
+    BAD="$(grep -nE "$BAD_LOG_PATTERN" "$LOG" || true)"
+    if grep -q "State: ACTIVE" "$SANDBOX/info.txt" 2>/dev/null && [ -z "$BAD" ]; then
+        log_success "Extension ACTIVE for ${DURATION}s in an isolated shell with a clean log."
+        finish_sandbox
+    else
+        log_error "Headless verification failed (sandbox kept: $SANDBOX)"
+        cat "$SANDBOX/info.txt" 2>/dev/null | sed 's/^/  /'
+        echo "$BAD" | head -n 40
+        exit 1
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -240,13 +265,9 @@ cmd_test_ui() {
     check_syntax
     compile_schemas
 
-    local SANDBOX
-    SANDBOX="$(mktemp -d /tmp/rp-ui-test.XXXXXX)"
-    local EXT_DIR="$SANDBOX/data/gnome-shell/extensions"
-    mkdir -p "$EXT_DIR" "$SANDBOX/config" "$SANDBOX/shots"
-    ln -s "$SCRIPT_DIR" "$EXT_DIR/$UUID"
-    ln -s "$SCRIPT_DIR/tests/ui-driver" "$EXT_DIR/rp-ui-driver@resource-pulse.test"
-    local LOG="$SANDBOX/shell.log"
+    local SANDBOX LOG
+    make_sandbox
+    ln -s "$SCRIPT_DIR/tests/ui-driver" "$SANDBOX/data/gnome-shell/extensions/rp-ui-driver@resource-pulse.test"
 
     # Private XDG dirs: no other user extensions, no writes to the real dconf.
     XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" RP_UITEST_SHOTS="$SANDBOX/shots" \
@@ -266,11 +287,12 @@ cmd_test_ui() {
     ' || true
 
     local BAD
-    BAD="$(grep -nE "RP-UITEST FAIL|JS ERROR|Clutter-ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove" "$LOG" || true)"
+    BAD="$(grep -nE "$BAD_LOG_PATTERN" "$LOG" || true)"
     if grep -q "RP-UITEST DONE" "$LOG" && [ -z "$BAD" ]; then
-        log_success "UI test passed (log: $LOG)"
+        log_success "UI test passed${RP_KEEP:+ (screenshots: $SANDBOX/shots)}"
+        finish_sandbox
     else
-        log_error "UI test failed (log: $LOG)"
+        log_error "UI test failed (log and screenshots kept: $SANDBOX)"
         echo "$BAD" | head -n 40
         grep -A12 "RP-UITEST FAIL" "$LOG" | head -n 30 || true
         exit 1
@@ -278,7 +300,7 @@ cmd_test_ui() {
 }
 
 # ------------------------------------------------------------------------------
-# Command: Show current extension status & journal logs
+# Command: Unit tests (pure parsers, ring buffer, presentation helpers, churn)
 # ------------------------------------------------------------------------------
 cmd_test_unit() {
     check_syntax
@@ -291,12 +313,19 @@ cmd_test_unit() {
     fi
 }
 
+# ------------------------------------------------------------------------------
+# Command: Show current extension status & journal logs
+# ------------------------------------------------------------------------------
 cmd_status() {
     log_title "Extension Status & Logs"
     gnome-extensions info "$UUID" 2>/dev/null || log_warn "Extension not found via gnome-extensions"
 
     echo -e "\n${BOLD}Recent extension journal logs:${RESET}"
-    journalctl -b 0 --since "10 minutes ago" --no-pager 2>/dev/null | grep -i "resource-pulse" | tail -n 25 || echo "No recent logs found."
+    # The extension logs as 'ResourcePulse ...' / 'Error in <X> sample';
+    # stack traces mention the UUID.
+    journalctl -b 0 --since "10 minutes ago" --no-pager 2>/dev/null \
+        | grep -E "ResourcePulse|resource-pulse@|Error in .* sample|UPower .* failed|CPU identity unavailable|Process sample failed" \
+        | grep -v "dbus-daemon" | tail -n 25 || echo "No recent logs found."
 }
 
 # ------------------------------------------------------------------------------
@@ -328,8 +357,8 @@ cmd_pack() {
     log_title "Packaging Extension"
     check_syntax
     compile_schemas
-    gnome-extensions pack --extra-source=lib --extra-source=ui --force
-    log_success "Extension packaged: $(ls -1 *.zip 2>/dev/null | head -n 1)"
+    (cd "$SCRIPT_DIR" && gnome-extensions pack --extra-source=lib --extra-source=ui --force)
+    log_success "Extension packaged: $SCRIPT_DIR/$UUID.shell-extension.zip"
 }
 
 # ------------------------------------------------------------------------------
@@ -341,9 +370,9 @@ cmd_help() {
     echo -e "Commands:"
     echo -e "  ${GREEN}reload, reenable${RESET}   (Default) Compile schemas, verify symlink, and re-enable in current session"
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
-    echo -e "  ${GREEN}test-headless [sec]${RESET} Run a headless automated test in isolated environment (default 5s)"
+    echo -e "  ${GREEN}test-headless [sec]${RESET} Enable in an isolated headless shell for [sec] (default 5) and scan its log"
     echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
-    echo -e "  ${GREEN}test-ui${RESET}            Drive every menu tab + a disable/enable cycle headlessly and scan the shell log"
+    echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
     echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"

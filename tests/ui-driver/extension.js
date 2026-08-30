@@ -139,7 +139,11 @@ async function cycleTabs(rp, pass, tag = null) {
     // Hover readout: every x position, including off-graph ones, must paint cleanly.
     const graph = rp._sparklines.find(g => g.options.showGrid && g.is_mapped());
     check(graph, `pass ${pass}: no detail graph mapped on the cpu tab`);
-    check(graph.sampleSeconds === 2 && graph.spanLabel === '2m', `pass ${pass}: lazily built graph missed its time scale`);
+    const interval = rp._settings.get_int('poll-interval');
+    const span = interval * 60;
+    const spanLabel = span > 60 && span % 60 === 0 ? `${span / 60}m` : `${span}s`;
+    check(graph.sampleSeconds === interval && graph.spanLabel === spanLabel,
+        `pass ${pass}: lazily built graph has ${graph.sampleSeconds}s / '${graph.spanLabel}', expected ${interval}s / '${spanLabel}'`);
     for (const x of [-5, 0, graph.width / 2, graph.width - 30, graph.width - 1, graph.width + 50]) {
         graph._setHoverX(x);
         await sleep(60);
@@ -153,7 +157,7 @@ async function cycleTabs(rp, pass, tag = null) {
     // 60 s of history at most, however many on-demand polls were fired.
     check(rp._hist.cpu.length >= 3, `pass ${pass}: cpu history not recorded (${rp._hist.cpu.length})`);
     // One sample per 2 s tick since enable, however many on-demand polls were fired.
-    const maxTicks = Math.ceil((GLib.get_monotonic_time() - enabledAt) / 2000000) + 2;
+    const maxTicks = Math.ceil((GLib.get_monotonic_time() - enabledAt) / (rp._settings.get_int('poll-interval') * 1000000)) + 2;
     check(rp._hist.cpu.length <= maxTicks, `pass ${pass}: on-demand polls leaked into history (${rp._hist.cpu.length} > ${maxTicks})`);
     check(rp._hist.cpu.capacity === 60, 'history capacity changed');
     check(rp._dskMountRows?.length > 0, `pass ${pass}: no disk mount rows`);
@@ -281,6 +285,9 @@ async function run() {
     await sleep(1500);
     Main.extensionManager.enableExtension(TARGET);
     await sleep(2500);
+    const last = Main.extensionManager.lookup(TARGET);
+    check(last?.stateObj?._indicator && last.stateObj._summaryCards.cpu.valueLabel.text !== '--%',
+        'extension did not come back and poll after the final re-enable');
 }
 
 export default class Driver extends Extension {
