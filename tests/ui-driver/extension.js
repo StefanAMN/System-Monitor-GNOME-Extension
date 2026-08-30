@@ -139,6 +139,17 @@ async function cycleTabs(rp, pass, tag = null) {
         rp._poll();
         await sleep(400);
         if (tag) await shot(`${tag}-${tab}`);
+        // The settings page is longer than the panel: capture all of it.
+        if (tag && tab === 'settings') {
+            const adj = rp._scrollView.get_vadjustment();
+            const pageful = adj.page_size - 40;
+            for (let part = 2, y = pageful; y < adj.upper - adj.page_size + pageful && part <= 4; part++, y += pageful) {
+                adj.value = Math.min(y, adj.upper - adj.page_size);
+                await sleep(300);
+                await shot(`${tag}-settings-${part}`);
+            }
+            adj.value = 0;
+        }
     }
 
     // Nothing may be laid out wider than the menu (it would be clipped).
