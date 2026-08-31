@@ -374,6 +374,7 @@ export default class ResourcePulseExtension extends Extension {
         this._menuContainer = null;
         this._menuViewport = null;
         this._scrollView = null;
+        this._shownTab = null;
         this._menuSection = null;
         this._coreWidgets = null;
         this._procWidgets = [];
@@ -2794,6 +2795,11 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _updateTabVisibility() {
+        // A page opens at its top, not at the offset the last one was left at.
+        if (this._shownTab !== this._activeTab) {
+            this._shownTab = this._activeTab;
+            this._scrollView?.get_vadjustment().set_value(0);
+        }
         if (this._activeTab === 'settings') this._ensureSettingsPage();
         else if (this._activeTab !== 'overview') this._ensureDetailSection(this._activeTab);
         // Detail data (sensor list, mounts, processes) is only sampled for
