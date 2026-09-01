@@ -9,27 +9,31 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **Top Processes Card**: Current per-process CPU (delta of `/proc/[pid]/stat` ticks, 100% = one core) and resident memory, sampled only while the CPU or Memory tab is open.
 - **Light and Dark**: The dashboard follows the shell's style variant; all colours live in `stylesheet.css` (`.rp-light` overrides).
 - **Honest Readouts**: Metrics the machine cannot provide read `n/a` with the reason in the tooltip; "Disk %" always means space used on `/`.
-- **Libadwaita Preferences**: Access update intervals (1-10s), display modes, temperature/memory units, and warning thresholds.
+- **One Set of Settings, Two Places**: The panel's settings page (⋮ on the overview) and the Libadwaita preferences window are built from the same list (`lib/settingsmodel.js`): pinned metrics and their order, compact mode, tooltips, battery and network format, update interval (1–10 s), temperature and memory units, warning thresholds.
+- **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and controls, Return or Space activates, Left / Right change a choice or a number, Escape goes back.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
 ## File Structure
 
 ```
 ├── extension.js          # Extension lifecycle, polling engine, indicator and dashboard
-├── prefs.js              # Preferences UI using Libadwaita window pages
+├── prefs.js              # Preferences window (rows come from ui/prefsrows.js)
 ├── stylesheet.css        # CSS styles for custom layouts and dashboard cards
 ├── metadata.json         # Extension metadata
 ├── schemas/              # GSettings schema definition
 ├── docs/spec.md          # Original product spec (PLAN.md tracks milestones and verification)
 ├── icons/                # Bundled symbolic icons (thermal, CPU fallback)
 ├── ui/
-│   └── widgets.js        # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
+│   ├── widgets.js        # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
+│   ├── settings.js       # Settings page widgets: row, switch, segmented choice, stepper, pin tile
+│   └── prefsrows.js      # Preferences rows (GTK side, never loaded by the shell)
 ├── lib/                  # Collectors (no UI code) and pure helpers
 │   ├── cpu.js  memory.js  battery.js  power.js
 │   ├── disk.js  network.js  thermal.js  gpu.js
 │   ├── process.js        # Per-process CPU / memory from /proc/[pid]/stat
 │   ├── ringbuffer.js     # Fixed-capacity history buffer
 │   ├── format.js         # Unit formatting
+│   ├── settingsmodel.js  # The user-facing settings, described once for both settings UIs
 │   ├── present.js        # Pure presentation decisions (n/a, icons, scales, hover)
 │   ├── stats.js          # Time-weighted running mean / peak (power session stats)
 │   ├── raplfix.js        # The single privileged (pkexec) action
@@ -63,7 +67,7 @@ Every push and pull request runs the lint and the unit tests on GitHub Actions (
 
 - **One battery, one GPU**: the first battery and the first GPU found are shown.
 - **GPU**: Intel, AMD and NVIDIA are supported, but only the Intel path has been run on real hardware. Integrated GPUs report no dedicated memory, temperature or fan; those fields read `--`.
-- **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; Preferences → Advanced has a one-time fix. On battery it is the battery's discharge rate.
+- **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; while that is the case the settings page (Panel section) and the preferences window offer a one-time fix. On battery it is the battery's discharge rate.
 - **Temperature**: the top bar shows the CPU package sensor, else the first core, else the hottest sensor.
 - **Process CPU**: 100% means one full core, as in `top`. The list needs two samples, so it stays dimmed for about half a second after the tab opens.
 - **Units**: rates are decimal (1 MB/s = 1 000 000 bytes/s). Memory follows the GB / GiB setting.
