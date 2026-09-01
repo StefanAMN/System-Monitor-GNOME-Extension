@@ -268,6 +268,13 @@ function checkIcons(rp, label) {
     check(missing.length === 0, `${label}: icons the theme cannot supply: ${[...new Set(missing)].join(', ')}`);
 }
 
+// Whether the keyboard focus is on `root` or something inside it (there may
+// be no focused actor at all).
+function focusWithin(root) {
+    const focus = global.stage.get_key_focus();
+    return !!focus && root.contains(focus);
+}
+
 function eachDescendant(actor, visit) {
     visit(actor);
     actor.get_children().forEach(child => eachDescendant(child, visit));
@@ -498,11 +505,11 @@ async function settingsKeyboard(rp) {
     check(rp._indicator.menu.isOpen, 'keyboard: the panel button did not open the menu');
     await pressKey(Clutter.KEY_Down);
     const entered = global.stage.get_key_focus();
-    check(entered !== rp._menuSection && rp._menuContainer.contains(entered),
+    check(entered !== rp._menuSection && focusWithin(rp._menuContainer),
         `keyboard: Down from the panel button focused ${entered?.constructor.name}.${entered?.style_class}, not something in the panel`);
     await pressKey(Clutter.KEY_Tab);
     const next = global.stage.get_key_focus();
-    check(next !== entered && rp._menuContainer.contains(next), 'keyboard: Tab did not move on inside the panel');
+    check(next !== entered && focusWithin(rp._menuContainer), 'keyboard: Tab did not move on inside the panel');
     await openSettings(rp);
 
     const focusable = [];
@@ -559,11 +566,25 @@ async function settingsKeyboard(rp) {
     check(s.get_int('threshold-mem') === 90, `keyboard: Right on a stepper gave ${s.get_int('threshold-mem')}`);
     check(rp._activeTab === 'settings', `keyboard: arrow keys left the settings page for '${rp._activeTab}'`);
 
+    // Backspace goes back one page (Escape belongs to the shell: it closes
+    // the menu before the panel sees it), keeps the menu open and keeps the
+    // focus inside the panel; Return on the menu button comes back.
+    await pressKey(Clutter.KEY_BackSpace);
+    check(rp._activeTab === 'overview' && rp._indicator.menu.isOpen,
+        `keyboard: Backspace left the tab at '${rp._activeTab}' with the menu ${rp._indicator.menu.isOpen ? 'open' : 'closed'}`);
+    check(focusWithin(rp._overviewPage), 'keyboard: going back dropped the focus out of the panel');
+    rp._overviewMenuBtn.grab_key_focus();
+    await pressKey(Clutter.KEY_Return);
+    check(rp._activeTab === 'settings' && focusWithin(rp._settingsPage),
+        `keyboard: Return on the menu button gave tab '${rp._activeTab}' with the focus ${focusWithin(rp._settingsPage) ? 'on' : 'off'} the page`);
+
+    await pressKey(Clutter.KEY_Escape);
+    check(!rp._indicator.menu.isOpen, 'keyboard: Escape did not close the menu');
+
     s.reset('network-top-format');
     s.reset('threshold-mem');
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
-    rp._indicator.menu.close();
     await sleep(400);
 }
 

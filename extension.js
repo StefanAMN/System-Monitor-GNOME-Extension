@@ -2545,7 +2545,14 @@ export default class ResourcePulseExtension extends Extension {
         this._refreshSettingsUI();
     }
 
+    /** Whether the keyboard focus is on something inside the panel. */
+    _focusInPanel() {
+        const focus = global.stage.get_key_focus();
+        return !!focus && this._menuContainer.contains(focus);
+    }
+
     _updateTabVisibility() {
+        const hadFocus = this._focusInPanel();
         // A page opens at its top, not at the offset the last one was left at.
         if (this._shownTab !== this._activeTab) {
             this._shownTab = this._activeTab;
@@ -2604,6 +2611,10 @@ export default class ResourcePulseExtension extends Extension {
                 if (section) section.visible = (key === this._activeTab);
             }
         }
+        // Hiding the page that held the keyboard focus drops the focus;
+        // hand it to the page now shown so a keyboard user keeps their place.
+        if (hadFocus && !this._focusInPanel())
+            this._menuContainer.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
     }
 
     _detailRow(labelText, valueText = '--') {
