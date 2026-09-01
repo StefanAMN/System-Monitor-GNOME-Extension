@@ -335,7 +335,7 @@ Done and committed on `settings-redesign` (not pushed):
 | S1 | `lib/settingsmodel.js` | unit: key types, accepted choices, ranges and steps against the schema; 216 unit checks pass |
 | S2 | `ui/settings.js`: `SettingRow`, `SwitchButton`, `SegmentedControl`, `Stepper`, `ActionButton`, `PinTile`, `Note`; CSS classes `rp-set-*`, no inline style on the page | `test-ui`, real pointer: pin tile, switch (knob position checked), segment, stepper (button goes insensitive at the limit), Reset; a change made behind the page's back is followed |
 | S3 | Page rebuilt: 4 sections, 11 rows (12 with the power row) | `test-ui`: rows all 40 px, controls all 28 px, one control column (148 px), 8 equal tiles 8 px apart, no ellipsized label among > 40 at 380 px and at the 360 px minimum, page 821 px (861 px with the power row) instead of about 1150 px |
-| S4 | Keyboard | `test-ui`, real key events: Down / Tab enter the panel from the top-bar button, Tab reaches all 29 controls, focused control scrolls into view, Space / Return on a switch, Left / Right on a choice and on a stepper |
+| S4 | Keyboard | `test-ui`, real key events: Down / Tab enter the panel from the top-bar button, Tab reaches all 29 controls, focused control scrolls into view, Space / Return on a switch, Left / Right on a choice and on a stepper, Backspace goes back and Return on the menu button opens the page with the focus following, Escape closes the menu |
 | S5 | `ui/prefsrows.js`, `prefs.js` reduced to the header button | `tests/ui-driver/prefs-check.js`: 65 checks on real GTK rows over a memory-backed schema, run by the driver as a client of the sandboxed shell; the real window is opened and screenshotted (its content is checked by eye only) |
 
 Deviations from the plan above, and things found on the way:
@@ -345,7 +345,15 @@ Deviations from the plan above, and things found on the way:
 - `lib/power.js` now reports `raplBlocked` (counters exist, reading denied) and has `forgetProbe()`; the power row needs the first, and the second makes the fix show at once instead of after the 60 s probe cache. Unit-tested against a fixture directory.
 - Found: the scroll offset carried over from one page to the next (`fix(ui): open every page at its top`).
 - Found: keyboard focus could not get into the panel at all. The menu item and the page container were focusable themselves and St does not navigate inside a focusable widget; the stacking container was a bare `Clutter.Actor`. Two attempts at the Tab test failed before the cause was looked for with a focus trace instead of guessed (`fix(ui): let keyboard focus into the panel`). This also makes the overview cards reachable, which the earlier "cards open with Return / Space" check had only proved for a card that was given focus by the test.
+- Found: hiding the page that held the focus dropped the focus out of the panel (`fix(ui): keep the keyboard focus when the page changes`).
+- Found: the panel's own Escape handler never runs, because the shell's menu grab takes Escape first and closes the menu. Left as the shell has it; Backspace is the back key. The README said Escape goes back and was corrected.
 - The old settings CSS (`resource-pulse-settings-*`, `-setting-*`, `-toggle-btn`, `-stepper-btn`, `-action-btn`, `-status-label`) is removed.
+
+Whole-project checks on the final code (2026-10-12):
+
+- Lint clean; 216 unit checks pass; `./dev.sh test-ui` passes on GNOME 50 (host).
+- `./dev.sh test-overhead` (600 s soak): menu closed +0.37 % of one core (budget 1 %), overview +0.87 %, CPU tab +2.00 % (budget 5 %); soak RSS 274.8 -> 267.5 MB with a steady-state slope of 0.353 MB/min; fds 75 -> 75; menu actors 789 -> 789 over three churn rounds. The run before the redesign measured +0.70 % / +0.67 % / +1.27 % and 0.224 MB/min; the settings page does no sampling, but the test was run once, so how much of the difference is run-to-run spread was not measured.
+- `./dev.sh test-compat`: GNOME Shell 46.10, 47.10, 48.8 and 49.10 pass unit, headless and UI tests in containers (the UI test includes the settings layout, pointer, keyboard and preferences checks). 45 is not listed and was not run.
 
 Not executed:
 
