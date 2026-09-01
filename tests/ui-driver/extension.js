@@ -671,6 +671,54 @@ async function topBarFits(rp) {
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
 // cost its own metric only: the others keep updating and it is not started
 // again while the first call is outstanding.
+// The preferences window. Its rows are checked by prefs-check.js, a GTK
+// client of this shell working on a memory-backed copy of the settings; then
+// the real window is opened the way the shell opens it.
+async function prefsWindow() {
+    const here = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
+    const root = Main.extensionManager.lookup(TARGET).path;
+    const runtime = Gio.File.new_for_path(GLib.get_user_runtime_dir());
+    const listing = runtime.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+    let socket = null;
+    for (let info = listing.next_file(null); info; info = listing.next_file(null)) {
+        if (/^wayland-\d+$/.test(info.get_name())) socket = info.get_name();
+    }
+    listing.close(null);
+    check(socket, 'prefs: no Wayland socket of this shell found');
+
+    const titled = () => global.get_window_actors().map(a => a.meta_window).find(w => w.title === 'Resource Pulse');
+    const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE });
+    launcher.setenv('WAYLAND_DISPLAY', socket, true);
+    launcher.setenv('GDK_BACKEND', 'wayland', true);
+    const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, '5000']);
+    const output = new Promise((resolve, reject) => proc.communicate_utf8_async(null, null, (obj, res) => {
+        try {
+            resolve(obj.communicate_utf8_finish(res)[1]);
+        } catch (e) {
+            reject(e);
+        }
+    }));
+    for (let i = 0; i < 16 && !titled(); i++) await sleep(250);
+    await sleep(1200);
+    if (titled()) await shot('prefs-rows');
+    const text = await output;
+    const verdict = text.split('\n').filter(line => line.startsWith('PREFS-CHECK'));
+    check(proc.get_successful() && verdict.some(line => line.startsWith('PREFS-CHECK DONE')),
+        `prefs: ${verdict.join(' | ') || `no verdict (exit ${proc.get_exit_status()})`}`);
+    console.log(`RP-UITEST ${verdict.join(' | ')}`);
+    await sleep(500);
+
+    // The real thing: only "a window with the extension's name appears" can
+    // be asserted from here; its content is in the screenshot.
+    Main.extensionManager.openExtensionPrefs(TARGET, '', {});
+    for (let i = 0; i < 40 && !titled(); i++) await sleep(250);
+    check(titled(), 'prefs: the shell did not open a preferences window');
+    await sleep(1500);
+    await shot('prefs-window');
+    titled().delete(global.get_current_time());
+    await sleep(800);
+}
+
 async function stuckCollector(rp) {
     let calls = 0;
     rp._net.sample = () => {
@@ -751,6 +799,7 @@ async function run() {
     await settingsControls(ext.stateObj);
     await powerRowWhenBlocked(ext.stateObj);
     await settingsKeyboard(ext.stateObj);
+    await prefsWindow();
     await stepperClamps(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await thresholdFollowsUnit(ext.stateObj);
