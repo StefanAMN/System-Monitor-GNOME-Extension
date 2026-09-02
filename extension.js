@@ -20,7 +20,7 @@ import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, sanitizeMetricList, PeakScale } from './lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
@@ -2578,6 +2578,12 @@ export default class ResourcePulseExtension extends Extension {
             this._menuContainer.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
     }
 
+    /** Show a detail row with `text`, or leave it out when there is no reading (null). */
+    _setDetailRow(row, text) {
+        row.row.visible = text !== null;
+        if (text !== null) row.val.text = text;
+    }
+
     _detailRow(labelText, valueText = '--') {
         const row = new St.BoxLayout({ style: 'padding: 4px 0; spacing: 8px;', x_expand: true });
         const lbl = new St.Label({ text: labelText, style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', x_expand: true });
@@ -2965,7 +2971,10 @@ export default class ResourcePulseExtension extends Extension {
         this._gpuHwCard.add_child(hwTop);
 
         // Hardware Sub Stats (Clock, Temp, Power)
+        // Shown per reading: a GPU that reports no temperature has no
+        // temperature field, instead of one that reads "--".
         const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
+        this._gpuHwStatsRow = hwStatsRow;
 
         const clockBox = new St.BoxLayout({ vertical: true, x_expand: true });
         clockBox.add_child(new St.Label({ text: 'Clock', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
@@ -2985,12 +2994,14 @@ export default class ResourcePulseExtension extends Extension {
         hwStatsRow.add_child(clockBox);
         hwStatsRow.add_child(tempBox);
         hwStatsRow.add_child(powerBox);
+        this._gpuHwFields = { clock: clockBox, temp: tempBox, power: powerBox };
         this._gpuHwCard.add_child(hwStatsRow);
         this._addCardInteractions(this._gpuHwCard);
         box.add_child(this._gpuHwCard);
 
         // 2. GPU Usage Sparkline Card
         const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._gpuSparkCard = sparkCard;
         sparkCard.add_child(new St.Label({ text: 'GPU Utilization (%)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._gpuSparkline = this._newSparkline('gpu', 100, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._gpuSparkline.x_expand = true;
@@ -3018,6 +3029,7 @@ export default class ResourcePulseExtension extends Extension {
 
         // 4. Performance & Thermal Stats Card
         const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._gpuStatsCard = statsCard;
         statsCard.add_child(new St.Label({ text: 'Performance & Sensors', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
         this._gpuUsage = this._detailRow('Core Utilization');
         statsCard.add_child(this._gpuUsage.row);
@@ -3401,13 +3413,20 @@ export default class ResourcePulseExtension extends Extension {
                 }
             }
 
+            // Without a GPU only the notice is shown, not cards of placeholders.
             if (this._gpuInactiveCard) {
                 this._gpuInactiveCard.visible = !gpu.present;
+                this._gpuHwCard.visible = gpu.present;
+                this._gpuSparkCard.visible = gpu.present;
+                this._gpuStatsCard.visible = gpu.present;
             }
 
             // Update Model / Chip Badge
             if (this._gpuModelName) this._gpuModelName.text = gpu.model || `${gpu.brand} Graphics`;
-            if (this._gpuDriverDesc) this._gpuDriverDesc.text = `Driver: ${gpu.driver || '--'}`;
+            if (this._gpuDriverDesc) {
+                this._gpuDriverDesc.visible = !!gpu.driver;
+                this._gpuDriverDesc.text = `Driver: ${gpu.driver || ''}`;
+            }
 
             if (this._gpuChipBox) {
                 const brand = (gpu.brand || '').toLowerCase();
@@ -3432,11 +3451,17 @@ export default class ResourcePulseExtension extends Extension {
                 }
             }
 
-            // Quick Hardware Sub-Stats
-            const clockStr = gpu.clock ? (gpu.maxClock ? `${Math.round(gpu.clock)} / ${Math.round(gpu.maxClock)} MHz` : `${Math.round(gpu.clock)} MHz`) : '--';
-            if (this._gpuHwClockVal) this._gpuHwClockVal.text = clockStr;
-            if (this._gpuHwTempVal) this._gpuHwTempVal.text = gpu.temp > 0 ? formatTemp(gpu.temp, tempUnit) : '--';
-            if (this._gpuHwPowerVal) this._gpuHwPowerVal.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
+            // Quick Hardware Sub-Stats: only what this GPU reports.
+            const readings = gpuReadings(gpu, tempUnit);
+            if (this._gpuHwFields) {
+                this._gpuHwFields.clock.visible = readings.clock !== null;
+                this._gpuHwFields.temp.visible = readings.temp !== null;
+                this._gpuHwFields.power.visible = readings.power !== null;
+                this._gpuHwStatsRow.visible = readings.clock !== null || readings.temp !== null || readings.power !== null;
+                if (readings.clock !== null) this._gpuHwClockVal.text = readings.clock;
+                if (readings.temp !== null) this._gpuHwTempVal.text = readings.temp;
+                if (readings.power !== null) this._gpuHwPowerVal.text = readings.power;
+            }
 
             // Sparkline
 
@@ -3459,10 +3484,12 @@ export default class ResourcePulseExtension extends Extension {
 
             // Stats Card
             if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
-            if (this._gpuCoreClock) this._gpuCoreClock.val.text = clockStr;
-            if (this._gpuTemp) this._gpuTemp.val.text = gpu.temp > 0 ? formatTemp(gpu.temp, tempUnit) : '--';
-            if (this._gpuFan) this._gpuFan.val.text = gpu.fanSpeed !== null ? `${gpu.fanSpeed} RPM` : '--';
-            if (this._gpuPower) this._gpuPower.val.text = gpu.powerDraw ? `${gpu.powerDraw.toFixed(1)} W` : '--';
+            if (this._gpuCoreClock) {
+                this._setDetailRow(this._gpuCoreClock, readings.clock);
+                this._setDetailRow(this._gpuTemp, readings.temp);
+                this._setDetailRow(this._gpuFan, readings.fan);
+                this._setDetailRow(this._gpuPower, readings.power);
+            }
         }
 
         for (const spark of this._sparklines) spark.refresh();
