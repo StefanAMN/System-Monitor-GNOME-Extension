@@ -126,6 +126,33 @@ function checkTheme(rp, light, label) {
     check(c.blue > c.red, `${label}: cpu card lost its tint (${c.red},${c.green},${c.blue})`);
 }
 
+// The overview is a grid: every visible card has the same size, whatever it
+// has to say, and every bar sits on the same line of its card.
+function overviewGrid(rp, label) {
+    const cards = Object.entries(rp._summaryCards).filter(([, card]) => card.box.visible);
+    check(cards.length >= 6, `${label}: only ${cards.length} overview cards are visible`);
+    const size = card => `${Math.round(card.box.width)}x${Math.round(card.box.height)}`;
+    const sizes = new Set(cards.map(([, card]) => size(card)));
+    check(sizes.size === 1, `${label}: overview cards differ in size (${cards.map(([key, card]) => `${key} ${size(card)}`).join(', ')})`);
+    const barLine = card => Math.round(card.pbar.get_transformed_position()[1] - card.box.get_transformed_position()[1]);
+    const lines = new Set(cards.map(([, card]) => barLine(card)));
+    check(lines.size === 1, `${label}: bars sit at different heights (${cards.map(([key, card]) => `${key} ${barLine(card)}`).join(', ')})`);
+    console.log(`RP-UITEST ${label}: ${cards.length} overview cards of ${[...sizes][0]}, bar at ${[...lines][0]}px`);
+}
+
+// No row of the GPU page may show a placeholder: what the GPU does not
+// report is left out.
+function gpuPlaceholders(rp) {
+    const found = [];
+    eachDescendant(rp._detailSections.gpu, actor => {
+        if (actor instanceof St.Label && actor.is_mapped() && /(^|\s)--$/.test(actor.text)) {
+            const row = actor.get_parent().get_children().map(child => child.text).filter(Boolean).join(' ');
+            found.push(row);
+        }
+    });
+    return found;
+}
+
 async function cycleTabs(rp, pass, tag = null) {
     rp._indicator.menu.open();
     for (const tab of TABS) {
@@ -138,6 +165,11 @@ async function cycleTabs(rp, pass, tag = null) {
         rp._poll();
         await sleep(400);
         if (tag) await shot(`${tag}-${tab}`);
+        if (tab === 'overview') overviewGrid(rp, `pass ${pass}${tag ? ` ${tag}` : ''}`);
+        if (tab === 'gpu' && rp._lastGpu?.present) {
+            const placeholders = gpuPlaceholders(rp);
+            check(placeholders.length === 0, `pass ${pass}: the GPU page shows placeholders (${placeholders.join(' | ')})`);
+        }
         // The settings page is longer than the panel: capture all of it.
         if (tag && tab === 'settings') {
             const adj = rp._scrollView.get_vadjustment();
@@ -740,6 +772,59 @@ async function prefsWindow() {
     await sleep(800);
 }
 
+// The GPU page with three kinds of reading, fed through the real poll: a GPU
+// that reports everything, one that reports only its load, and none at all.
+async function gpuPageFollowsReadings(rp) {
+    rp._indicator.menu.open();
+    rp._activeTab = 'gpu';
+    rp._updateTabVisibility();
+    const wait = rp._settings.get_int('poll-interval') * 1000 + 1500;
+    const feed = async reading => {
+        rp._gpu.sample = () => Promise.resolve(reading);
+        await sleep(wait);
+    };
+    const rows = () => [rp._gpuCoreClock, rp._gpuTemp, rp._gpuFan, rp._gpuPower].map(row => row.row.visible).join();
+    const fields = () => ['clock', 'temp', 'power'].map(key => rp._gpuHwFields[key].visible).join();
+
+    const full = {
+        present: true, brand: 'NVIDIA', model: 'NVIDIA GeForce RTX 4070 Laptop GPU', driver: 'NVIDIA 550.120',
+        percent: 37, memPercent: 25, memUsed: 2e9, memTotal: 8e9, memFree: 6e9,
+        temp: 61, powerDraw: 42.5, clock: 1800, maxClock: 2400, fanSpeed: 0
+    };
+    await feed(full);
+    check(rows() === 'true,true,true,true' && fields() === 'true,true,true' && rp._gpuHwStatsRow.visible && rp._gpuVramCard.visible,
+        `gpu page: a GPU that reports everything shows rows ${rows()}, fields ${fields()}`);
+    check(rp._gpuFan.val.text === '0 RPM' && rp._gpuPower.val.text === '42.5 W' && rp._gpuHwClockVal.text === '1800 / 2400 MHz',
+        `gpu page: values are '${rp._gpuFan.val.text}', '${rp._gpuPower.val.text}', '${rp._gpuHwClockVal.text}'`);
+    check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders with a full reading (${gpuPlaceholders(rp).join(' | ')})`);
+    await shot('gpu-full');
+
+    await feed({
+        ...full, brand: 'Intel', model: 'Intel Graphics', driver: 'i915', memPercent: 0, memUsed: 0, memTotal: 0, memFree: 0,
+        temp: 0, powerDraw: null, clock: null, maxClock: null, fanSpeed: null
+    });
+    check(rows() === 'false,false,false,false' && !rp._gpuHwStatsRow.visible && !rp._gpuVramCard.visible,
+        `gpu page: a GPU that reports only its load still shows rows ${rows()}`);
+    check(rp._gpuUsage.row.is_mapped() && rp._gpuUsage.val.text === '37%' && rp._gpuHwCard.visible,
+        `gpu page: the load row reads '${rp._gpuUsage.val.text}'`);
+    check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders with a bare reading (${gpuPlaceholders(rp).join(' | ')})`);
+    await shot('gpu-bare');
+
+    await feed({ present: false, percent: 0 });
+    check(rp._gpuInactiveCard.visible && !rp._gpuHwCard.visible && !rp._gpuSparkCard.visible && !rp._gpuStatsCard.visible,
+        'gpu page: without a GPU the cards of readings are still shown');
+    check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders without a GPU (${gpuPlaceholders(rp).join(' | ')})`);
+    check(rp._summaryCards.gpu.valueLabel.text === 'n/a', `gpu card: reads '${rp._summaryCards.gpu.valueLabel.text}' without a GPU`);
+
+    delete rp._gpu.sample;
+    await sleep(wait);
+    check(rp._gpuHwCard.visible === !!rp._lastGpu?.present, 'gpu page: did not follow the real reading again');
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
 async function stuckCollector(rp) {
     let calls = 0;
     rp._net.sample = () => {
@@ -821,6 +906,7 @@ async function run() {
     await powerRowWhenBlocked(ext.stateObj);
     await settingsKeyboard(ext.stateObj);
     await prefsWindow();
+    await gpuPageFollowsReadings(ext.stateObj);
     await stepperClamps(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await thresholdFollowsUnit(ext.stateObj);
