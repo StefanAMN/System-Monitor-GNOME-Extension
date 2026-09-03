@@ -533,8 +533,28 @@ export default class ResourcePulseExtension extends Extension {
         this._gpu = null;
     }
 
+    _hasKey(key) {
+        return !!(this._settings && this._settings.settings_schema && this._settings.settings_schema.has_key(key));
+    }
+
+    _getStrv(key, fallback = []) {
+        return this._hasKey(key) ? this._settings.get_strv(key) : fallback;
+    }
+
+    _getString(key, fallback = '') {
+        return this._hasKey(key) ? this._settings.get_string(key) : fallback;
+    }
+
+    _getInt(key, fallback = 0) {
+        return this._hasKey(key) ? this._settings.get_int(key) : fallback;
+    }
+
+    _getBoolean(key, fallback = false) {
+        return this._hasKey(key) ? this._settings.get_boolean(key) : fallback;
+    }
+
     _showTooltip(actor, text) {
-        if (!this._settings || !this._settings.get_boolean('show-tooltips') || (this._indicator && this._indicator.menu.isOpen) || !text) {
+        if (!this._getBoolean('show-tooltips', true) || (this._indicator && this._indicator.menu.isOpen) || !text) {
             this._hideTooltip();
             return;
         }
@@ -1387,7 +1407,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
 
     async _poll() {
         try {
-            const pinned = this._settings?.get_strv('pinned-metrics') || ['cpu', 'memory'];
+            const pinned = this._getStrv('pinned-metrics', ['cpu', 'memory']);
             const isOpen = this._menuOpen;
 
             const isDetailedCpu = isOpen && this._activeTab === 'cpu';
