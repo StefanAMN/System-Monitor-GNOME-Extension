@@ -384,3 +384,82 @@ Whole-project checks on the final code (2026-10-12):
 - `./dev.sh test-overhead` (600 s soak, one run): menu closed +0.20 % of one core (budget 1 %), overview +0.37 %, CPU tab +1.20 % (budget 5 %); soak RSS 266.4 -> 262.9 MB, steady-state slope 0.118 MB/min; fds 75 -> 75; menu actors 797 -> 797 (8 more than before: one slot per card). The baseline of this run was 0.60 % against 0.97 % in the previous one, so the two runs were made on a differently loaded machine and their differences are not attributed to the code.
 
 Follow-up the owner asked for (2026-10-12): the GPU model name wraps onto a second line instead of ending in an ellipsis. The check written for it (no ellipsized label on the GPU page) failed first on the old code for "Intel Alder Lake-UP3 GT2 [Iris Xe Graphics]", and then also caught the no-GPU notice being cut off, which wraps now too (`fix(gpu): wrap the model name and the no-GPU notice instead of cutting them off`). Run after it: lint, 220 unit checks, `test-ui` on GNOME 50, `test-compat` on 46.10 / 47.10 / 48.8 / 49.10, all passing. The overhead test was not rerun for this change (two label properties set once when the page is built).
+
+---
+
+# Battery report, diagnostics and a details window (2026-10-14, branch `battery-report`) — PLAN ONLY, awaiting owner approval
+
+Owner's request: track which apps use the battery, give a report of the biggest consumers and a diagnostic that helps the machine last longer; consider a separate window for in-depth settings and statistics instead of crowding the panel. No code has been changed for this section.
+
+## What this machine gives an unprivileged extension (checked 2026-10-14, kernel 7.0, GNOME 50)
+
+- **Per-app CPU time, without polling processes.** GNOME starts every app in its own systemd scope (`app-gnome-<desktop id>-<pid>.scope`, `app-flatpak-…`, `snap.…`), and `cpu.stat` (`usage_usec`) of each scope is readable by the user. It counts every process the app ever ran, including short-lived ones, so nothing is lost between samples. The root cgroup and `system.slice` are readable too, so system services and the kernel can be shown as their own lines. Terminals split their windows into further scopes (`kitty-21009-1.scope`, `vte-spawn-…`).
+- **Energy.** RAPL `package-0`, `core` and `uncore` (integrated GPU) are readable here (after the earlier fix); on battery the discharge rate comes from UPower. Display, Wi-Fi and the rest of the platform cannot be measured per app by anything on Linux.
+- **Per-app GPU time.** `/proc/<pid>/fdinfo` of a DRM file gives `drm-engine-render` nanoseconds (i915 here), for the user's own processes.
+- **For the diagnostic.** Backlight level (`/sys/class/backlight`, here at 100 %), power profile (power-profiles-daemon over D-Bus, here "balanced"), battery health (here 38.99 of 45 Wh design, 87 %, 204 cycles), UPower `EnableChargeThreshold` (present; this battery has no `charge_control_end_threshold`, so it is not supported here), focused app (`Shell.WindowTracker`).
+
+## Answer to "a separate window?"
+
+Yes. The panel should keep a one-line summary at most; ranked lists, history and advice need a real window.
+
+Recommended way to get it: grow the preferences window the extension already has into a multi-page window (Settings, Battery, Diagnostics), opened from a new icon in the panel's overview header. It ships in the same zip, is allowed on extensions.gnome.org, reuses `ui/prefsrows.js` and the `prefs-check.js` test rig, and runs in its own GTK process, so a heavy page never touches the shell.
+
+The alternative, a separate GJS application with its own app id and launcher icon, gives the window its own identity in the dash, but must install a `.desktop` file outside the extension's directory, needs its own single-instance and lifecycle code, and is not something extensions.gnome.org accepts as part of an extension. Not recommended unless the dash identity matters.
+
+Either way the data is collected by the extension inside the shell (the window only exists while it is open) and written to a file the window reads.
+
+## How consumption is attributed (an estimate, and labelled as one)
+
+Every 30 s, independent of the panel's own refresh, and also while the menu is closed:
+
+1. Read `usage_usec` of each app scope, of `system.slice` and of the root cgroup; read RAPL package (and uncore) energy; read battery energy, rate and AC state; note the focused app (signal, not polled) and the backlight level.
+2. CPU energy of an app over the interval = (package energy − idle baseline) × app CPU time / total CPU time. The idle baseline is a low percentile of the package power seen on this machine and is reported as "idle and platform", not given to any app.
+3. Each app's share is split into foreground (it had focus) and background.
+4. On battery, everything the battery delivered that is not attributed to an app is shown as "display, radios and the rest", so the list never pretends to explain 100 %.
+5. Without readable RAPL the report shows CPU time shares only (no watts) and offers the existing permission fix.
+
+Stored as hourly buckets: for each hour, AC or battery, battery energy used, and per app CPU time, attributed energy and foreground share. Fixed capacity: 14 days × 24 hours, at most 30 apps per hour plus "other". One file in `~/.local/share/resource-pulse/`, written when an hour closes and when the extension is disabled (screen lock), so about 25 writes a day. Local only; a switch to stop tracking and a button to clear the history.
+
+GNOME disables extensions while the screen is locked, so nothing is attributed then; the battery energy used meanwhile is shown as "while locked". Suspend is detected (boot-time clock against monotonic clock) and its interval is not attributed.
+
+## The window
+
+- **Settings**: the current preferences rows, unchanged.
+- **Battery**: range (today, 24 h, 7 days, 14 days) and "on battery only". Summary (battery used in Wh and % of capacity, average drain, estimated runtime at that drain, share attributed to apps). Ranked list of apps with icon and name (from the desktop id), energy, share, foreground / background split and CPU time. Later: a drain-over-time chart stacked by the top apps.
+- **Diagnostics**: findings, each with its evidence and, where it can be estimated, its effect ("about 0.9 W, roughly 35 min on a full charge"). Only findings backed by data are shown:
+  - an app that used a large share in the background over the last hours;
+  - a high backlight level on battery (the display is often the largest consumer, but it cannot be measured here, and the finding says so);
+  - the "performance" power profile on battery, with a button to switch (power-profiles-daemon allows this without a password);
+  - battery health: capacity against design and cycle count; where the battery supports a charge limit, advice to turn it on (in GNOME Settings, or `EnableChargeThreshold`);
+  - long periods of high CPU temperature on battery;
+  - power readings not available, pointing to the fix.
+- **Panel**: a "details" icon in the overview header opens the window; the battery page in the panel gets one line, "Top app on battery today: X (n %)", that opens the Battery page.
+
+## Milestones
+
+| # | Milestone | Layer | Proof |
+|---|-----------|-------|-------|
+| B1 | `lib/appusage.js`: read scope CPU counters; turn scope names into an app id and a label (GNOME, flatpak, snap, escaped `\x2d`, terminal sub-scopes, services) | HAL | unit: name parser on real names from this machine; fixture cgroup tree (scopes appearing, vanishing, unreadable) |
+| B2 | `lib/batteryledger.js`: attribution, idle baseline, foreground split, hourly buckets with fixed capacity, file format with version, recovery from a damaged file (kept aside and reported, never silently dropped) | Engine | unit: synthetic counters with known answers; rollover; caps; suspend gap; write / read round trip |
+| B3 | Tracker in the extension: 30 s timer, focus signal, lock and suspend gaps, `battery-tracking` setting | Engine / UI | `test-ui`: a CPU burner started as `systemd-run --user --scope -u app-test-burner-1.scope` ranks first with about its true share; churn of short-lived scopes; `test-overhead` with tracking on against off |
+| B4 | The window: Settings, Battery and Diagnostics pages; header icon in the panel; panel battery line | UI | `prefs-check.js` extended: pages built from a fixture history; driver: real click on the icon opens the window; screenshots light / dark |
+| B5 | `lib/diagnostics.js`: the rules as pure functions over a ledger summary plus system state; power-profile action | Engine / UI | unit: each rule fires on its evidence and stays silent without it; the action is tested where power-profiles-daemon runs (not in the containers; stated) |
+| B6 | Optional: per-app GPU time from `drm-engine-render`, uncore energy split by it | HAL | unit with fixture fdinfo; real reading on this Intel machine |
+| B7 | Docs, compat 46–49, overhead soak | All | as before |
+
+Overhead budget: the tracker reads about 100 small files every 30 s (expected well under 0.05 % of a core); the window does its work in its own process. Measured, not assumed, in B3.
+
+## Not possible or not planned
+
+- Per-app display, Wi-Fi or disk power: Linux has no source for it; it stays in "the rest".
+- Exact per-app watts: an estimate from CPU (and later GPU) time.
+- Tracking while the screen is locked (GNOME disables extensions then).
+- Changing system settings that need a password (charge limits, kernel tunables): advice only.
+
+## Decisions needed from the owner
+
+1. The window: grow the preferences window (recommended) or build a separate app.
+2. Tracking: off until the user starts it on the Battery page (recommended, since it records which apps were used and when) or on by default.
+3. History: 14 days (recommended) or 30.
+4. "Last longer": longer runtime per charge, longer battery lifespan, or both (recommended: both; the diagnostic list above covers both).
+5. B6 (GPU per app): now or later (recommended: later).
