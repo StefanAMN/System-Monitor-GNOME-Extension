@@ -63,7 +63,7 @@ function formatUptime(seconds) {
 const ResizeHandle = GObject.registerClass({
     GTypeName: 'ResourcePulseResizeHandle',
 }, class ResizeHandle extends St.DrawingArea {
-    _init(corner = 'se', size = 28, cursor = Clutter.CursorType.DEFAULT, hasGrip = true) {
+    _init(corner = 'se', size = 32, cursor = Clutter.CursorType.DEFAULT) {
         super._init({
             style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${corner}`,
             reactive: true,
@@ -74,11 +74,32 @@ const ResizeHandle = GObject.registerClass({
         });
         this.set_cursor_type(cursor);
         this._corner = corner;
-        this._hasGrip = hasGrip;
         this._hovered = false;
         this._active = false;
+
+        // Set pivot point to corner apex: (1.0, 1.0) for SE, (0.0, 1.0) for SW
+        const pivotX = corner === 'se' ? 1.0 : 0.0;
+        const pivotY = 1.0;
+        this.set_pivot_point(pivotX, pivotY);
+
         this.connect('notify::hover', () => {
             this._hovered = this.hover;
+            this.remove_all_transitions();
+            if (this._hovered && !this._active) {
+                this.ease({
+                    scale_x: 1.15,
+                    scale_y: 1.15,
+                    duration: 180,
+                    mode: Clutter.AnimationMode.EASE_OUT_BACK
+                });
+            } else if (!this._active) {
+                this.ease({
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    duration: 150,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+            }
             if (this.is_mapped()) this.queue_repaint();
         });
         this.connect('repaint', this._draw.bind(this));
@@ -87,42 +108,70 @@ const ResizeHandle = GObject.registerClass({
     setActive(active) {
         if (this._active !== active) {
             this._active = active;
+            this.remove_all_transitions();
+            if (active) {
+                this.ease({
+                    scale_x: 1.25,
+                    scale_y: 1.25,
+                    duration: 120,
+                    mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+                });
+            } else {
+                this.ease({
+                    scale_x: this._hovered ? 1.15 : 1.0,
+                    scale_y: this._hovered ? 1.15 : 1.0,
+                    duration: 250,
+                    mode: Clutter.AnimationMode.EASE_OUT_BACK
+                });
+            }
             if (this.is_mapped()) this.queue_repaint();
         }
     }
 
     _draw(area) {
-        if (!this._hasGrip) return;
+        // No static resize icon! The corner only illuminates when hovered or active.
+        if (!this._hovered && !this._active) return;
+
         const cr = area.get_context();
         const [w, h] = area.get_surface_size();
         cr.save();
 
+        const cornerX = this._corner === 'se' ? w : 0;
+        const cornerY = h;
+        const radius = Math.max(w, h);
+
+        // Radiant radial corner illumination
+        const glow = new Cairo.RadialGradient(cornerX, cornerY, 0, cornerX, cornerY, radius);
         if (this._active) {
-            cr.setSourceRGBA(0.208, 0.518, 0.894, 0.95);
-        } else if (this._hovered) {
-            cr.setSourceRGBA(0.208, 0.518, 0.894, 0.80);
+            glow.addColorStopRGBA(0.0, 0.208, 0.518, 0.894, 0.65);
+            glow.addColorStopRGBA(0.5, 0.208, 0.518, 0.894, 0.28);
+            glow.addColorStopRGBA(1.0, 0.208, 0.518, 0.894, 0.0);
         } else {
-            cr.setSourceRGBA(1.0, 1.0, 1.0, 0.35);
+            glow.addColorStopRGBA(0.0, 0.208, 0.518, 0.894, 0.40);
+            glow.addColorStopRGBA(0.5, 0.208, 0.518, 0.894, 0.15);
+            glow.addColorStopRGBA(1.0, 0.208, 0.518, 0.894, 0.0);
         }
 
-        cr.setLineWidth(2.0);
+        cr.setSource(glow);
+        cr.rectangle(0, 0, w, h);
+        cr.fill();
+
+        // Sleek corner accent highlight arc matching the panel corner radius
+        cr.setLineWidth(2.5);
         cr.setLineCap(Cairo.LineCap.ROUND);
-
-        if (this._corner === 'se') {
-            const offsets = [7, 13, 19];
-            for (const off of offsets) {
-                cr.moveTo(w - off, h - 4);
-                cr.lineTo(w - 4, h - off);
-            }
-            cr.stroke();
-        } else if (this._corner === 'sw') {
-            const offsets = [7, 13, 19];
-            for (const off of offsets) {
-                cr.moveTo(off, h - 4);
-                cr.lineTo(4, h - off);
-            }
-            cr.stroke();
+        if (this._active) {
+            cr.setSourceRGBA(0.40, 0.70, 1.0, 0.95);
+        } else {
+            cr.setSourceRGBA(0.40, 0.70, 1.0, 0.70);
         }
+
+        const arcRadius = 14;
+        if (this._corner === 'se') {
+            cr.arc(w - arcRadius, h - arcRadius, arcRadius - 1, 0, Math.PI / 2);
+        } else {
+            cr.arc(arcRadius, h - arcRadius, arcRadius - 1, Math.PI / 2, Math.PI);
+        }
+        cr.stroke();
 
         cr.restore();
     }
@@ -424,8 +473,11 @@ export default class ResourcePulseExtension extends Extension {
         this._scrollView.add_child(this._menuContainer);
         this._popupStack.add_child(this._scrollView);
 
-        // Build 4 Corner Resize Handles
+        // Build Corner Resize Handles
         this._buildCornerResizeHandles();
+
+        // Build Interactive Resize HUD
+        this._buildResizeHud();
 
         // Build In-Panel 3-Dots Quick Menu Popover
         this._buildQuickMenuPopover();
@@ -454,6 +506,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._poll();
             } else {
                 this._hideQuickMenu();
+                this._hideResizeHud();
                 if (this._dragGrab) {
                     this._dragGrab.dismiss();
                     this._dragGrab = null;
@@ -519,6 +572,11 @@ export default class ResourcePulseExtension extends Extension {
             this._dragGrab.dismiss();
             this._dragGrab = null;
         }
+        if (this._resizeHud) {
+            this._resizeHud.destroy();
+            this._resizeHud = null;
+        }
+        this._resizeHudLabel = null;
         if (this._quickMenuPopover) {
             this._quickMenuPopover.destroy();
             this._quickMenuPopover = null;
@@ -700,6 +758,7 @@ export default class ResourcePulseExtension extends Extension {
         newH = Math.max(minH, Math.min(maxH, Math.round(newH)));
 
         this._applyDimensions(newW, newH);
+        this._updateResizeHud(newW, newH);
     }
 
     _applyDimensions(w, h) {
@@ -747,12 +806,12 @@ export default class ResourcePulseExtension extends Extension {
     _buildCornerResizeHandles() {
         this._resizeHandles = {};
         const corners = [
-            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NWSE_RESIZE, size: 28, hasGrip: true },
-            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NESW_RESIZE, size: 28, hasGrip: true }
+            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NWSE_RESIZE, size: 32 },
+            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NESW_RESIZE, size: 32 }
         ];
 
         corners.forEach(c => {
-            const handle = new ResizeHandle(c.id, c.size, c.cursor, c.hasGrip);
+            const handle = new ResizeHandle(c.id, c.size, c.cursor);
             handle.x_align = c.xAlign;
             handle.y_align = c.yAlign;
             handle.x_expand = true;
@@ -766,6 +825,21 @@ export default class ResourcePulseExtension extends Extension {
             const startDrag = (event) => {
                 const now = event.get_time();
                 if (now - lastClickTime < 350) {
+                    handle.remove_all_transitions();
+                    handle.ease({
+                        scale_x: 0.85,
+                        scale_y: 0.85,
+                        duration: 90,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                        onComplete: () => {
+                            handle.ease({
+                                scale_x: 1.0,
+                                scale_y: 1.0,
+                                duration: 250,
+                                mode: Clutter.AnimationMode.EASE_OUT_BACK
+                            });
+                        }
+                    });
                     this._resetMenuDimensions();
                     lastClickTime = 0;
                     return Clutter.EVENT_STOP;
@@ -817,6 +891,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._activeResizeCorner = c.id;
                 this._dragGrab = global.stage.grab(handle);
                 handle.setActive(true);
+                this._showResizeHud(startWidth, startHeight);
                 return Clutter.EVENT_STOP;
             };
 
@@ -841,6 +916,7 @@ export default class ResourcePulseExtension extends Extension {
                 isDragging = false;
                 this._activeResizeCorner = null;
                 handle.setActive(false);
+                this._hideResizeHud();
                 this._saveCustomDimensions();
                 return Clutter.EVENT_STOP;
             };
@@ -864,6 +940,75 @@ export default class ResourcePulseExtension extends Extension {
 
             this._resizeHandles[c.id] = handle;
             this._popupStack.add_child(handle);
+        });
+    }
+
+    _buildResizeHud() {
+        this._resizeHud = new St.BoxLayout({
+            style_class: 'resource-pulse-resize-hud',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.END,
+            reactive: false,
+            can_focus: false,
+            visible: false,
+            opacity: 0
+        });
+        this._resizeHud.margin_bottom = 20;
+
+        const icon = new St.Icon({
+            icon_name: 'view-fullscreen-symbolic',
+            style: 'icon-size: 13px; color: #3584e4; margin-right: 6px;'
+        });
+        this._resizeHud.add_child(icon);
+
+        this._resizeHudLabel = new St.Label({
+            text: '0 × 0 px',
+            style_class: 'resource-pulse-resize-hud-label',
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        this._resizeHud.add_child(this._resizeHudLabel);
+
+        this._popupStack.add_child(this._resizeHud);
+    }
+
+    _showResizeHud(w, h) {
+        if (!this._resizeHud || !this._resizeHudLabel) return;
+        this._resizeHudLabel.text = `${w} × ${h} px`;
+        this._resizeHud.remove_all_transitions();
+        this._resizeHud.set_pivot_point(0.5, 0.5);
+        this._resizeHud.scale_x = 0.75;
+        this._resizeHud.scale_y = 0.75;
+        this._resizeHud.opacity = 0;
+        this._resizeHud.visible = true;
+        this._resizeHud.ease({
+            scale_x: 1.0,
+            scale_y: 1.0,
+            opacity: 255,
+            duration: 180,
+            mode: Clutter.AnimationMode.EASE_OUT_BACK
+        });
+    }
+
+    _updateResizeHud(w, h) {
+        if (this._resizeHudLabel) {
+            this._resizeHudLabel.text = `${w} × ${h} px`;
+        }
+    }
+
+    _hideResizeHud() {
+        if (!this._resizeHud || !this._resizeHud.visible) return;
+        this._resizeHud.remove_all_transitions();
+        this._resizeHud.ease({
+            scale_x: 0.8,
+            scale_y: 0.8,
+            opacity: 0,
+            duration: 220,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onComplete: () => {
+                if (this._resizeHud) {
+                    this._resizeHud.visible = false;
+                }
+            }
         });
     }
 
