@@ -2568,6 +2568,10 @@ export default class ResourcePulseExtension extends Extension {
     _updateTabVisibility() {
         if (this._activeTab === 'settings') this._ensureSettingsPage();
         else if (this._activeTab !== 'overview') this._ensureDetailSection(this._activeTab);
+        // Detail data (sensor list, mounts, processes) is only sampled for
+        // the visible tab: fetch it now instead of after up to one interval.
+        // _poll() itself coalesces bursts (keyboard navigation, re-renders).
+        if (this._menuOpen && this._activeTab !== 'settings') this._poll();
         if (this._activeTab === 'overview') {
             if (!this._overviewPage.visible) {
                 this._overviewPage.opacity = 0;
@@ -3287,7 +3291,8 @@ export default class ResourcePulseExtension extends Extension {
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
             if (this._dskUsage) this._dskUsage.val.text = `${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`;
 
-            if (this._menuOpen && this._activeTab === 'disk' && this._dskMountsBox && dsk.mounts) {
+            // Only a detailed sample has the full mount list.
+            if (this._menuOpen && this._activeTab === 'disk' && this._dskMountsBox && dsk.mounts && dsk.detailed) {
                 if (!this._dskMountRows) this._dskMountRows = [];
                 if (this._dskMountRows.length !== dsk.mounts.length) {
                     this._dskMountsBox.destroy_all_children();
@@ -3371,7 +3376,9 @@ export default class ResourcePulseExtension extends Extension {
                 sc.subLabel.visible = missing;
                 if (missing) sc.subLabel.text = 'No sensor found';
             }
-            if (this._menuOpen && this._activeTab === 'thermal') {
+            // A top-bar sample carries only the package sensor; rendering it
+            // here would collapse the list to one row until the next detailed one.
+            if (this._menuOpen && this._activeTab === 'thermal' && thm.detailed !== false) {
                 if (this._thmSensorsBox && thm.sensors) {
                     if (!this._thmSensorRows) this._thmSensorRows = [];
                     if (this._thmSensorRows.length !== thm.sensors.length) {
