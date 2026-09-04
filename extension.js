@@ -370,12 +370,20 @@ export default class ResourcePulseExtension extends Extension {
             style_class: 'resource-pulse-menu-section',
             reactive: true,
             can_focus: true,
-            x_expand: true
+            x_expand: true,
+            y_expand: true
         });
 
-        // Dismiss quick menu on container click
-        this._menuContainer.connect('button-press-event', () => {
-            if (this._quickMenuPopover && this._quickMenuPopover.visible) {
+        // Dismiss quick menu on container click (ignoring clicks on the 3-dots trigger button itself)
+        this._menuContainer.connect('button-press-event', (actor, event) => {
+            if (this._isQuickMenuOpen) {
+                const source = event.get_source();
+                if (this._overviewMenuBtn && (source === this._overviewMenuBtn || this._overviewMenuBtn.contains(source))) {
+                    return Clutter.EVENT_PROPAGATE;
+                }
+                if (this._detailOptBtn && (source === this._detailOptBtn || this._detailOptBtn.contains(source))) {
+                    return Clutter.EVENT_PROPAGATE;
+                }
                 this._hideQuickMenu();
             }
             return Clutter.EVENT_PROPAGATE;
@@ -385,7 +393,7 @@ export default class ResourcePulseExtension extends Extension {
         this._menuContainer.connect('key-press-event', (actor, event) => {
             const symbol = event.get_key_symbol();
             if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
-                if (this._quickMenuPopover && this._quickMenuPopover.visible) {
+                if (this._isQuickMenuOpen) {
                     this._hideQuickMenu();
                     return Clutter.EVENT_STOP;
                 }
@@ -444,7 +452,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._hideTooltip();
                 this._poll();
             } else {
-                if (this._quickMenuPopover) this._quickMenuPopover.visible = false;
+                this._hideQuickMenu();
                 if (this._dragGrab) {
                     this._dragGrab.dismiss();
                     this._dragGrab = null;
@@ -643,11 +651,21 @@ export default class ResourcePulseExtension extends Extension {
             this._currentHeight = 0;
             if (this._menuContainer) {
                 this._menuContainer.width = defaultWidth;
+                this._menuContainer.height = -1;
                 this._menuContainer.style = `width: ${defaultWidth}px; min-width: ${defaultWidth}px; max-width: ${defaultWidth}px;`;
             }
             if (this._scrollView) {
+                this._scrollView.width = defaultWidth;
                 this._scrollView.height = -1;
-                this._scrollView.style = `max-height: ${defaultMaxHeight}px;`;
+                this._scrollView.style = `width: ${defaultWidth}px; max-height: ${defaultMaxHeight}px;`;
+            }
+            if (this._popupStack) {
+                this._popupStack.width = defaultWidth;
+                this._popupStack.height = -1;
+            }
+            if (this._menuSection) {
+                this._menuSection.width = defaultWidth;
+                this._menuSection.height = -1;
             }
             if (this._settingsDimensionsLabel) {
                 this._settingsDimensionsLabel.text = `Auto Dynamic: ${defaultWidth} × auto px`;
@@ -686,11 +704,20 @@ export default class ResourcePulseExtension extends Extension {
         this._currentHeight = h;
         if (this._menuContainer) {
             this._menuContainer.width = w;
-            this._menuContainer.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px;`;
+            this._menuContainer.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px; min-height: ${h}px;`;
         }
         if (this._scrollView) {
+            this._scrollView.width = w;
             this._scrollView.height = h;
-            this._scrollView.style = `height: ${h}px; max-height: ${h}px;`;
+            this._scrollView.style = `width: ${w}px; height: ${h}px; max-height: ${h}px;`;
+        }
+        if (this._popupStack) {
+            this._popupStack.width = w;
+            this._popupStack.height = h;
+        }
+        if (this._menuSection) {
+            this._menuSection.width = w;
+            this._menuSection.height = h;
         }
         if (this._settingsDimensionsLabel) {
             this._settingsDimensionsLabel.text = `Custom: ${w} × ${h} px (Drag corners to resize)`;
@@ -740,15 +767,44 @@ export default class ResourcePulseExtension extends Extension {
                 startX = x;
                 startY = y;
 
-                const savedW = this._settings?.get_int('menu-custom-width') || 0;
-                const savedH = this._settings?.get_int('menu-custom-height') || 0;
+                // Safely read real rendered allocation size
+                let curW = 0;
+                let curH = 0;
 
-                startWidth = (savedW > 0 && this._currentWidth > 0)
-                    ? this._currentWidth
-                    : (this._popupStack.get_width() || this._scrollView.get_width() || 420);
-                startHeight = (savedH > 0 && this._currentHeight > 0)
-                    ? this._currentHeight
-                    : (this._scrollView.get_height() || this._popupStack.get_height() || 450);
+                if (this._menuSection) {
+                    const box = this._menuSection.get_allocation_box();
+                    if (box) {
+                        const bw = box.get_width();
+                        const bh = box.get_height();
+                        if (bw > 100) curW = bw;
+                        if (bh > 100) curH = bh;
+                    }
+                }
+                if ((!curW || !curH) && this._scrollView) {
+                    const box = this._scrollView.get_allocation_box();
+                    if (box) {
+                        const bw = box.get_width();
+                        const bh = box.get_height();
+                        if (!curW && bw > 100) curW = bw;
+                        if (!curH && bh > 100) curH = bh;
+                    }
+                }
+                if ((!curW || !curH) && this._menuContainer) {
+                    const box = this._menuContainer.get_allocation_box();
+                    if (box) {
+                        const bw = box.get_width();
+                        const bh = box.get_height();
+                        if (!curW && bw > 100) curW = bw;
+                        if (!curH && bh > 100) curH = bh;
+                    }
+                }
+                if (!curW && this._currentWidth > 100) curW = this._currentWidth;
+                if (!curH && this._currentHeight > 100) curH = this._currentHeight;
+                if (!curW) curW = 420;
+                if (!curH) curH = 500;
+
+                startWidth = Math.round(curW);
+                startHeight = Math.round(curH);
 
                 isDragging = true;
                 this._activeResizeCorner = c.id;
@@ -800,15 +856,21 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _buildQuickMenuPopover() {
+        this._isQuickMenuOpen = false;
         this._quickMenuPopover = new St.BoxLayout({
             vertical: true,
             style_class: 'resource-pulse-quick-menu',
             x_align: Clutter.ActorAlign.END,
             y_align: Clutter.ActorAlign.START,
+            x_expand: true,
+            y_expand: true,
             reactive: true,
             visible: false
         });
-        this._quickMenuPopover.style = 'margin-top: 46px; margin-right: 14px; width: 220px;';
+        this._quickMenuPopover.margin_top = 50;
+        this._quickMenuPopover.margin_right = 16;
+        this._quickMenuPopover.width = 220;
+        this._quickMenuPopover.style = 'margin-top: 50px; margin-right: 16px; width: 220px;';
 
         const items = [
             {
@@ -873,31 +935,63 @@ export default class ResourcePulseExtension extends Extension {
         this._popupStack.add_child(this._quickMenuPopover);
     }
 
-    _toggleQuickMenu() {
+    _showQuickMenu() {
         if (!this._quickMenuPopover) return;
-        if (this._quickMenuPopover.visible) {
-            this._hideQuickMenu();
-        } else {
-            this._quickMenuPopover.opacity = 0;
-            this._quickMenuPopover.visible = true;
-            this._quickMenuPopover.ease({
-                opacity: 255,
-                duration: 150,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-            });
-        }
+        this._isQuickMenuOpen = true;
+        this._quickMenuPopover.remove_all_transitions();
+        this._quickMenuPopover.opacity = 0;
+        this._quickMenuPopover.visible = true;
+        this._quickMenuPopover.ease({
+            opacity: 255,
+            duration: 150,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD
+        });
+        this._updateQuickMenuIcons(true);
     }
 
     _hideQuickMenu() {
-        if (!this._quickMenuPopover || !this._quickMenuPopover.visible) return;
+        if (!this._quickMenuPopover || !this._isQuickMenuOpen) return;
+        this._isQuickMenuOpen = false;
+        this._quickMenuPopover.remove_all_transitions();
         this._quickMenuPopover.ease({
             opacity: 0,
             duration: 100,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             onComplete: () => {
-                if (this._quickMenuPopover) this._quickMenuPopover.visible = false;
+                if (this._quickMenuPopover && !this._isQuickMenuOpen) {
+                    this._quickMenuPopover.visible = false;
+                }
             }
         });
+        this._updateQuickMenuIcons(false);
+    }
+
+    _toggleQuickMenu() {
+        if (this._isQuickMenuOpen) {
+            this._hideQuickMenu();
+        } else {
+            this._showQuickMenu();
+        }
+    }
+
+    _updateQuickMenuIcons(open) {
+        const angle = open ? 90 : 0;
+        if (this._overviewMenuIcon) {
+            this._overviewMenuIcon.remove_all_transitions();
+            this._overviewMenuIcon.ease({
+                rotation_angle_z: angle,
+                duration: 200,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+        }
+        if (this._detailOptIcon) {
+            this._detailOptIcon.remove_all_transitions();
+            this._detailOptIcon.ease({
+                rotation_angle_z: angle,
+                duration: 200,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+        }
     }
 
     _openSettingsView() {
@@ -912,6 +1006,7 @@ export default class ResourcePulseExtension extends Extension {
             vertical: true,
             style_class: 'resource-pulse-settings-page',
             x_expand: true,
+            y_expand: true,
             visible: false
         });
 
@@ -1726,7 +1821,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
     }
 
     _buildOverview() {
-        this._overviewPage = new St.BoxLayout({ vertical: true });
+        this._overviewPage = new St.BoxLayout({ vertical: true, x_expand: true, y_expand: true });
 
         // Header container (System Overview, Refresh, Menu)
         const headerBox = new St.BoxLayout({ style: 'margin-bottom: 12px;', y_align: Clutter.ActorAlign.CENTER });
@@ -1752,14 +1847,10 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         menuIcon.set_pivot_point(0.5, 0.5);
         menuBtn.add_child(menuIcon);
         menuBtn.connect('clicked', () => {
-            menuIcon.rotation_angle_z = 0;
-            menuIcon.ease({
-                rotation_angle_z: 180,
-                duration: 300,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-            });
             this._toggleQuickMenu();
         });
+        this._overviewMenuBtn = menuBtn;
+        this._overviewMenuIcon = menuIcon;
 
         this._addClickAnimations(refreshBtn);
         headerBox.add_child(refreshBtn);
@@ -2013,7 +2104,8 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         this._detailArea = new St.BoxLayout({
             vertical: true,
             style_class: 'resource-pulse-detail-area',
-            x_expand: true
+            x_expand: true,
+            y_expand: true
         });
 
         // Top bar for CPU detail header (matches Right Panel header)
@@ -2037,14 +2129,10 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         optIcon.set_pivot_point(0.5, 0.5);
         optBtn.add_child(optIcon);
         optBtn.connect('clicked', () => {
-            optIcon.rotation_angle_z = 0;
-            optIcon.ease({
-                rotation_angle_z: 180,
-                duration: 300,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-            });
             this._toggleQuickMenu();
         });
+        this._detailOptBtn = optBtn;
+        this._detailOptIcon = optIcon;
 
         this._addClickAnimations(backBtn);
         this._detailHeader.add_child(backBtn);
@@ -2076,6 +2164,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
     }
 
     _updateTabVisibility() {
+        this._hideQuickMenu();
         if (this._activeTab === 'overview') {
             if (!this._overviewPage.visible) {
                 this._overviewPage.opacity = 0;
