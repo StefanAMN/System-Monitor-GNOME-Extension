@@ -63,7 +63,7 @@ function formatUptime(seconds) {
 const ResizeHandle = GObject.registerClass({
     GTypeName: 'ResourcePulseResizeHandle',
 }, class ResizeHandle extends St.DrawingArea {
-    _init(corner = 'se', size = 24, cursor = Clutter.CursorType.DEFAULT, hasGrip = false) {
+    _init(corner = 'se', size = 28, cursor = Clutter.CursorType.DEFAULT, hasGrip = true) {
         super._init({
             style_class: `resource-pulse-resize-handle resource-pulse-resize-handle-${corner}`,
             reactive: true,
@@ -99,25 +99,26 @@ const ResizeHandle = GObject.registerClass({
         if (this._active) {
             cr.setSourceRGBA(0.208, 0.518, 0.894, 0.95);
         } else if (this._hovered) {
-            cr.setSourceRGBA(0.208, 0.518, 0.894, 0.7);
+            cr.setSourceRGBA(0.208, 0.518, 0.894, 0.80);
         } else {
-            cr.setSourceRGBA(1.0, 1.0, 1.0, 0.25);
+            cr.setSourceRGBA(1.0, 1.0, 1.0, 0.35);
         }
 
-        cr.setLineWidth(1.5);
+        cr.setLineWidth(2.0);
+        cr.setLineCap(Cairo.LineCap.ROUND);
 
         if (this._corner === 'se') {
-            const offsets = [6, 11, 16];
+            const offsets = [7, 13, 19];
             for (const off of offsets) {
-                cr.moveTo(w - off, h - 3);
-                cr.lineTo(w - 3, h - off);
+                cr.moveTo(w - off, h - 4);
+                cr.lineTo(w - 4, h - off);
             }
             cr.stroke();
         } else if (this._corner === 'sw') {
-            const offsets = [6, 11, 16];
+            const offsets = [7, 13, 19];
             for (const off of offsets) {
-                cr.moveTo(off, h - 3);
-                cr.lineTo(3, h - off);
+                cr.moveTo(off, h - 4);
+                cr.lineTo(4, h - off);
             }
             cr.stroke();
         }
@@ -627,6 +628,7 @@ export default class ResourcePulseExtension extends Extension {
 
         const defaultWidth = Math.min(Math.max(380, Math.round(screenW * 0.28)), 600);
         const defaultMaxHeight = Math.max(380, Math.round(screenH * 0.80));
+        this._defaultMaxHeight = defaultMaxHeight;
 
         if (savedW > 0 && savedH > 0) {
             const minW = 360;
@@ -638,15 +640,17 @@ export default class ResourcePulseExtension extends Extension {
             this._applyDimensions(w, h);
         } else {
             this._currentWidth = defaultWidth;
-            this._currentHeight = defaultMaxHeight;
+            this._currentHeight = 0;
             if (this._menuContainer) {
+                this._menuContainer.width = defaultWidth;
                 this._menuContainer.style = `width: ${defaultWidth}px; min-width: ${defaultWidth}px; max-width: ${defaultWidth}px;`;
             }
             if (this._scrollView) {
+                this._scrollView.height = -1;
                 this._scrollView.style = `max-height: ${defaultMaxHeight}px;`;
             }
             if (this._settingsDimensionsLabel) {
-                this._settingsDimensionsLabel.text = `Auto Dynamic: ${defaultWidth} × ${defaultMaxHeight} px`;
+                this._settingsDimensionsLabel.text = `Auto Dynamic: ${defaultWidth} × auto px`;
             }
         }
     }
@@ -669,12 +673,6 @@ export default class ResourcePulseExtension extends Extension {
         } else if (corner === 'sw') {
             newW = startW - deltaX;
             newH = startH + deltaY;
-        } else if (corner === 'ne') {
-            newW = startW + deltaX;
-            newH = startH - deltaY;
-        } else if (corner === 'nw') {
-            newW = startW - deltaX;
-            newH = startH - deltaY;
         }
 
         newW = Math.max(minW, Math.min(maxW, Math.round(newW)));
@@ -687,9 +685,11 @@ export default class ResourcePulseExtension extends Extension {
         this._currentWidth = w;
         this._currentHeight = h;
         if (this._menuContainer) {
+            this._menuContainer.width = w;
             this._menuContainer.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px;`;
         }
         if (this._scrollView) {
+            this._scrollView.height = h;
             this._scrollView.style = `height: ${h}px; max-height: ${h}px;`;
         }
         if (this._settingsDimensionsLabel) {
@@ -715,10 +715,8 @@ export default class ResourcePulseExtension extends Extension {
     _buildCornerResizeHandles() {
         this._resizeHandles = {};
         const corners = [
-            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END,   cursor: Clutter.CursorType.NWSE_RESIZE, size: 24, hasGrip: true },
-            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END,   cursor: Clutter.CursorType.NESW_RESIZE, size: 24, hasGrip: true },
-            { id: 'ne', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.START, cursor: Clutter.CursorType.NESW_RESIZE, size: 20, hasGrip: false },
-            { id: 'nw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.START, cursor: Clutter.CursorType.NWSE_RESIZE, size: 20, hasGrip: false }
+            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NWSE_RESIZE, size: 28, hasGrip: true },
+            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NESW_RESIZE, size: 28, hasGrip: true }
         ];
 
         corners.forEach(c => {
@@ -741,8 +739,17 @@ export default class ResourcePulseExtension extends Extension {
                 const [x, y] = event.get_coords();
                 startX = x;
                 startY = y;
-                startWidth = this._currentWidth || 420;
-                startHeight = this._currentHeight || (this._scrollView ? this._scrollView.get_height() : 450) || 450;
+
+                const savedW = this._settings?.get_int('menu-custom-width') || 0;
+                const savedH = this._settings?.get_int('menu-custom-height') || 0;
+
+                startWidth = (savedW > 0 && this._currentWidth > 0)
+                    ? this._currentWidth
+                    : (this._popupStack.get_width() || this._scrollView.get_width() || 420);
+                startHeight = (savedH > 0 && this._currentHeight > 0)
+                    ? this._currentHeight
+                    : (this._scrollView.get_height() || this._popupStack.get_height() || 450);
+
                 isDragging = true;
                 this._activeResizeCorner = c.id;
                 this._dragGrab = global.stage.grab(handle);
@@ -750,25 +757,32 @@ export default class ResourcePulseExtension extends Extension {
                 return Clutter.EVENT_STOP;
             });
 
+            const finishDrag = () => {
+                if (!isDragging) return Clutter.EVENT_PROPAGATE;
+                if (this._dragGrab) {
+                    this._dragGrab.dismiss();
+                    this._dragGrab = null;
+                }
+                isDragging = false;
+                this._activeResizeCorner = null;
+                handle.setActive(false);
+                this._saveCustomDimensions();
+                return Clutter.EVENT_STOP;
+            };
+
+            handle.connect('button-release-event', finishDrag);
+
             handle.connect('event', (actor, event) => {
                 if (!isDragging) return Clutter.EVENT_PROPAGATE;
                 const type = event.type();
-                if (type === Clutter.EventType.MOTION) {
+                if (type === Clutter.EventType.MOTION || type === Clutter.EventType.TOUCH_UPDATE) {
                     const [currX, currY] = event.get_coords();
                     const deltaX = currX - startX;
                     const deltaY = currY - startY;
                     this._applyResizeDelta(c.id, deltaX, deltaY, startWidth, startHeight);
                     return Clutter.EVENT_STOP;
-                } else if (type === Clutter.EventType.BUTTON_RELEASE) {
-                    if (this._dragGrab) {
-                        this._dragGrab.dismiss();
-                        this._dragGrab = null;
-                    }
-                    isDragging = false;
-                    this._activeResizeCorner = null;
-                    handle.setActive(false);
-                    this._saveCustomDimensions();
-                    return Clutter.EVENT_STOP;
+                } else if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END) {
+                    return finishDrag();
                 }
                 return Clutter.EVENT_PROPAGATE;
             });
@@ -1319,7 +1333,7 @@ export default class ResourcePulseExtension extends Extension {
             if (customW > 0 && customH > 0) {
                 this._settingsDimensionsLabel.text = `Custom Size: ${customW} × ${customH} px (Drag corners to resize)`;
             } else {
-                this._settingsDimensionsLabel.text = `Auto Dynamic: ${this._currentWidth || 420} × ${this._currentHeight || 500} px`;
+                this._settingsDimensionsLabel.text = `Auto Dynamic: ${this._currentWidth || 420} × auto px`;
             }
         }
     }
