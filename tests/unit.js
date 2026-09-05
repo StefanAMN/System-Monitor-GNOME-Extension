@@ -307,6 +307,13 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
     const fds = async () => (await listDirAsync('/proc/self/fd')).length;
     const sampler = new ProcessSampler();
     await sampler.sample(16e9);
+    // Back-to-back samples (ms apart) must not turn one clock tick into a spike.
+    let spike = 0;
+    for (let i = 0; i < 20; i++) {
+        const r = await sampler.sample(16e9);
+        for (const p of r.top) spike = Math.max(spike, p.cpu / p.count);
+    }
+    ok(spike <= GLib.get_num_processors() * 100 && spike <= 150, `rapid samples: no per-process rate spike (max ${spike.toFixed(1)}% per process)`);
     const fdBefore = await fds();
     let maxMap = 0;
     let maxCpu = 0;

@@ -356,6 +356,7 @@ export default class ResourcePulseExtension extends Extension {
             this._stSettings = null;
             this._schemeIds = null;
         }
+        this._proc?.destroy();
         this._proc = null;
         this._pwrScale = null;
         this._netScale = null;
@@ -1479,9 +1480,13 @@ export default class ResourcePulseExtension extends Extension {
             let processes = [];
             let procSort = null;
             if (isDetailedCpu || isDetailedMem) {
-                processes = (await this._proc.sample(mem.total, isDetailedMem)).top;
+                const procResult = await this._proc.sample(mem.total, isDetailedMem);
                 if (gen !== this._gen) return;
-                procSort = isDetailedMem ? 'memory' : 'cpu';
+                // null: the sampler was destroyed or is still reading.
+                if (procResult) {
+                    processes = procResult.top;
+                    procSort = isDetailedMem ? 'memory' : 'cpu';
+                }
             } else if (!isOpen) {
                 // Deltas across a closed menu would be averages over minutes.
                 this._proc.reset();

@@ -42,6 +42,7 @@ docs/                     Spec, design notes, test checklist
 - ES Modules throughout; match the style already in `extension.js` (class-based `Extension`/`ExtensionPreferences` subclasses).
 - All `GLib.timeout_add*`, `Gio.DBusProxy`, and signal connections created in `enable()` must be torn down in `disable()`. Treat any leak here as a bug, not a style nit.
 - No synchronous file or subprocess I/O on the main loop — use the async `Gio.File` APIs and `Gio.Subprocess` for anything touching `/proc`, `/sys`, or external binaries (`upower`, `nvidia-smi`, etc.).
+  - **Exception (approved by the owner, 2026-10-03): the process list (`lib/process.js`)** reads `/proc/<pid>/stat` synchronously, at most 32 files per `GLib.idle_add` slice. procfs files are generated in memory and never wait on storage; measured on 508 processes this costs ~5 ms CPU per sample, versus ~22 ms for spawning `sh` + `cat` and ~53 ms for one async GIO request per file. The exception covers procfs files read in bounded slices only — never `/sys`, never unbounded loops, never files on real filesystems.
 - Any metric that depends on hardware that may not exist (RAPL, GPU, hwmon sensors) must fail soft: hide the metric, never throw out of `enable()`.
 - Keep metric-collection modules (`lib/*.js`) free of UI code; keep `extension.js`/`prefs.js` free of `/proc`/`/sys` parsing. Don't blur that boundary for convenience.
 
