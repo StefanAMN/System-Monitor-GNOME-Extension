@@ -466,41 +466,6 @@
     border-bottom-left-radius: 14px;
 }
 
-/* ── In-Panel 3-Dots Quick Menu Popover ───────────────────────────────────── */
-
-.resource-pulse-quick-menu {
-    background-color: #242424;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 12px;
-    padding: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-    margin-top: 50px;
-    margin-right: 16px;
-    width: 220px;
-}
-
-.resource-pulse-quick-menu-item {
-    padding: 8px 12px;
-    border-radius: 8px;
-    spacing: 10px;
-    transition-duration: 100ms;
-}
-
-.resource-pulse-quick-menu-item:hover,
-.resource-pulse-quick-menu-item:focus {
-    background-color: rgba(255, 255, 255, 0.09);
-}
-
-.resource-pulse-quick-menu-item:active {
-    background-color: rgba(53, 132, 228, 0.25);
-}
-
-.resource-pulse-quick-menu-label {
-    font-size: 0.85em;
-    font-weight: 600;
-    color: #ffffff;
-}
-
 /* ── In-Panel Settings Page ───────────────────────────────────────────────── */
 
 .resource-pulse-settings-page {

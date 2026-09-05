@@ -424,29 +424,10 @@ export default class ResourcePulseExtension extends Extension {
             y_expand: true
         });
 
-        // Dismiss quick menu on container click (ignoring clicks on the 3-dots trigger button itself)
-        this._menuContainer.connect('button-press-event', (actor, event) => {
-            if (this._isQuickMenuOpen) {
-                const source = event.get_source();
-                if (this._overviewMenuBtn && (source === this._overviewMenuBtn || this._overviewMenuBtn.contains(source))) {
-                    return Clutter.EVENT_PROPAGATE;
-                }
-                if (this._detailOptBtn && (source === this._detailOptBtn || this._detailOptBtn.contains(source))) {
-                    return Clutter.EVENT_PROPAGATE;
-                }
-                this._hideQuickMenu();
-            }
-            return Clutter.EVENT_PROPAGATE;
-        });
-
         // Keyboard navigation inside dropdown menu
         this._menuContainer.connect('key-press-event', (actor, event) => {
             const symbol = event.get_key_symbol();
             if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
-                if (this._isQuickMenuOpen) {
-                    this._hideQuickMenu();
-                    return Clutter.EVENT_STOP;
-                }
                 if (this._activeTab !== 'overview') {
                     this._activeTab = (this._activeTab === 'settings' && this._previousTab) ? this._previousTab : 'overview';
                     this._updateTabVisibility();
@@ -476,9 +457,6 @@ export default class ResourcePulseExtension extends Extension {
         // Build Corner Resize Handles
         this._buildCornerResizeHandles();
 
-        // Build In-Panel 3-Dots Quick Menu Popover
-        this._buildQuickMenuPopover();
-
         this._menuSection.add_child(this._popupStack);
         this._indicator.menu.box.add_style_class_name('resource-pulse-popup');
         this._indicator.menu.addMenuItem(this._menuSection);
@@ -502,7 +480,6 @@ export default class ResourcePulseExtension extends Extension {
                 this._hideTooltip();
                 this._poll();
             } else {
-                this._hideQuickMenu();
                 if (this._dragGrab) {
                     this._dragGrab.dismiss();
                     this._dragGrab = null;
@@ -567,10 +544,6 @@ export default class ResourcePulseExtension extends Extension {
         if (this._dragGrab) {
             this._dragGrab.dismiss();
             this._dragGrab = null;
-        }
-        if (this._quickMenuPopover) {
-            this._quickMenuPopover.destroy();
-            this._quickMenuPopover = null;
         }
         if (this._settingsPage) {
             this._settingsPage.destroy();
@@ -931,148 +904,13 @@ export default class ResourcePulseExtension extends Extension {
         });
     }
 
-    _buildQuickMenuPopover() {
-        this._isQuickMenuOpen = false;
-        this._quickMenuPopover = new St.BoxLayout({
-            vertical: true,
-            style_class: 'resource-pulse-quick-menu',
-            x_align: Clutter.ActorAlign.END,
-            y_align: Clutter.ActorAlign.START,
-            x_expand: true,
-            y_expand: true,
-            reactive: true,
-            visible: false
-        });
-        this._quickMenuPopover.margin_top = 50;
-        this._quickMenuPopover.margin_right = 16;
-        this._quickMenuPopover.width = 220;
-        this._quickMenuPopover.style = 'margin-top: 50px; margin-right: 16px; width: 220px;';
-
-        const items = [
-            {
-                icon: 'preferences-system-symbolic',
-                label: 'Settings & Preferences',
-                action: () => {
-                    this._hideQuickMenu();
-                    this._openSettingsView();
-                }
-            },
-            {
-                icon: 'channel-secure-symbolic',
-                label: 'Fix Power Permissions',
-                action: () => {
-                    this._hideQuickMenu();
-                    this._runPowerFix();
-                }
-            },
-            {
-                icon: 'view-restore-symbolic',
-                label: 'Reset Window Size',
-                action: () => {
-                    this._hideQuickMenu();
-                    this._resetMenuDimensions();
-                }
-            },
-            {
-                icon: 'org.gnome.SystemMonitor-symbolic',
-                label: 'Open System Monitor',
-                action: () => {
-                    this._hideQuickMenu();
-                    this._launchSystemMonitor();
-                    this._indicator.menu.close();
-                }
-            },
-            {
-                icon: 'view-refresh-symbolic',
-                label: 'Refresh All Data',
-                action: () => {
-                    this._hideQuickMenu();
-                    this._poll();
-                }
-            }
-        ];
-
-        items.forEach(item => {
-            const btn = new St.Button({
-                style_class: 'resource-pulse-quick-menu-item',
-                reactive: true,
-                can_focus: true,
-                x_expand: true
-            });
-            const row = new St.BoxLayout({ style: 'spacing: 10px;', y_align: Clutter.ActorAlign.CENTER });
-            row.add_child(new St.Icon({ icon_name: item.icon, style: 'icon-size: 16px; color: #3584e4;' }));
-            row.add_child(new St.Label({ text: item.label, style_class: 'resource-pulse-quick-menu-label', x_expand: true }));
-            btn.add_child(row);
-            btn.connect('clicked', () => item.action());
-            this._addClickAnimations(btn);
-            this._quickMenuPopover.add_child(btn);
-        });
-
-        this._popupStack.add_child(this._quickMenuPopover);
-    }
-
-    _showQuickMenu() {
-        if (!this._quickMenuPopover) return;
-        this._isQuickMenuOpen = true;
-        this._quickMenuPopover.remove_all_transitions();
-        this._quickMenuPopover.opacity = 0;
-        this._quickMenuPopover.visible = true;
-        this._quickMenuPopover.ease({
-            opacity: 255,
-            duration: 150,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD
-        });
-        this._updateQuickMenuIcons(true);
-    }
-
-    _hideQuickMenu() {
-        if (!this._quickMenuPopover || !this._isQuickMenuOpen) return;
-        this._isQuickMenuOpen = false;
-        this._quickMenuPopover.remove_all_transitions();
-        this._quickMenuPopover.ease({
-            opacity: 0,
-            duration: 100,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: () => {
-                if (this._quickMenuPopover && !this._isQuickMenuOpen) {
-                    this._quickMenuPopover.visible = false;
-                }
-            }
-        });
-        this._updateQuickMenuIcons(false);
-    }
-
-    _toggleQuickMenu() {
-        if (this._isQuickMenuOpen) {
-            this._hideQuickMenu();
-        } else {
-            this._showQuickMenu();
-        }
-    }
-
-    _updateQuickMenuIcons(open) {
-        const angle = open ? 90 : 0;
-        if (this._overviewMenuIcon) {
-            this._overviewMenuIcon.remove_all_transitions();
-            this._overviewMenuIcon.ease({
-                rotation_angle_z: angle,
-                duration: 200,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-            });
-        }
-        if (this._detailOptIcon) {
-            this._detailOptIcon.remove_all_transitions();
-            this._detailOptIcon.ease({
-                rotation_angle_z: angle,
-                duration: 200,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-            });
-        }
-    }
-
     _openSettingsView() {
-        this._previousTab = this._activeTab === 'settings' ? 'overview' : this._activeTab;
-        this._activeTab = 'settings';
+        if (this._activeTab === 'settings') {
+            this._activeTab = this._previousTab || 'overview';
+        } else {
+            this._previousTab = this._activeTab;
+            this._activeTab = 'settings';
+        }
         this._refreshSettingsUI();
         this._updateTabVisibility();
     }
@@ -1923,7 +1761,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         menuIcon.set_pivot_point(0.5, 0.5);
         menuBtn.add_child(menuIcon);
         menuBtn.connect('clicked', () => {
-            this._toggleQuickMenu();
+            this._openSettingsView();
         });
         this._overviewMenuBtn = menuBtn;
         this._overviewMenuIcon = menuIcon;
@@ -2205,7 +2043,7 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         optIcon.set_pivot_point(0.5, 0.5);
         optBtn.add_child(optIcon);
         optBtn.connect('clicked', () => {
-            this._toggleQuickMenu();
+            this._openSettingsView();
         });
         this._detailOptBtn = optBtn;
         this._detailOptIcon = optIcon;
@@ -2240,7 +2078,6 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
     }
 
     _updateTabVisibility() {
-        this._hideQuickMenu();
         if (this._activeTab === 'overview') {
             if (!this._overviewPage.visible) {
                 this._overviewPage.opacity = 0;
