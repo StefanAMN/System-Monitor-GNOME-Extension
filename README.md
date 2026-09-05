@@ -34,6 +34,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 └── tests/
     ├── unit.js           # ./dev.sh test-unit  (plain gjs)
     ├── benchmark_runner.js, workload_generator.py   # ./dev.sh benchmark
+    ├── overhead-driver/  # ./dev.sh test-overhead (isolated headless shell)
     └── ui-driver/        # ./dev.sh test-ui    (isolated headless shell)
 ```
 
@@ -44,7 +45,9 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ./dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
 RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
 ./dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
-./dev.sh benchmark all       # sampler accuracy against synthetic CPU / memory / disk load (works from any directory)
+./dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 10 min leak soak
+./dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
+                             # power/thermal response, battery vs upower (works from any directory)
 ```
 
 ## Installation & Deployment
