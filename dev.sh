@@ -185,7 +185,7 @@ cmd_test_ci() {
         UUID="resource-pulse@yourdomain.example"
         DURATION="'"$DURATION"'"
         
-        gnome-shell --headless --virtual-monitor 1280x720 2>&1 > /tmp/rp-test-shell.log &
+        gnome-shell --headless --virtual-monitor 1280x720 > /tmp/rp-test-shell.log 2>&1 &
         SHELL_PID=$!
         
         cleanup() {
