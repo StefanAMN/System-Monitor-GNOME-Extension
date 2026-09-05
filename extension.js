@@ -21,6 +21,8 @@ import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
+import { BatteryTracker, ledgerPath } from './lib/batterytracker.js';
+import { BatteryLedger, saveLedger } from './lib/batteryledger.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { RunningStats } from './lib/stats.js';
@@ -268,6 +270,24 @@ export default class ResourcePulseExtension extends Extension {
         this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
         // Whoever changes a setting (this menu, the preferences window, gsettings), the page follows.
         this._settingsUiId = this._settings.connect('changed', () => this._refreshSettingsUI());
+        // Battery tracking (off until the user starts it in the preferences window).
+        this._trackingId = this._settings.connect('changed::battery-tracking', () => this._syncTracking());
+        this._flushHistoryId = this._settings.connect('changed::action-flush-history', () => {
+            if (!this._settings.get_boolean('action-flush-history')) return;
+            this._settings.set_boolean('action-flush-history', false);
+            this._tracker?.save();
+        });
+        this._clearHistoryId = this._settings.connect('changed::action-clear-history', () => {
+            if (!this._settings.get_boolean('action-clear-history')) return;
+            this._settings.set_boolean('action-clear-history', false);
+            if (this._tracker) {
+                this._tracker.clear();
+            } else {
+                saveLedger(ledgerPath(), new BatteryLedger())
+                    .catch(e => console.warn(`ResourcePulse: cannot clear the battery history: ${e.message}`));
+            }
+        });
+        this._syncTracking();
         this._openMenuId = this._settings.connect('changed::action-open-menu', () => {
             if (this._settings.get_boolean('action-open-menu')) {
                 this._settings.set_boolean('action-open-menu', false);
@@ -299,6 +319,12 @@ export default class ResourcePulseExtension extends Extension {
         if (this._pollId) this._settings.disconnect(this._pollId);
         if (this._settingsUiId) this._settings.disconnect(this._settingsUiId);
         if (this._openMenuId) this._settings.disconnect(this._openMenuId);
+        for (const id of [this._trackingId, this._flushHistoryId, this._clearHistoryId])
+            if (id) this._settings.disconnect(id);
+        // Saved with the time of the save: battery used until the next
+        // enable (screen lock) is reported as a gap, not attributed.
+        this._tracker?.stop();
+        this._tracker = null;
 
         this._gen++;
         this._pollInFlight = false;
@@ -445,6 +471,27 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     /** Pinned metrics as stored, minus unknown keys and duplicates. */
+    /** Start or stop battery tracking to match the setting. */
+    _syncTracking() {
+        const wanted = this._settings.get_boolean('battery-tracking');
+        if (wanted && !this._tracker) {
+            const windows = Shell.WindowTracker.get_default();
+            this._tracker = new BatteryTracker({
+                battery: this._bat,
+                focus: {
+                    current: () => windows.focus_app?.get_id()?.replace(/\.desktop$/, '') ?? null,
+                    connect: callback => windows.connect('notify::focus-app', callback),
+                    disconnect: id => windows.disconnect(id),
+                },
+            });
+            this._tracker.start().catch(e => console.error(`ResourcePulse: battery tracking did not start: ${e.message}`));
+        } else if (!wanted && this._tracker) {
+            // Switched off: the time until it is switched on again is not a gap.
+            this._tracker.stop({ forget: true });
+            this._tracker = null;
+        }
+    }
+
     _pinnedMetrics() {
         return sanitizeMetricList(this._settings.get_strv('pinned-metrics'));
     }

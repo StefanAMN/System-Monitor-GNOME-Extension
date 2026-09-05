@@ -154,6 +154,22 @@ async function overhead() {
     ext._indicator.menu.close();
     await sleep(1000);
 
+    // Battery tracking takes one sample every 30 s whatever the menu does:
+    // its cost is measured per sample (40 back to back, so the 10 ms tick of
+    // /proc/self/stat resolves it) and added to the menu-closed figure. It
+    // stays on for the churn and soak below.
+    ext._settings.set_boolean('battery-tracking', true);
+    for (let i = 0; i < 40 && !ext._tracker?.lastSample; i++) await sleep(250);
+    check(ext._tracker?.lastSample, 'battery tracking did not start');
+    const SAMPLES = 40;
+    const c0 = cpuTicks();
+    for (let i = 0; i < SAMPLES; i++) await ext._tracker.tick();
+    const perSampleMs = (cpuTicks() - c0) * (1000 / CLK_TCK) / SAMPLES;
+    const tracking = perSampleMs / (30 * 1000) * 100;
+    report(`battery tracking: ${perSampleMs.toFixed(1)} ms CPU per sample (apps ${ext._tracker.lastSample.appsAvailable ? 'read' : 'not available'}), ` +
+        `+${tracking.toFixed(3)}% at one sample per 30 s; menu closed with tracking +${(closed + tracking).toFixed(2)}% (budget ${BUDGET_CLOSED}%)`);
+    check(closed + tracking <= BUDGET_CLOSED, `menu-closed overhead with tracking ${(closed + tracking).toFixed(2)}% exceeds ${BUDGET_CLOSED}%`);
+
     check(closed <= BUDGET_CLOSED, `menu-closed overhead ${closed.toFixed(2)}% exceeds ${BUDGET_CLOSED}%`);
     check(open <= BUDGET_OPEN, `menu-open overhead ${open.toFixed(2)}% exceeds ${BUDGET_OPEN}%`);
     check(cpuTab <= BUDGET_OPEN, `CPU-tab overhead ${cpuTab.toFixed(2)}% exceeds ${BUDGET_OPEN}%`);

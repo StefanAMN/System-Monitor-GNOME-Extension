@@ -92,6 +92,21 @@
       <summary>Trigger for opening the menu</summary>
       <description>Writing true opens the extension menu.</description>
     </key>
+    <key name="battery-tracking" type="b">
+      <default>false</default>
+      <summary>Track battery use per app</summary>
+      <description>Sample per-app CPU time and energy every 30 seconds and keep 14 days of hourly totals in ~/.local/share/resource-pulse/battery-history.json. Off until the user starts it.</description>
+    </key>
+    <key name="action-flush-history" type="b">
+      <default>false</default>
+      <summary>Trigger for saving the battery history now</summary>
+      <description>Writing true makes the extension write its battery history file at once (the preferences window does this to show current figures).</description>
+    </key>
+    <key name="action-clear-history" type="b">
+      <default>false</default>
+      <summary>Trigger for clearing the battery history</summary>
+      <description>Writing true deletes all recorded battery history.</description>
+    </key>
     <key name="overview-card-order" type="as">
       <default>['cpu', 'memory', 'battery', 'disk', 'network', 'thermal', 'power', 'gpu']</default>
       <summary>Overview Card Order</summary>

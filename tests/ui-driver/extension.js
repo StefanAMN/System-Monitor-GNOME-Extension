@@ -845,6 +845,66 @@ async function gpuPageFollowsReadings(rp) {
     await sleep(400);
 }
 
+// Battery tracking in the real shell: off by default; on, it must attribute
+// a CPU burner's time to the burner's own app scope. The burner is started
+// by the user's systemd as `app-rptest-<tag>-1.scope`, as GNOME starts apps.
+async function batteryTracking(rp) {
+    const s = rp._settings;
+    check(!s.get_boolean('battery-tracking') && !rp._tracker, 'tracking: running although it is off by default');
+    s.set_boolean('battery-tracking', true);
+    for (let i = 0; i < 40 && !rp._tracker?.lastSample; i++) await sleep(250);
+    check(rp._tracker?.running && rp._tracker.lastSample, 'tracking: did not start');
+    const path = rp._tracker.path;
+    check(path.startsWith(GLib.get_user_data_dir()), `tracking: history kept outside the data directory (${path})`);
+
+    if (!rp._tracker.lastSample.appsAvailable) {
+        console.log('RP-UITEST tracking: no systemd user cgroups in this environment; the burner check was not run');
+    } else {
+        const tag = `burner${GLib.random_int_range(1000, 9999)}`;
+        const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.NONE });
+        // The sandbox has its own runtime directory and bus; the user's
+        // systemd is reached through its private socket.
+        launcher.setenv('XDG_RUNTIME_DIR', `/run/user/${new Gio.Credentials().get_unix_user()}`, true);
+        launcher.unsetenv('DBUS_SESSION_BUS_ADDRESS');
+        const burner = launcher.spawnv(['systemd-run', '--user', '--scope', '--quiet', `--unit=app-rptest-${tag}-1.scope`,
+            'timeout', '8', 'sh', '-c', 'while :; do :; done']);
+        const done = new Promise(resolve => burner.wait_async(null, () => resolve()));
+        await sleep(500);
+        await rp._tracker.tick();
+        await sleep(5500);
+        await rp._tracker.tick();
+        await done;
+        const sum = rp._tracker.ledger.summarize();
+        const byCpu = sum.apps.filter(a => !a.id.startsWith('@')).sort((x, y) => y.cpu - x.cpu);
+        const found = sum.apps.find(a => a.id === tag);
+        // Born after the previous sample: counted from zero, about 6 s of one core.
+        check(found && found.cpu > 4.5e6 && found.cpu < 7e6,
+            `tracking: burner ${tag} got ${found ? (found.cpu / 1e6).toFixed(2) : 'no'} s of CPU (expected about 6)`);
+        check(byCpu[0]?.id === tag, `tracking: top app by CPU is ${byCpu[0]?.id}, not the burner`);
+        console.log(`RP-UITEST tracking: burner ${(found.cpu / 1e6).toFixed(2)} s CPU, ${(found.wh * 1000).toFixed(2)} mWh, ` +
+            `energy ${sum.hasEnergy ? 'measured' : 'not readable'}; next: ${byCpu.slice(1, 3).map(a => `${a.id} ${(a.cpu / 1e6).toFixed(2)} s`).join(', ')}`);
+    }
+
+    // The preferences window asks for a save, then for clearing.
+    const mtime = () => {
+        const f = Gio.File.new_for_path(path);
+        return f.query_exists(null) ? f.query_info('time::modified,time::modified-usec', 0, null).get_modification_date_time().to_unix_usec() : 0;
+    };
+    const before = mtime();
+    await sleep(1100);
+    s.set_boolean('action-flush-history', true);
+    for (let i = 0; i < 20 && mtime() === before; i++) await sleep(150);
+    check(mtime() > before && !s.get_boolean('action-flush-history'), 'tracking: a flush request did not write the history');
+    s.set_boolean('action-clear-history', true);
+    await sleep(800);
+    const cleared = JSON.parse(new TextDecoder().decode(Gio.File.new_for_path(path).load_contents(null)[1]));
+    check(cleared.buckets.length === 0 && rp._tracker.ledger.buckets.length === 0, `tracking: clearing left ${cleared.buckets.length} hours in the file`);
+
+    s.set_boolean('battery-tracking', false);
+    await sleep(500);
+    check(!rp._tracker, 'tracking: still running after being switched off');
+}
+
 async function stuckCollector(rp) {
     let calls = 0;
     rp._net.sample = () => {
@@ -927,6 +987,7 @@ async function run() {
     await settingsKeyboard(ext.stateObj);
     await prefsWindow();
     await gpuPageFollowsReadings(ext.stateObj);
+    await batteryTracking(ext.stateObj);
     await stepperClamps(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await thresholdFollowsUnit(ext.stateObj);
