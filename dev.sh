@@ -112,6 +112,26 @@ make_sandbox() {
 # Lines in a shell log that mean this extension misbehaved.
 BAD_LOG_PATTERN="RP-UITEST FAIL|JS ERROR|Clutter-ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove"
 
+# Shell / session output goes to log files unless --show-logs was given;
+# with it, the same files are streamed to the terminal while the test runs.
+SHOW_LOGS=0
+LOG_STREAM_PID=""
+
+start_log_stream() {
+    [ "$SHOW_LOGS" = "1" ] || return 0
+    touch "$@"
+    tail -n +1 -F "$@" 2>/dev/null &
+    LOG_STREAM_PID=$!
+}
+
+stop_log_stream() {
+    [ -n "$LOG_STREAM_PID" ] || return 0
+    sleep 0.3
+    kill "$LOG_STREAM_PID" 2>/dev/null || true
+    wait "$LOG_STREAM_PID" 2>/dev/null || true
+    LOG_STREAM_PID=""
+}
+
 # Remove a sandbox after a pass unless RP_KEEP=1; failures are always kept.
 finish_sandbox() {
     if [ "${RP_KEEP:-0}" = "1" ]; then
@@ -186,13 +206,30 @@ cmd_test_dedicated() {
     echo -e "You can interact with the top bar, click the extension icon, and test resizing safely."
     echo -e "Press ${BOLD}Ctrl+C${RESET} in this terminal or close the window to exit.\n"
 
+    # Overwritten each run, so it never piles up.
+    local LOG="${XDG_RUNTIME_DIR:-/tmp}/resource-pulse-test-window.log"
+    : > "$LOG"
+    if [ "$SHOW_LOGS" = "1" ]; then
+        log_info "Streaming shell logs here (also saved to $LOG)"
+    else
+        log_info "Shell logs: $LOG  (add --show-logs to stream them here)"
+    fi
+    start_log_stream "$LOG"
+
+    # Ctrl+C is how this session ends: let it stop the session but not this
+    # script, so the error summary below still runs.
+    trap 'true' INT
     dbus-run-session -- bash -c '
+        # This script talks to the terminal (fd 3); session services started
+        # by the bus inherit the log file as stdout/stderr instead.
+        exec 1>&3 3>&-
         UUID="resource-pulse@yourdomain.example"
         HOST_WL="'"$HOST_WL"'"
         HOST_DISP="'"$HOST_DISP"'"
+        LOG="'"$LOG"'"
         
         echo -e "\033[34m[TEST-ENV]\033[0m Starting isolated GNOME Shell 50 compositor..."
-        gnome-shell --devkit --wayland &
+        gnome-shell --devkit --wayland >> "$LOG" 2>&1 &
         SHELL_PID=$!
         
         cleanup() {
@@ -214,7 +251,7 @@ cmd_test_dedicated() {
         MDK_PID=$(pgrep -n -P "$SHELL_PID" -f "mutter-devkit" || true)
         if [ -z "$MDK_PID" ] && [ -x "/usr/libexec/mutter-devkit" ]; then
             echo -e "\033[34m[TEST-ENV]\033[0m Launching Mutter Devkit window on host display ($HOST_WL)..."
-            WAYLAND_DISPLAY="$HOST_WL" DISPLAY="$HOST_DISP" /usr/libexec/mutter-devkit &
+            WAYLAND_DISPLAY="$HOST_WL" DISPLAY="$HOST_DISP" /usr/libexec/mutter-devkit >> "$LOG" 2>&1 &
             MDK_PID=$!
         fi
 
@@ -225,7 +262,26 @@ cmd_test_dedicated() {
         echo -e "\033[36mInteract with the extension in the test window. Press Ctrl+C here to stop.\033[0m\n"
         
         wait "$MDK_PID" 2>/dev/null || wait "$SHELL_PID"
-    '
+    ' 3>&1 >> "$LOG" 2>&1 || true
+    trap - INT
+    stop_log_stream
+
+    # Surface this extension's problems even when the log was not shown.
+    # This session also runs the user's other extensions, so a JS ERROR only
+    # counts when its stack trace (next lines) mentions this extension.
+    local BAD
+    BAD="$(awk -v uuid="$UUID" '
+        /JS ERROR/ { if (pending && hit) print pending; pending = FNR ": " $0; hit = 0; left = 8; next }
+        left > 0 { left--; if (index($0, uuid)) hit = 1; if (left == 0 && pending) { if (hit) print pending; pending = "" } }
+        /ResourcePulse|Error in .* sample|already disposed|was not found when attempting to remove/ { print FNR ": " $0 }
+        END { if (pending && hit) print pending }
+    ' "$LOG" || true)"
+    if [ -n "$BAD" ]; then
+        log_warn "Errors from the test session (full log: $LOG):"
+        echo "$BAD" | head -n 20
+    else
+        log_info "No extension errors in the session log ($LOG)."
+    fi
 }
 
 # ------------------------------------------------------------------------------
@@ -241,16 +297,18 @@ cmd_test_ci() {
     local SANDBOX LOG
     make_sandbox
 
+    start_log_stream "$LOG" "$SANDBOX/session.log"
     XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" \
     dbus-run-session -- bash -c '
-        gnome-shell --headless --virtual-monitor 1280x720 > "'"$LOG"'" 2>&1 &
+        gnome-shell --headless --virtual-monitor 1280x720 >> "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
         trap "kill $SHELL_PID 2>/dev/null; wait $SHELL_PID 2>/dev/null" EXIT INT TERM
         sleep 3
         gnome-extensions enable "'"$UUID"'"
         sleep "'"$DURATION"'"
         gnome-extensions info "'"$UUID"'" > "'"$SANDBOX"'/info.txt" 2>&1 || true
-    ' 2> "$SANDBOX/session.log" || true
+    ' >> "$SANDBOX/session.log" 2>&1 || true
+    stop_log_stream
 
     # ACTIVE only proves enable() did not throw; the log shows whether the
     # polling loop ran cleanly for DURATION seconds.
@@ -277,9 +335,10 @@ run_driver() {
     make_sandbox
     ln -s "$SCRIPT_DIR/tests/$DRIVER_DIR" "$SANDBOX/data/gnome-shell/extensions/$DRIVER_UUID"
 
+    start_log_stream "$LOG" "$SANDBOX/session.log"
     XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" RP_UITEST_SHOTS="$SANDBOX/shots" \
     dbus-run-session -- bash -c '
-        gnome-shell --headless --virtual-monitor 1280x720 > "'"$LOG"'" 2>&1 &
+        gnome-shell --headless --virtual-monitor 1280x720 >> "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
         trap "kill $SHELL_PID 2>/dev/null; wait $SHELL_PID 2>/dev/null" EXIT INT TERM
         sleep 3
@@ -291,7 +350,8 @@ run_driver() {
             sleep 1
         done
         sleep 1
-    ' 2> "$SANDBOX/session.log" || true
+    ' >> "$SANDBOX/session.log" 2>&1 || true
+    stop_log_stream
 }
 
 # Verdict for a run_driver log: DONE and no bad lines.
@@ -418,7 +478,7 @@ cmd_pack() {
 # ------------------------------------------------------------------------------
 cmd_help() {
     echo -e "${BOLD}${CYAN}Resource Pulse - Developer Automation Script${RESET}"
-    echo -e "Usage: ${BOLD}./dev.sh [command]${RESET}\n"
+    echo -e "Usage: ${BOLD}./dev.sh [command] [--show-logs]${RESET}\n"
     echo -e "Commands:"
     echo -e "  ${GREEN}reload, reenable${RESET}   (Default) Compile schemas, verify symlink, and re-enable in current session"
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
@@ -430,11 +490,25 @@ cmd_help() {
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
     echo -e "  ${GREEN}help${RESET}               Show this help message\n"
+    echo -e "Options:"
+    echo -e "  ${GREEN}--show-logs${RESET}        Stream GNOME Shell / session logs to the terminal (test, test-headless,"
+    echo -e "                     test-ui, test-overhead). Without it they only go to log files.\n"
 }
 
 # ------------------------------------------------------------------------------
 # Entrypoint
 # ------------------------------------------------------------------------------
+# --show-logs may appear anywhere on the command line.
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--show-logs" ]; then
+        SHOW_LOGS=1
+    else
+        ARGS+=("$arg")
+    fi
+done
+set -- "${ARGS[@]}"
+
 case "${1:-reload}" in
     reload|reenable|enable)
         cmd_reload
