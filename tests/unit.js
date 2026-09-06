@@ -639,6 +639,13 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const gs = gaps.summarize();
         ok(near(gs.gapWh, 1.5) && gs.batteryWh === 0 && !gs.apps.some(x => x.id === 'a'), 'ledger: battery used over gaps is kept apart');
 
+        // Time above the temperature alert is counted only over attributed intervals.
+        const warm = new BatteryLedger();
+        warm.ingest({ ...reading(0, { 'a#1': 0 }, 0, 0), packageW: 5, battery: null, hot: true });
+        warm.ingest({ ...reading(1, { 'a#1': 1e6 }, 2e6, 0), packageW: 5, battery: null, hot: true });
+        warm.ingest({ ...reading(2, { 'a#1': 2e6 }, 4e6, 0), packageW: 5, battery: null, hot: false });
+        eq([warm.summarize().hotSeconds, warm.summarize().seconds], [30, 60], 'ledger: hot seconds');
+
         // AC and battery in one hour are two buckets; the battery-only view sees one.
         const mixed = new BatteryLedger();
         mixed.ingest({ ...reading(0, { 'a#1': 0 }, 0, 0), packageW: 5, battery: battery(40) });
@@ -725,6 +732,8 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
                 },
             },
             power: { sample: () => Promise.resolve({ raplSupported: true, packagePower: 6 }) },
+            thermal: { sample: fast => Promise.resolve({ packageTemp: fast === false ? 91 : null }) },
+            hotAbove: () => 85,
             battery: { sample: () => Promise.resolve({ present: true, state: 'discharging', energy: 40 - cpu / 1e7 }) },
             focus: { current: () => focused, connect: cb => { focusCb = cb; return 7; }, disconnect: id => { if (id === 7) focusCb = null; } },
             onProblem: message => problems.push(message),
@@ -740,6 +749,7 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const nautilus = sum.apps.find(a => a.id === 'org.gnome.Nautilus');
         ok(nautilus && nautilus.fg > 0 && nautilus.fg < nautilus.cpu, `tracker: focus time split the CPU time (${nautilus?.fg} of ${nautilus?.cpu})`);
         ok(sum.packageWh > 0 && sum.hasEnergy, 'tracker: package power reached the ledger');
+        ok(sum.hotSeconds > 0 && sum.hotSeconds === sum.seconds, 'tracker: a temperature above the alert is recorded (fast thermal sample)');
         ok(GLib.file_test(path, GLib.FileTest.EXISTS), 'tracker: the first hour was saved');
         await tracker.stop({ forget: true });
         ok(!tracker.running && focusCb === null, 'tracker: stopped, focus no longer watched');

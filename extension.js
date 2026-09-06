@@ -478,6 +478,8 @@ export default class ResourcePulseExtension extends Extension {
             const windows = Shell.WindowTracker.get_default();
             this._tracker = new BatteryTracker({
                 battery: this._bat,
+                thermal: this._thm,
+                hotAbove: () => this._settings.get_int('threshold-temp'),
                 focus: {
                     current: () => windows.focus_app?.get_id()?.replace(/\.desktop$/, '') ?? null,
                     connect: callback => windows.connect('notify::focus-app', callback),
