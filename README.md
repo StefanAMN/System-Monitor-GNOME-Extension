@@ -10,6 +10,9 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **Light and Dark**: The dashboard follows the shell's style variant; all colours live in `stylesheet.css` (`.rp-light` overrides).
 - **Honest Readouts**: Metrics the machine cannot provide read `n/a` with the reason in the tooltip; "Disk %" always means space used on `/`.
 - **One Set of Settings, Two Places**: The panel's settings page (⋮ on the overview) and the Libadwaita preferences window are built from the same list (`lib/settingsmodel.js`): pinned metrics and their order, compact mode, tooltips, battery and network format, update interval (1–10 s), temperature and memory units, warning thresholds.
+- **Battery Use per App (opt-in)**: Switched on in the details window's Tracking tab. Every 30 s the extension reads each app's CPU time from the session's cgroups (no privileges; short-lived processes included) and shares the CPU package energy above an idle baseline among the apps by that time. The report shows battery used, average drain, how long a full charge would last, the apps ranked with their time in the background, and what cannot be attributed (idle and platform; display, radios and the rest; time while locked). 14 days of hourly totals, kept only in `~/.local/share/resource-pulse/battery-history.json`.
+- **Diagnostics**: Advice for longer runtime per charge and longer battery life, each with its evidence and, where it can be worked out, the minutes per charge it would save: apps working in the background, performance power mode on battery (one-click switch to Balanced), high screen brightness, a processor running hot on battery, battery wear, and a charge limit the battery supports but has off.
+- **Details Window**: The preferences window, with Settings, Tracking and Diagnostics tabs, opens from the overview header or from the battery page's "top app today" line.
 - **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and controls, Return or Space activates, Left / Right change a choice or a number, Backspace goes back a page, Escape closes the panel.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
@@ -26,11 +29,19 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ├── ui/
 │   ├── widgets.js        # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
 │   ├── settings.js       # Settings page widgets: row, switch, segmented choice, stepper, pin tile
-│   └── prefsrows.js      # Preferences rows (GTK side, never loaded by the shell)
+│   ├── prefsrows.js      # Preferences rows (GTK side, never loaded by the shell)
+│   ├── prefsbattery.js   # Tracking tab: switch, history, battery report (GTK side)
+│   └── prefsdiagnostics.js # Diagnostics tab (GTK side)
 ├── lib/                  # Collectors (no UI code) and pure helpers
 │   ├── cpu.js  memory.js  battery.js  power.js
 │   ├── disk.js  network.js  thermal.js  gpu.js
 │   ├── process.js        # Per-process CPU / memory from /proc/[pid]/stat
+│   ├── appusage.js       # CPU time per app from the session's cgroups
+│   ├── batteryledger.js  # Energy per app: attribution, hourly buckets, file
+│   ├── batterytracker.js # Runs the ledger every 30 s in the shell
+│   ├── diagnostics.js    # Rules for the Diagnostics tab
+│   ├── systemstate.js    # Battery health, charge limit, power mode, backlight
+│   ├── appnames.js       # App names and icons from desktop entries
 │   ├── ringbuffer.js     # Fixed-capacity history buffer
 │   ├── format.js         # Unit formatting
 │   ├── settingsmodel.js  # The user-facing settings, described once for both settings UIs
@@ -73,6 +84,7 @@ Every push and pull request runs the lint and the unit tests on GitHub Actions (
 - **Units**: rates are decimal (1 MB/s = 1 000 000 bytes/s). Memory follows the GB / GiB setting.
 - **Session figures** (network totals, power average and peak) start over when the extension is disabled, which GNOME does on every screen lock.
 - **Top bar room**: when the pinned metrics do not fit beside the clock, the last-pinned ones show only their icon (the value is in the hover tooltip) until there is room again. Pin the metrics you most want to read first.
+- **Battery use per app** is an estimate: CPU package energy shared by CPU time. Display, Wi-Fi and the rest of the machine cannot be measured per app on Linux and are shown as one line. Without readable RAPL counters apps are ranked by CPU time only. GNOME disables extensions while the screen is locked, so the battery used then is shown but not attributed. A scope that ends between two samples loses up to 30 s of its CPU time. Apps started from a terminal count towards the terminal.
 - **Language**: the interface is English only.
 - **GNOME Shell versions**: developed and used on 50. Versions 46 to 49 are covered by the automated tests in containers (software rendering, Fedora builds), not by daily use. On 45 the menu does not render, so it is not listed.
 
