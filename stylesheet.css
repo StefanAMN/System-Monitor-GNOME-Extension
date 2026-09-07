@@ -136,6 +136,14 @@
 /* Trend graph or detail line of an overview card; its height is set in
    extension.js (CARD_SLOT_HEIGHT) so every card is the same size. */
 .rp-card-slot { margin-bottom: 4px; }
+.rp-top-app {
+    border-radius: 12px;
+    padding: 10px 12px;
+}
+.rp-top-app:hover,
+.rp-top-app:focus { background-color: rgba(255, 255, 255, 0.10); }
+.rp-light .rp-top-app:hover,
+.rp-light .rp-top-app:focus { background-color: rgba(0, 0, 0, 0.06); }
 .rp-card-detail { font-size: 0.75em; }
 
 .resource-pulse-secondary-grid {

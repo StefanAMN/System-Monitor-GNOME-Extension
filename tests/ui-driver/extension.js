@@ -735,10 +735,12 @@ async function topBarFits(rp) {
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
 // cost its own metric only: the others keep updating and it is not started
 // again while the first call is outstanding.
-// The preferences window. Its rows are checked by prefs-check.js, a GTK
-// client of this shell working on a memory-backed copy of the settings; then
-// the real window is opened the way the shell opens it.
-async function prefsWindow() {
+// The preferences window. Its pages are checked by prefs-check.js, a GTK
+// client of this shell working on a memory-backed copy of the settings and a
+// fixture history; it prints a SHOW line for each page it puts on screen and
+// the driver screenshots it. Then the real window is opened from the panel,
+// with the pointer.
+async function prefsWindow(rp) {
     const here = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
     const root = Main.extensionManager.lookup(TARGET).path;
     const runtime = Gio.File.new_for_path(GLib.get_user_runtime_dir());
@@ -754,33 +756,68 @@ async function prefsWindow() {
     const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE });
     launcher.setenv('WAYLAND_DISPLAY', socket, true);
     launcher.setenv('GDK_BACKEND', 'wayland', true);
-    const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, '5000']);
-    const output = new Promise((resolve, reject) => proc.communicate_utf8_async(null, null, (obj, res) => {
+    const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, '2500']);
+    const lines = new Gio.DataInputStream({ base_stream: proc.get_stdout_pipe() });
+    const readLine = () => new Promise((resolve, reject) => lines.read_line_async(GLib.PRIORITY_DEFAULT, null, (obj, res) => {
         try {
-            resolve(obj.communicate_utf8_finish(res)[1]);
+            const [line] = obj.read_line_finish_utf8(res);
+            resolve(line);
         } catch (e) {
             reject(e);
         }
     }));
-    for (let i = 0; i < 16 && !titled(); i++) await sleep(250);
-    await sleep(1200);
-    if (titled()) await shot('prefs-rows');
-    const text = await output;
-    const verdict = text.split('\n').filter(line => line.startsWith('PREFS-CHECK'));
+    const verdict = [];
+    for (let line = await readLine(); line !== null; line = await readLine()) {
+        if (!line.startsWith('PREFS-CHECK')) continue;
+        const show = /^PREFS-CHECK SHOW (\w+)/.exec(line);
+        if (show) {
+            await sleep(1500);
+            check(titled(), `prefs: no window on screen for the ${show[1]} page`);
+            await shot(`prefs-${show[1]}`);
+        } else {
+            verdict.push(line);
+        }
+    }
+    await new Promise(resolve => proc.wait_async(null, () => resolve()));
     check(proc.get_successful() && verdict.some(line => line.startsWith('PREFS-CHECK DONE')),
         `prefs: ${verdict.join(' | ') || `no verdict (exit ${proc.get_exit_status()})`}`);
     console.log(`RP-UITEST ${verdict.join(' | ')}`);
-    await sleep(500);
+    for (let i = 0; i < 20 && titled(); i++) await sleep(150);
 
-    // The real thing: only "a window with the extension's name appears" can
-    // be asserted from here; its content is in the screenshot.
-    Main.extensionManager.openExtensionPrefs(TARGET, '', {});
+    // The real window, from the overview's details button.
+    rp._indicator.menu.open();
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    await sleep(600);
+    await clickActor(rp._overviewDetailsBtn);
     for (let i = 0; i < 40 && !titled(); i++) await sleep(250);
-    check(titled(), 'prefs: the shell did not open a preferences window');
+    check(titled(), 'prefs: the details button did not open the window');
+    check(!rp._indicator.menu.isOpen, 'prefs: the menu stayed open over the window');
     await sleep(1500);
     await shot('prefs-window');
     titled().delete(global.get_current_time());
-    await sleep(800);
+    for (let i = 0; i < 20 && titled(); i++) await sleep(150);
+
+    // The battery page's line opens the window on the Tracking page.
+    rp._indicator.menu.open();
+    rp._activeTab = 'battery';
+    rp._updateTabVisibility();
+    await sleep(1500);
+    check(rp._batTopAppLabel.text.includes('tracking is off'), `battery line: '${rp._batTopAppLabel.text}' with tracking off`);
+    ensureActorVisibleInScrollView(rp._scrollView, rp._batTopApp);
+    await sleep(600);
+    await shot('battery-top-app');
+    await clickActor(rp._batTopApp);
+    for (let i = 0; i < 40 && !titled(); i++) await sleep(250);
+    check(titled(), 'prefs: the battery line did not open the window');
+    for (let i = 0; i < 20 && rp._settings.get_string('prefs-page') !== ''; i++) await sleep(150);
+    check(rp._settings.get_string('prefs-page') === '', `prefs: the window did not take the page it was asked for ('${rp._settings.get_string('prefs-page')}')`);
+    await sleep(1200);
+    await shot('prefs-window-tracking');
+    titled().delete(global.get_current_time());
+    for (let i = 0; i < 20 && titled(); i++) await sleep(150);
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
 }
 
 // The GPU page with three kinds of reading, fed through the real poll: a GPU
@@ -985,7 +1022,7 @@ async function run() {
     await settingsControls(ext.stateObj);
     await powerRowWhenBlocked(ext.stateObj);
     await settingsKeyboard(ext.stateObj);
-    await prefsWindow();
+    await prefsWindow(ext.stateObj);
     await gpuPageFollowsReadings(ext.stateObj);
     await batteryTracking(ext.stateObj);
     await stepperClamps(ext.stateObj);

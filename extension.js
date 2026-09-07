@@ -23,6 +23,7 @@ import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
 import { BatteryTracker, ledgerPath } from './lib/batterytracker.js';
 import { BatteryLedger, saveLedger } from './lib/batteryledger.js';
+import { appInfo as ledgerAppInfo } from './lib/appnames.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { RunningStats } from './lib/stats.js';
@@ -492,6 +493,7 @@ export default class ResourcePulseExtension extends Extension {
             this._tracker.stop({ forget: true });
             this._tracker = null;
         }
+        this._refreshTopApp();
     }
 
     _pinnedMetrics() {
@@ -2355,8 +2357,16 @@ export default class ResourcePulseExtension extends Extension {
         this._overviewMenuBtn = menuBtn;
         this._overviewMenuIcon = menuIcon;
 
+        // Opens the preferences window: settings, battery tracking, diagnostics.
+        const detailsBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true, can_focus: true });
+        detailsBtn.add_child(new St.Icon({ icon_name: 'window-new-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' }));
+        detailsBtn.connect('clicked', () => this._openDetailsWindow());
+        this._overviewDetailsBtn = detailsBtn;
+
         this._addClickAnimations(refreshBtn);
         headerBox.add_child(refreshBtn);
+        this._addClickAnimations(detailsBtn);
+        headerBox.add_child(detailsBtn);
         this._addClickAnimations(menuBtn);
         headerBox.add_child(menuBtn);
         this._overviewPage.add_child(headerBox);
@@ -2865,7 +2875,59 @@ export default class ResourcePulseExtension extends Extension {
         this._batDesign = this._detailRow('Design Capacity');
         statsCard.add_child(this._batDesign.row);
         box.add_child(statsCard);
+
+        // Battery use per app lives in the details window; one line here.
+        this._batTopApp = new St.Button({ style_class: 'rp-surface rp-top-app', reactive: true, can_focus: true, x_expand: true });
+        const topBox = new St.BoxLayout({ style: 'spacing: 10px;', x_expand: true });
+        topBox.add_child(new St.Icon({ icon_name: 'battery-level-70-symbolic', style_class: 'rp-c-battery', style: 'icon-size: 16px;', y_align: Clutter.ActorAlign.CENTER }));
+        this._batTopAppLabel = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        this._wrapLabel(this._batTopAppLabel);
+        topBox.add_child(this._batTopAppLabel);
+        topBox.add_child(new St.Icon({ icon_name: 'go-next-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px;', y_align: Clutter.ActorAlign.CENTER }));
+        this._batTopApp.set_child(topBox);
+        this._batTopApp.connect('clicked', () => this._openDetailsWindow('tracking'));
+        this._batTopAppStamp = null;
+        box.add_child(this._batTopApp);
+        this._refreshTopApp();
         return box;
+    }
+
+    /** Open the preferences window, on a given page ('settings', 'tracking', 'diagnostics'). */
+    _openDetailsWindow(page = '') {
+        this._settings.set_string('prefs-page', page);
+        this._indicator.menu.close();
+        try {
+            this.openPreferences();
+        } catch (e) {
+            console.error(`ResourcePulse: cannot open the preferences window: ${e.message}`);
+        }
+    }
+
+    /**
+     * The Battery page's line about the app that used the battery most today.
+     * Recomputed only when the tracker has taken a new sample.
+     */
+    _refreshTopApp() {
+        if (!this._batTopAppLabel) return;
+        const stamp = this._tracker ? (this._tracker.lastSample ?? 'starting') : 'off';
+        if (stamp === this._batTopAppStamp) return;
+        this._batTopAppStamp = stamp;
+        if (!this._tracker) {
+            this._batTopAppLabel.text = 'Battery use per app: tracking is off. Open the Tracking page to start it.';
+            return;
+        }
+        const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+        const sum = this._tracker.ledger?.summarize({ from: today, batteryOnly: true });
+        const top = sum?.apps.find(a => !a.id.startsWith('@') && a.cpu > 0);
+        if (!top) {
+            this._batTopAppLabel.text = 'Battery use per app: no time on battery recorded today yet.';
+            return;
+        }
+        const name = ledgerAppInfo(top.id).name;
+        const share = sum.hasEnergy
+            ? (sum.attributedWh > 0 ? top.wh / sum.attributedWh : 0)
+            : (sum.cpu > 0 ? top.cpu / sum.cpu : 0);
+        this._batTopAppLabel.text = `Top app on battery today: ${name} (${Math.round(share * 100)} % of the processor's ${sum.hasEnergy ? 'energy' : 'time'})`;
     }
 
     _buildPowerDetails() {
@@ -3242,6 +3304,7 @@ export default class ResourcePulseExtension extends Extension {
                     this._batTimeEst.val.text = estText;
                 }
                 if (this._batHealth) this._batHealth.val.text = `${bat.health.toFixed(1)}%`;
+                if (this._activeTab === 'battery') this._refreshTopApp();
                 if (this._batCycles) this._batCycles.val.text = `${bat.cycleCount}`;
                 if (this._batCapacity) this._batCapacity.val.text = `${bat.energy.toFixed(1)} Wh / ${bat.energyFull.toFixed(1)} Wh`;
                 if (this._batDesign) this._batDesign.val.text = `${bat.energyFullDesign.toFixed(1)} Wh`;
