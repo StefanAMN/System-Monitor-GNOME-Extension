@@ -118,6 +118,7 @@ function appRow(app, total, hasEnergy) {
     const info = appInfo(app.id);
     const background = app.cpu > 0 ? 1 - app.fg / app.cpu : 0;
     const parts = [`${formatCpu(app.cpu)} of processor time`];
+    if (app.gpu > 0) parts.push(`${formatCpu(app.gpu / 1000)} of graphics time`);
     if (!app.id.startsWith('@') && app.cpu > 0) parts.push(`${Math.round(background * 100)} % in the background`);
     const row = new Adw.ActionRow({ title: info.name, subtitle: parts.join(' · ') });
     row.appId = app.id;
@@ -188,13 +189,14 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
 
     const summary = new Adw.PreferencesGroup({
         title: 'Summary',
-        description: 'Processor energy is shared among apps by the processor time each used: an estimate. ' +
+        description: 'Processor energy is shared among apps by the processor time each used, and the integrated ' +
+            'graphics part by graphics time where the machine reports it: an estimate. ' +
             'The display, radios and the rest of the machine cannot be measured per app.',
     });
     page.add(summary);
     for (const [key, title] of [
         ['used', 'Battery used'], ['time', 'Time on battery'], ['drain', 'Average drain'], ['runtime', 'A full charge would last'],
-        ['apps', 'Processor, shared among apps'], ['idle', 'Processor idle and platform'], ['rest', 'Display, radios and the rest'],
+        ['apps', 'Processor, shared among apps'], ['graphics', 'of which graphics, by graphics time'], ['idle', 'Processor idle and platform'], ['rest', 'Display, radios and the rest'],
         ['gap', 'While locked or asleep'],
     ]) {
         rows[key] = valueRow(title);
@@ -240,6 +242,8 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
             ? `${formatWh(sum.attributedWh)}${sum.batteryWh > 0 ? ` · ${Math.round(sum.attributedWh / sum.batteryWh * 100)} %` : ''}`
             : 'not measured';
         rows.idle.value.label = sum.hasEnergy ? formatWh(sum.idleWh) : 'not measured';
+        rows.graphics.visible = sum.graphicsWh > 0;
+        rows.graphics.value.label = formatWh(sum.graphicsWh);
         const rest = sum.batteryWh - sum.packageWh;
         rows.rest.visible = batteryOnly && sum.hasEnergy && sum.batteryWh > 0;
         rows.rest.value.label = `${formatWh(Math.max(0, rest))}${sum.batteryWh > 0 ? ` · ${Math.round(Math.max(0, rest) / sum.batteryWh * 100)} %` : ''}`;
