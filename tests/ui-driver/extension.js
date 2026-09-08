@@ -3,6 +3,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import Clutter from 'gi://Clutter';
+import St from 'gi://St';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
@@ -226,6 +227,36 @@ async function cycleTabs(rp, pass, tag = null) {
     await sleep(300);
 }
 
+// Every icon in the panel button and the menu must be one the icon theme (or
+// the extension's own icons/ directory) can supply; an unknown name renders
+// as a broken-image placeholder that no other assertion notices.
+function checkIcons(rp, label) {
+    const theme = new St.IconTheme();
+    const resolves = gicon => {
+        if (!gicon) return false;
+        if (gicon instanceof Gio.FileIcon) return gicon.get_file().query_exists(null);
+        if (gicon instanceof Gio.ThemedIcon) return gicon.get_names().some(n => theme.has_icon(n));
+        return true;
+    };
+    const describe = gicon => gicon instanceof Gio.ThemedIcon ? gicon.get_names().join('/') : `${gicon}`;
+    const missing = [];
+    let seen = 0;
+    const walk = actor => {
+        // An St.Icon with no icon at all (the menu item's empty ornament)
+        // draws nothing and has nothing to resolve.
+        if (actor instanceof St.Icon && (actor.gicon || actor.fallback_gicon)) {
+            seen++;
+            if (!resolves(actor.gicon) && !resolves(actor.fallback_gicon))
+                missing.push(describe(actor.gicon));
+        }
+        actor.get_children().forEach(walk);
+    };
+    walk(rp._indicator);
+    walk(rp._indicator.menu.box);
+    check(seen > 20, `${label}: only ${seen} icons found, the walk is broken`);
+    check(missing.length === 0, `${label}: icons the theme cannot supply: ${[...new Set(missing)].join(', ')}`);
+}
+
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
 // cost its own metric only: the others keep updating and it is not started
 // again while the first call is outstanding.
@@ -284,6 +315,18 @@ async function run() {
     await sleep(300);
     checkTheme(ext.stateObj, false, 'dark');
     ext.stateObj._indicator.menu.close();
+
+    // Icons, in the session's own theme and in stock Adwaita.
+    {
+        const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+        const sessionTheme = iface.get_string('icon-theme');
+        checkIcons(ext.stateObj, `icon theme ${sessionTheme}`);
+        iface.set_string('icon-theme', 'Adwaita');
+        await sleep(800);
+        checkIcons(ext.stateObj, 'icon theme Adwaita');
+        iface.set_string('icon-theme', sessionTheme);
+        await sleep(500);
+    }
 
     await stuckCollector(ext.stateObj);
 

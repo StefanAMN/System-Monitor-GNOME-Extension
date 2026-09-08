@@ -92,6 +92,7 @@ export default class ResourcePulseExtension extends Extension {
         // Tooltip state
         this._tooltip = null;
         this._tooltipTexts = {};
+        this._bundledIcons = {};
 
         // Panel indicator
         this._indicator = new PanelMenu.Button(0.0, 'Resource Pulse', false);
@@ -812,7 +813,7 @@ export default class ResourcePulseExtension extends Extension {
                 margin_bottom: 6
             });
             const bBox = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
-            const bIcon = new St.Icon({ icon_name: this._getIconName(m.key), style: 'icon-size: 14px;' });
+            const bIcon = this._setMetricIcon(new St.Icon({ style: 'icon-size: 14px;' }), m.key);
             const bLbl = new St.Label({ text: m.label, style: 'font-size: 0.85em;' });
             bBox.add_child(bIcon);
             bBox.add_child(bLbl);
@@ -1587,10 +1588,33 @@ export default class ResourcePulseExtension extends Extension {
             power: 'thunderbolt-symbolic',
             disk: 'drive-harddisk-symbolic',
             network: 'network-transmit-receive-symbolic',
-            thermal: 'sensors-temperature-symbolic',
             gpu: 'video-display-symbolic'
         };
         return map[key] || 'image-missing-symbolic';
+    }
+
+    /** An icon shipped in the extension's icons/ directory. */
+    _bundledIcon(name) {
+        if (!this._bundledIcons[name])
+            this._bundledIcons[name] = Gio.icon_new_for_string(`${this.path}/icons/${name}-symbolic.svg`);
+        return this._bundledIcons[name];
+    }
+
+    /**
+     * Point an St.Icon at a metric's icon. No icon theme has a temperature
+     * icon, so that one is bundled; the CPU icon comes from the theme where
+     * it exists (Yaru, or with GNOME System Monitor installed) and falls
+     * back to a bundled one elsewhere.
+     */
+    _setMetricIcon(icon, key) {
+        if (key === 'thermal') {
+            icon.gicon = this._bundledIcon('rp-thermal');
+            icon.fallback_gicon = null;
+        } else {
+            icon.icon_name = this._getIconName(key);
+            icon.fallback_gicon = key === 'cpu' ? this._bundledIcon('rp-cpu') : null;
+        }
+        return icon;
     }
 
     _rebuildTopBar() {
@@ -1617,11 +1641,10 @@ export default class ResourcePulseExtension extends Extension {
             }
 
             const box = new St.BoxLayout({ reactive: true, track_hover: true });
-            const icon = new St.Icon({
-                icon_name: this._getIconName(key),
+            const icon = this._setMetricIcon(new St.Icon({
                 style_class: 'system-status-icon',
                 y_align: Clutter.ActorAlign.CENTER
-            });
+            }), key);
             box.add_child(icon);
 
             let label = null;
@@ -2367,7 +2390,7 @@ export default class ResourcePulseExtension extends Extension {
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const cpuHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-        const cpuIcon = new St.Icon({ icon_name: this._getIconName('cpu'), style_class: 'rp-c-cpu', style: 'icon-size: 16px;' });
+        const cpuIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-cpu', style: 'icon-size: 16px;' }), 'cpu');
         cpuHead.add_child(cpuIcon);
         cpuHead.add_child(new St.Label({ text: 'CPU', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
         const cpuGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
@@ -2389,7 +2412,7 @@ export default class ResourcePulseExtension extends Extension {
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const memHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-        const memIcon = new St.Icon({ icon_name: this._getIconName('memory'), style_class: 'rp-c-memory', style: 'icon-size: 16px;' });
+        const memIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-memory', style: 'icon-size: 16px;' }), 'memory');
         memHead.add_child(memIcon);
         memHead.add_child(new St.Label({ text: 'Memory', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
         const memGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
@@ -2411,7 +2434,7 @@ export default class ResourcePulseExtension extends Extension {
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
         const batHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-        const batIcon = new St.Icon({ icon_name: this._getIconName('battery'), style_class: 'rp-c-battery', style: 'icon-size: 16px;' });
+        const batIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-battery', style: 'icon-size: 16px;' }), 'battery');
         batHead.add_child(batIcon);
         batHead.add_child(new St.Label({ text: 'Battery', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
         const batGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
@@ -2442,7 +2465,7 @@ export default class ResourcePulseExtension extends Extension {
             });
 
             const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-            head.add_child(new St.Icon({ icon_name: this._getIconName(m.key), style_class: `rp-c-${m.key}`, style: 'icon-size: 16px;' }));
+            head.add_child(this._setMetricIcon(new St.Icon({ style_class: `rp-c-${m.key}`, style: 'icon-size: 16px;' }), m.key));
             head.add_child(new St.Label({ text: m.label, style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
             const grip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
             head.add_child(grip);
@@ -2525,7 +2548,7 @@ export default class ResourcePulseExtension extends Extension {
         const sysMonBox = new St.BoxLayout({ style: 'spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
         const sysMonIcon = new St.Icon({
             icon_name: 'org.gnome.SystemMonitor-symbolic',
-            fallback_icon_name: 'utilities-system-monitor-symbolic',
+            fallback_gicon: this._bundledIcon('rp-cpu'),
             style_class: 'rp-c-cpu', style: 'icon-size: 16px;'
         });
         const sysMonLbl = new St.Label({
@@ -2575,7 +2598,7 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         this._detailHeaderTitleBox = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
-        this._detailHeaderIcon = new St.Icon({ icon_name: 'utilities-system-monitor-symbolic', style_class: 'rp-c-cpu', style: 'icon-size: 18px;' });
+        this._detailHeaderIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-cpu', style: 'icon-size: 18px;' }), 'cpu');
         this._detailHeaderTitle = new St.Label({ text: 'CPU', style_class: 'rp-fg', style: 'font-size: 1.1em; font-weight: bold;' });
         this._detailHeaderTitleBox.add_child(this._detailHeaderIcon);
         this._detailHeaderTitleBox.add_child(this._detailHeaderTitle);
@@ -2676,7 +2699,7 @@ export default class ResourcePulseExtension extends Extension {
             }
             
             // Set header title & icon dynamically
-            this._detailHeaderIcon.icon_name = this._getIconName(this._activeTab);
+            this._setMetricIcon(this._detailHeaderIcon, this._activeTab);
             this._detailHeaderIcon.style_class = `rp-c-${this._activeTab}`;
             this._detailHeaderTitle.text = { cpu: 'CPU', gpu: 'GPU' }[this._activeTab] ||
                 this._activeTab.charAt(0).toUpperCase() + this._activeTab.slice(1);
@@ -2739,19 +2762,19 @@ export default class ResourcePulseExtension extends Extension {
         const statsRow = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true });
 
         const loadBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
-        loadBox.add_child(new St.Icon({ icon_name: 'emblem-synchronizing-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
+        loadBox.add_child(new St.Icon({ icon_name: 'system-run-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
         loadBox.add_child(new St.Label({ text: 'Load Average', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsLoad = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         loadBox.add_child(this._cpuDetailsLoad);
 
         const freqBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
-        freqBox.add_child(new St.Icon({ icon_name: 'emblem-favorite-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
+        freqBox.add_child(new St.Icon({ icon_name: 'power-profile-performance-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
         freqBox.add_child(new St.Label({ text: 'Frequency', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsFreq = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         freqBox.add_child(this._cpuDetailsFreq);
 
         const uptimeBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
-        uptimeBox.add_child(new St.Icon({ icon_name: 'clock-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
+        uptimeBox.add_child(new St.Icon({ icon_name: 'preferences-system-time-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
         uptimeBox.add_child(new St.Label({ text: 'Uptime', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsUptime = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         uptimeBox.add_child(this._cpuDetailsUptime);
@@ -3615,7 +3638,7 @@ export default class ResourcePulseExtension extends Extension {
                 });
 
                 const iconBox = new St.BoxLayout({ style_class: 'rp-chip-bg', style: 'width: 24px; height: 24px; border-radius: 6px;', y_align: Clutter.ActorAlign.CENTER });
-                const icon = new St.Icon({ icon_name: 'system-run-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px;' });
+                const icon = new St.Icon({ icon_name: 'application-x-executable-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px;' });
                 iconBox.add_child(icon);
                 item.add_child(iconBox);
 
@@ -3641,18 +3664,9 @@ export default class ResourcePulseExtension extends Extension {
                 this._addClickAnimations(item);
 
                 container.add_child(item);
-                this[targetWidgetsKey].push({ nameLbl, statLbl, pbar, icon });
+                this[targetWidgetsKey].push({ nameLbl, statLbl, pbar });
             }
         }
-
-        const iconMap = {
-            'firefox': 'firefox-symbolic',
-            'gnome-shell': 'utilities-terminal-symbolic',
-            'spotify': 'audio-card-symbolic',
-            'chrome': 'google-chrome-symbolic',
-            'code': 'com.visualstudio.code-symbolic',
-            'system': 'system-run-symbolic'
-        };
 
         const useGiB = this._settings.get_string('unit-mem') === 'GiB';
         processes.forEach((proc, i) => {
@@ -3662,16 +3676,6 @@ export default class ResourcePulseExtension extends Extension {
             const valNum = isMemory ? proc.mem : proc.cpu;
             w.statLbl.text = isMemory ? formatBytes(proc.rssBytes, useGiB) : `${valNum.toFixed(1)}%`;
             w.pbar.setPercent(Math.min(100, valNum));
-
-            let iconName = 'system-run-symbolic';
-            const commLower = proc.comm.toLowerCase();
-            for (const [key, name] of Object.entries(iconMap)) {
-                if (commLower.includes(key)) {
-                    iconName = name;
-                    break;
-                }
-            }
-            w.icon.icon_name = iconName;
         });
     }
 }
