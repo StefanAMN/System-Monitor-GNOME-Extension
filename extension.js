@@ -31,6 +31,9 @@ const HISTORY_CAPACITY = 60;
 // On-demand refreshes closer than this to the previous sample reuse it:
 // counter deltas over a few milliseconds are mostly noise.
 const MIN_RESAMPLE_US = 500000;
+// A collector that has not answered by then is skipped for this poll (its
+// previous value stands in) so one stuck read cannot freeze every metric.
+const POLL_DEADLINE_MS = 3000;
 const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 
 const WATT_SCALE = { autoScale: true, maxVal: 10, formatValue: v => `${v < 10 ? v.toFixed(1) : Math.round(v)}W` };
@@ -77,6 +80,8 @@ export default class ResourcePulseExtension extends Extension {
         this._lastPollTime = 0;
         this._lastData = null;
         this._deferredPollId = null;
+        this._pollDeadlineId = null;
+        this._outstanding = {};
 
         // Time-series history: fixed-capacity buffers owned here, painted by sparklines.
         this._hist = {};
@@ -270,6 +275,10 @@ export default class ResourcePulseExtension extends Extension {
             GLib.source_remove(this._deferredPollId);
             this._deferredPollId = null;
         }
+        if (this._pollDeadlineId) {
+            GLib.source_remove(this._pollDeadlineId);
+            this._pollDeadlineId = null;
+        }
         if (this._openStateId) this._indicator.menu.disconnect(this._openStateId);
         if (this._monitorsChangedId) {
             Main.layoutManager.disconnect(this._monitorsChangedId);
@@ -366,6 +375,7 @@ export default class ResourcePulseExtension extends Extension {
         this._dsk = null;
         this._net = null;
         this._thm = null;
+        this._gpu?.destroy();
         this._gpu = null;
 
         // Pages are built lazily, so a field left over from the previous
@@ -1401,6 +1411,34 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     /**
+     * Run one collector under the poll's deadline. If it has not answered in
+     * time the fallback (its previous value) is used, and it is not started
+     * again until the outstanding call settles, so a hung read costs one
+     * pending promise instead of one more per poll.
+     * @param {string} key collector name
+     * @param {Promise<void>} deadline resolves when the poll's time is up
+     * @param {function(): Promise} start begins the sample
+     * @param {*} fallback value to use when the collector is late or stuck
+     */
+    _guarded(key, deadline, start, fallback) {
+        const outstanding = this._outstanding;
+        if (outstanding[key]) return fallback;
+        const sample = start();
+        let settled = false;
+        const settle = () => {
+            settled = true;
+            if (outstanding[key] === sample) delete outstanding[key];
+        };
+        outstanding[key] = sample;
+        sample.then(settle, settle);
+        return Promise.race([sample, deadline.then(() => {
+            if (!settled)
+                console.warn(`ResourcePulse: ${key} collector did not answer within ${POLL_DEADLINE_MS} ms; showing its last value`);
+            return fallback;
+        })]);
+    }
+
+    /**
      * Sample and render. Only one poll runs at a time.
      * tick=true is the periodic timer sample, the only kind recorded in
      * history so the time axis stays uniform. tick=false is an on-demand
@@ -1452,14 +1490,32 @@ export default class ResourcePulseExtension extends Extension {
                 pwr: isOpen || pinned.includes('power')
             };
 
+            const deadline = new Promise(resolve => {
+                this._pollDeadlineId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POLL_DEADLINE_MS, () => {
+                    this._pollDeadlineId = null;
+                    resolve();
+                    return GLib.SOURCE_REMOVE;
+                });
+            });
+            const last = {
+                cpu: this._lastCpu || { total: 0, cores: [], loadavg: [0, 0, 0], uptime: 0 },
+                mem: this._lastMem || { percent: 0, total: 0, used: 0 },
+                bat: this._lastBat || { present: false },
+                dsk: this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 },
+                net: this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} },
+                thm: this._lastThm || { packageTemp: 0, sensors: [], fans: [] },
+                gpu: this._lastGpu || { present: false, percent: 0 },
+                pwr: this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null }
+            };
+
             const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
-                need.cpu ? this._cpu.sample(isDetailedCpu, isOpen) : this._lastCpu || { total: 0, cores: [] },
-                need.mem ? this._mem.sample(isDetailedMem) : this._lastMem || { percent: 0, total: 0, used: 0 },
-                need.bat ? this._bat.sample() : this._lastBat || { present: false },
-                need.dsk ? this._dsk.sample(isDetailedDsk) : this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 },
-                need.net ? this._net.sample() : this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} },
-                need.thm ? this._thm.sample(isDetailedThm) : this._lastThm || { packageTemp: 0, sensors: [], fans: [] },
-                need.gpu ? this._gpu.sample() : this._lastGpu || { present: false, percent: 0 }
+                need.cpu ? this._guarded('cpu', deadline, () => this._cpu.sample(isDetailedCpu, isOpen), last.cpu) : last.cpu,
+                need.mem ? this._guarded('memory', deadline, () => this._mem.sample(isDetailedMem), last.mem) : last.mem,
+                need.bat ? this._guarded('battery', deadline, () => this._bat.sample(), last.bat) : last.bat,
+                need.dsk ? this._guarded('disk', deadline, () => this._dsk.sample(isDetailedDsk), last.dsk) : last.dsk,
+                need.net ? this._guarded('network', deadline, () => this._net.sample(), last.net) : last.net,
+                need.thm ? this._guarded('thermal', deadline, () => this._thm.sample(isDetailedThm), last.thm) : last.thm,
+                need.gpu ? this._guarded('gpu', deadline, () => this._gpu.sample(), last.gpu) : last.gpu
             ]);
             if (gen !== this._gen) return;
 
@@ -1472,15 +1528,16 @@ export default class ResourcePulseExtension extends Extension {
             if (need.gpu) this._lastGpu = gpu;
 
             const pwr = need.pwr
-                ? await this._pwr.sample(bat)
-                : this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null };
+                ? await this._guarded('power', deadline, () => this._pwr.sample(bat), last.pwr)
+                : last.pwr;
             if (gen !== this._gen) return;
             if (need.pwr) this._lastPwr = pwr;
 
             let processes = [];
             let procSort = null;
             if (isDetailedCpu || isDetailedMem) {
-                const procResult = await this._proc.sample(mem.total, isDetailedMem);
+                const procResult = await this._guarded('processes', deadline,
+                    () => this._proc.sample(mem.total, isDetailedMem), null);
                 if (gen !== this._gen) return;
                 // null: the sampler was destroyed or is still reading.
                 if (procResult) {
@@ -1502,6 +1559,10 @@ export default class ResourcePulseExtension extends Extension {
             if (gen === this._gen) {
                 this._pollInFlight = false;
                 this._recordPending = false;
+                if (this._pollDeadlineId) {
+                    GLib.source_remove(this._pollDeadlineId);
+                    this._pollDeadlineId = null;
+                }
             }
         }
     }

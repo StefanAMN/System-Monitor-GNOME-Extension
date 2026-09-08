@@ -226,6 +226,30 @@ async function cycleTabs(rp, pass, tag = null) {
     await sleep(300);
 }
 
+// A collector that never answers (a hung nvidia-smi, a dead mount) must
+// cost its own metric only: the others keep updating and it is not started
+// again while the first call is outstanding.
+async function stuckCollector(rp) {
+    let calls = 0;
+    rp._net.sample = () => {
+        calls++;
+        return new Promise(() => {});
+    };
+    const interval = rp._settings.get_int('poll-interval') * 1000;
+    await sleep(3000 + 3 * interval);
+    const idle = (GLib.get_monotonic_time() - rp._lastPollTime) / 1000;
+    check(idle < interval + 800, `stuck collector: last poll started ${idle.toFixed(0)} ms ago, polling has stalled`);
+    check(!!rp._outstanding.network, 'stuck collector: outstanding call not tracked');
+    check(calls === 1, `stuck collector: started ${calls} times while still outstanding`);
+    const cpuBefore = rp._lastCpu;
+    await sleep(interval + 500);
+    check(rp._lastCpu !== cpuBefore, 'stuck collector: cpu stopped updating');
+    delete rp._net.sample;
+    delete rp._outstanding.network;
+    await sleep(interval + 500);
+    check(!rp._outstanding.network && rp._lastNet?.interfaces, 'stuck collector: network did not recover');
+}
+
 async function run() {
     await sleep(1500);
     enabledAt = GLib.get_monotonic_time() - 4000000;
@@ -260,6 +284,8 @@ async function run() {
     await sleep(300);
     checkTheme(ext.stateObj, false, 'dark');
     ext.stateObj._indicator.menu.close();
+
+    await stuckCollector(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.
     const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
