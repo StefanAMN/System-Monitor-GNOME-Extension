@@ -6,6 +6,7 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import { ensureActorVisibleInScrollView } from 'resource:///org/gnome/shell/misc/animationUtils.js';
 
 const TARGET = 'resource-pulse@yourdomain.example';
 const TABS = ['overview', 'cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu', 'settings'];
@@ -257,6 +258,31 @@ function checkIcons(rp, label) {
     check(missing.length === 0, `${label}: icons the theme cannot supply: ${[...new Set(missing)].join(', ')}`);
 }
 
+// The in-menu steppers move in steps of 5 while preferences move in steps
+// of 1: from 98 % the next step must land on the schema maximum, and the
+// label must show the stored value, not the rejected one.
+async function stepperClamps(rp) {
+    rp._settings.set_int('threshold-cpu', 98);
+    rp._indicator.menu.open();
+    rp._activeTab = 'settings';
+    rp._updateTabVisibility();
+    rp._refreshSettingsUI();
+    await sleep(600);
+    ensureActorVisibleInScrollView(rp._scrollView, rp._cpuThreshInc);
+    await sleep(600);
+    for (const round of [1, 2]) {
+        await clickActor(rp._cpuThreshInc);
+        const stored = rp._settings.get_int('threshold-cpu');
+        check(stored === 100, `stepper click ${round}: threshold-cpu is ${stored}, expected 100`);
+        check(rp._cpuThreshLbl.text === '100%', `stepper click ${round}: label shows '${rp._cpuThreshLbl.text}' for a stored 100`);
+    }
+    rp._settings.reset('threshold-cpu');
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
 // cost its own metric only: the others keep updating and it is not started
 // again while the first call is outstanding.
@@ -328,6 +354,7 @@ async function run() {
         await sleep(500);
     }
 
+    await stepperClamps(ext.stateObj);
     await stuckCollector(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.

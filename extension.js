@@ -1010,6 +1010,7 @@ export default class ResourcePulseExtension extends Extension {
         // 4.1 CPU Threshold
         const cpuThreshRow = this._buildStepperRow('CPU Alert Threshold', 50, 100, 5, 'threshold-cpu', '%');
         this._cpuThreshLbl = cpuThreshRow.valLbl;
+        this._cpuThreshInc = cpuThreshRow.incBtn;
         alertCard.add_child(cpuThreshRow.row);
 
         // 4.2 Mem Threshold
@@ -1078,32 +1079,26 @@ export default class ResourcePulseExtension extends Extension {
 
         const controls = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
         const decBtn = new St.Button({ label: '−', style_class: 'resource-pulse-stepper-btn', reactive: true });
-        const val = this._settings.get_int(settingKey) || min;
-        const valLbl = new St.Label({ text: `${val}${unitSuffix}`, style: 'font-size: 0.9em; font-weight: bold; min-width: 44px; text-align: center;' });
+        const valLbl = new St.Label({ text: `${this._settings.get_int(settingKey)}${unitSuffix}`, style: 'font-size: 0.9em; font-weight: bold; min-width: 44px; text-align: center;' });
         const incBtn = new St.Button({ label: '+', style_class: 'resource-pulse-stepper-btn', reactive: true });
 
-        decBtn.connect('clicked', () => {
-            const cur = this._settings.get_int(settingKey) || min;
-            if (cur > min) {
-                const next = cur - step;
-                this._settings.set_int(settingKey, next);
-                valLbl.text = `${next}${unitSuffix}`;
-            }
-        });
-        incBtn.connect('clicked', () => {
-            const cur = this._settings.get_int(settingKey) || min;
-            if (cur < max) {
-                const next = cur + step;
-                this._settings.set_int(settingKey, next);
-                valLbl.text = `${next}${unitSuffix}`;
-            }
-        });
+        // Preferences step by 1, so the stored value need not be a multiple
+        // of `step`: clamp to the schema range (GSettings rejects anything
+        // outside it) and show what was actually stored.
+        const stepBy = (delta) => {
+            const cur = this._settings.get_int(settingKey);
+            const next = Math.max(min, Math.min(max, cur + delta));
+            if (next !== cur) this._settings.set_int(settingKey, next);
+            valLbl.text = `${this._settings.get_int(settingKey)}${unitSuffix}`;
+        };
+        decBtn.connect('clicked', () => stepBy(-step));
+        incBtn.connect('clicked', () => stepBy(step));
 
         controls.add_child(decBtn);
         controls.add_child(valLbl);
         controls.add_child(incBtn);
         row.add_child(controls);
-        return { row, valLbl };
+        return { row, valLbl, incBtn, decBtn };
     }
 
     _updateToggleBtn(btn, active) {
