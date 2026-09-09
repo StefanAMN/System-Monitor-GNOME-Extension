@@ -22,6 +22,7 @@ import { ProcessSampler } from './lib/process.js';
 import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
+import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
 
@@ -67,6 +68,7 @@ export default class ResourcePulseExtension extends Extension {
         this._pwrScale = new PeakScale(15);            // watts
         this._netScale = new PeakScale(1024 * 1024);   // bytes/s
         this._pwr = new PowerSampler();
+        this._pwrStats = new RunningStats();
         this._dsk = new DiskSampler();
         this._net = new NetworkSampler();
         this._thm = new ThermalSampler();
@@ -1349,6 +1351,7 @@ export default class ResourcePulseExtension extends Extension {
         const spanLabel = span > 60 && span % 60 === 0 ? `${span / 60}m` : `${span}s`;
         this._spanLabel = spanLabel;
         this._sampleSeconds = interval;
+        this._pwrStats.maxGapS = 2.5 * interval;
         for (const spark of this._sparklines) {
             spark.setSpanLabel(spanLabel);
             spark.setSampleSeconds(interval);
@@ -1527,7 +1530,13 @@ export default class ResourcePulseExtension extends Extension {
                 ? await this._guarded('power', deadline, () => this._pwr.sample(bat), last.pwr)
                 : last.pwr;
             if (gen !== this._gen) return;
-            if (need.pwr) this._lastPwr = pwr;
+            if (need.pwr) {
+                this._lastPwr = pwr;
+                // One entry per sample, here in the engine: the render path
+                // also runs for re-draws of an old sample.
+                const draw = powerReadout(pwr).value;
+                if (draw > 0) this._pwrStats.add(draw, now);
+            }
 
             let processes = [];
             let procSort = null;
@@ -3327,14 +3336,6 @@ export default class ResourcePulseExtension extends Extension {
                 }
             }
             if (hasDraw) {
-                if (!this._pwrStats) this._pwrStats = { count: 0, sum: 0, peak: 0 };
-                if (draw > 0) {
-                    this._pwrStats.count++;
-                    this._pwrStats.sum += draw;
-                    if (draw > this._pwrStats.peak) this._pwrStats.peak = draw;
-                }
-                const avgDraw = this._pwrStats.count > 0 ? (this._pwrStats.sum / this._pwrStats.count) : 0;
-
                 if (this._pwrSystem)  this._pwrSystem.val.text  = pwr.systemPower  !== null ? `${pwr.systemPower.toFixed(1)} W`  : '--';
                 if (this._pwrPackage) this._pwrPackage.val.text = pwr.packagePower !== null ? `${pwr.packagePower.toFixed(1)} W` : '--';
                 
@@ -3350,7 +3351,7 @@ export default class ResourcePulseExtension extends Extension {
                     }
                 }
                 if (this._pwrPeak) this._pwrPeak.val.text = `${this._pwrStats.peak.toFixed(1)} W`;
-                if (this._pwrAvg) this._pwrAvg.val.text = `${avgDraw.toFixed(1)} W`;
+                if (this._pwrAvg) this._pwrAvg.val.text = `${this._pwrStats.mean.toFixed(1)} W`;
             }
         }
 

@@ -6,6 +6,7 @@ import System from 'system';
 
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../lib/format.js';
 import { RingBuffer } from '../lib/ringbuffer.js';
+import { RunningStats } from '../lib/stats.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync, runSubprocess } from '../lib/utils.js';
@@ -62,6 +63,26 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(rb.get(3), 0, 'ring stores non-finite as 0');
     rb.clear();
     eq([rb.length, rb.max()], [0, 0], 'ring clear');
+}
+
+// ── running stats (power session average / peak) ──
+{
+    const S = 1000000;
+    const st = new RunningStats(5);
+    eq([st.mean, st.peak, st.count], [0, 0, 0], 'stats: empty');
+    st.add(10, 1 * S);
+    eq([st.mean, st.peak], [10, 10], 'stats: a single reading is its own mean');
+    st.add(30, 3 * S);
+    eq(st.mean, 10, 'stats: a reading holds until the next one (10 W for 2 s)');
+    st.add(0, 4 * S);
+    eq([st.mean.toFixed(3), st.peak], [(50 / 3).toFixed(3), 30], 'stats: time-weighted, not per-sample (10 W x 2 s + 30 W x 1 s)');
+    st.add(100, 600 * S);
+    eq(st.mean.toFixed(3), (50 / 3).toFixed(3), 'stats: an unsampled gap is not bridged with the stale reading');
+    st.add(100, 601 * S);
+    eq(st.mean, 150 / 4, 'stats: resumes after the gap');
+    st.add(NaN, 602 * S);
+    st.add(100, 601 * S);
+    eq([st.mean, st.peak, st.count], [150 / 4, 100, 6], 'stats: non-finite readings and a clock going backwards add no time');
 }
 
 // ── /proc/stat ──
