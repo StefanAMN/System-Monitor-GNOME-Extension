@@ -466,7 +466,7 @@ async function prefsWindow(rp) {
     const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE });
     launcher.setenv('WAYLAND_DISPLAY', socket, true);
     launcher.setenv('GDK_BACKEND', 'wayland', true);
-    const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, '2500']);
+    const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, '1200']);
     const lines = new Gio.DataInputStream({ base_stream: proc.get_stdout_pipe() });
     const readLine = () => new Promise((resolve, reject) => lines.read_line_async(GLib.PRIORITY_DEFAULT, null, (obj, res) => {
         try {
@@ -479,9 +479,9 @@ async function prefsWindow(rp) {
     const verdict = [];
     for (let line = await readLine(); line !== null; line = await readLine()) {
         if (!line.startsWith('PREFS-CHECK')) continue;
-        const show = /^PREFS-CHECK SHOW (\w+)/.exec(line);
+        const show = /^PREFS-CHECK SHOW ([\w-]+)/.exec(line);
         if (show) {
-            await sleep(1500);
+            await sleep(700);
             check(titled(), `prefs: no window on screen for the ${show[1]} page`);
             await shot(`prefs-${show[1]}`);
         } else {

@@ -5,7 +5,7 @@
 // freshly built window for a few seconds so the driver can screenshot it.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import 'gi://Gtk?version=4.0';
+import Gtk from 'gi://Gtk?version=4.0';
 import Adw from 'gi://Adw?version=1';
 import System from 'system';
 
@@ -35,16 +35,20 @@ function newSettings() {
 }
 
 async function main() {
-    const { buildPreferences } = await import(`file://${root}/ui/prefsrows.js`);
+    const prefsRows = await import(`file://${root}/ui/prefsrows.js`);
+    const { buildPreferences } = prefsRows;
     const { allSettingRows, METRICS } = await import(`file://${root}/lib/settingsmodel.js`);
     const { PowerSampler } = await import(`file://${root}/lib/power.js`);
     Adw.init();
 
+    const { styleWindow: style } = await import(`file://${root}/ui/prefsstyle.js`);
     const build = (settings, power) => {
         const window = new Adw.PreferencesWindow({ title: 'Resource Pulse' });
+        style(window);
         const page = new Adw.PreferencesPage({ title: 'Settings' });
         window.add(page);
-        return { window, page, ...buildPreferences(page, settings, power) };
+        const { metricIcon } = prefsRows;
+        return { window, page, ...buildPreferences(page, settings, power, key => metricIcon(key, root)) };
     };
 
     // A powercap tree without any energy domain: the fix is not offered.
@@ -88,6 +92,13 @@ async function main() {
         }
     }
 
+    // Each pinned-metric row carries the metric's tinted icon, as the panel shows it.
+    const hasIcon = (widget, key) => {
+        if (widget instanceof Gtk.Image && widget.has_css_class(`rp-c-${key}`) && widget.gicon) return true;
+        for (let c = widget.get_first_child(); c; c = c.get_next_sibling()) if (hasIcon(c, key)) return true;
+        return false;
+    };
+    ok(METRICS.every(m => hasIcon(pinRows[m.key], m.key)), 'pins: every row has its metric icon');
     // Pinned metrics: switches plus the position each one has in the top bar.
     settings.reset('pinned-metrics');
     ok(Object.keys(pinRows).join() === METRICS.map(m => m.key).join(), `pin rows are ${Object.keys(pinRows)}`);
@@ -145,7 +156,21 @@ async function main() {
     GLib.rmdir(zone);
     GLib.rmdir(blockedRoot);
 
-    const battery = await batteryPages();
+    // The window's stylesheet parses cleanly, dark and light, in the variant
+    // this libadwaita loads (CSS variables from 1.6, named colours before).
+    const { windowCss, styleWindow } = await import(`file://${root}/ui/prefsstyle.js`);
+    const modern = Adw.get_minor_version() >= 6;
+    for (const dark of [true, false]) {
+        for (const variables of [modern]) {
+            const provider = new Gtk.CssProvider();
+            const errors = [];
+            provider.connect('parsing-error', (_p, section, error) => errors.push(`${section.to_string()}: ${error.message}`));
+            provider.load_from_string(windowCss(dark, variables));
+            ok(errors.length === 0, `style (${dark ? 'dark' : 'light'}, ${variables ? 'variables' : 'named colours'}): ${errors.join('; ')}`);
+        }
+    }
+
+    const battery = await batteryPages(styleWindow);
 
     print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} checks passed`);
     // Leave windows up for the driver's screenshots, one page at a time; the
@@ -157,12 +182,27 @@ async function main() {
         print('PREFS-CHECK SHOW settings');
         await sleep(linger);
         shown.window.destroy();
-        battery.window.set_default_size(720, 900);
+        battery.window.set_default_size(720, 680);
         battery.window.present();
-        for (const name of ['tracking', 'diagnostics']) {
-            battery.window.set_visible_page_name(name);
-            print(`PREFS-CHECK SHOW ${name}`);
-            await sleep(linger);
+        // Each tab from top to bottom, in both variants.
+        const manager = Adw.StyleManager.get_default();
+        for (const [variant, scheme] of [['light', Adw.ColorScheme.FORCE_LIGHT], ['dark', Adw.ColorScheme.FORCE_DARK]]) {
+            manager.color_scheme = scheme;
+            for (const name of ['tracking', 'diagnostics']) {
+                battery.window.set_visible_page_name(name);
+                const adj = findScrolled(battery.window.get_visible_page())?.get_vadjustment();
+                for (let part = 0, done = false; !done && part < 4; part++) {
+                    await sleep(300);
+                    if (adj) {
+                        adj.value = Math.min(part * (adj.page_size - 60), adj.upper - adj.page_size);
+                        done = adj.value >= adj.upper - adj.page_size - 1;
+                    } else {
+                        done = true;
+                    }
+                    print(`PREFS-CHECK SHOW ${variant}-${name}-${part + 1}`);
+                    await sleep(linger);
+                }
+            }
         }
     }
     shown.dispose();
@@ -170,9 +210,19 @@ async function main() {
     battery.window.destroy();
 }
 
+function findScrolled(widget) {
+    if (!widget) return null;
+    if (widget instanceof Gtk.ScrolledWindow) return widget;
+    for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) {
+        const found = findScrolled(child);
+        if (found) return found;
+    }
+    return null;
+}
+
 // The Tracking and Diagnostics pages on a fixture history: two hours on
 // battery with a chat app working in the background and an editor in use.
-async function batteryPages() {
+async function batteryPages(styleWindow) {
     const { HistorySource, buildTrackingPage } = await import(`file://${root}/ui/prefsbattery.js`);
     const { buildDiagnosticsPage } = await import(`file://${root}/ui/prefsdiagnostics.js`);
     const { BatteryLedger, saveLedger } = await import(`file://${root}/lib/batteryledger.js`);
@@ -193,7 +243,8 @@ async function batteryPages() {
                 { unit: 'app-gnome-chat-1.scope', id: 'chat', kind: 'app', label: 'chat', usec: c.chat },
                 { unit: 'app-gnome-editor-2.scope', id: 'editor', kind: 'app', label: 'editor', usec: c.editor },
             ] },
-            packageW: 9,
+            // Varies like a real machine, so an idle level below the mean is learnt.
+            packageW: 5 + (i % 7),
             battery: { present: true, onBattery: true, energyWh: 40 - i * 9.5 * 30 / 3600 },
             focusUsec: { editor: 30e6 },
             uncoreW: 3,
@@ -205,6 +256,8 @@ async function batteryPages() {
     const settings = newSettings();
     const history = new HistorySource(settings, path);
     const window = new Adw.PreferencesWindow({ title: 'Resource Pulse' });
+    const style = styleWindow(window);
+    ok(window.has_css_class('rp-window') && style.css().includes('#3584e4'), 'style: the window carries the extension\'s look and accent');
     const tracking = buildTrackingPage(settings, history, { fullWh: () => 40 });
     window.add(tracking.page);
     const profileCalls = [];
@@ -232,13 +285,19 @@ async function batteryPages() {
         `tracking: apps ranked ${r.appRows.map(row => row.appId).join()}, expected chat,editor,@system,@other`);
     ok(r.appRows[0].share > r.appRows[1].share && r.appRows[0].subtitle.includes('100 % in the background') &&
         r.appRows[1].subtitle.includes('0 % in the background'), `tracking: shares and background split ('${r.appRows[0].subtitle}' / '${r.appRows[1].subtitle}')`);
-    ok(r.drain.value.label === '9.5 W' && r.runtime.value.label === 'about 4h 12m' && r.used.value.label.includes('% of a full charge'),
-        `tracking: summary '${r.used.value.label}', '${r.drain.value.label}', '${r.runtime.value.label}'`);
+    ok(r.drain.value.label === '9.5 W' && r.runtime.value.label === '4h 12m' && r.used.detail.label.includes('% of a full charge'),
+        `tracking: summary '${r.used.value.label}' (${r.used.detail.label}), '${r.drain.value.label}', '${r.runtime.value.label}'`);
+    // Two hours on battery, one bar per hour: the chart has them, battery above processor.
+    // (The fixture's power is constant, so once the idle level is learnt the processor part is 0.)
+    const filled = r.chart.points.filter(p => p.battery > 0);
+    ok(r.chart.box.visible && filled.length >= 2 && filled.length <= 3 && filled.some(p => p.processor > 0) && filled.every(p => p.processor <= p.battery),
+        `tracking: chart bars ${filled.map(p => `${p.battery.toFixed(2)}/${p.processor.toFixed(2)}`).join(' ')}`);
+    ok(Math.abs(filled.reduce((t, p) => t + p.battery, 0) - parseFloat(r.used.value.label)) < 0.1, 'tracking: the bars add up to the battery used');
     ok(r.rest.visible && r.idle.value.label !== 'not measured', 'tracking: the unmeasured rest and the idle share are shown');
     ok(r.graphics.visible && r.appRows[1].subtitle.includes('of graphics time'), `tracking: graphics share and time shown ('${r.appRows[1].subtitle}')`);
 
     r.batteryOnly.active = false;
-    ok(r.time.title === 'Time recorded' && !r.drain.visible, 'tracking: the AC-and-battery view drops the battery figures');
+    ok(r.time.title === 'Time recorded' && !r.drain.visible && !r.chart.box.visible, 'tracking: the AC-and-battery view drops the battery figures');
     r.batteryOnly.active = true;
     r.period.selected = 1; // today: may or may not include the fixture, but must not fail
     r.period.selected = 3;

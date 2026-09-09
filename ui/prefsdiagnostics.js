@@ -64,7 +64,11 @@ export function buildDiagnosticsPage(history, {
         const lines = [finding.detail, finding.evidence, estimateText(finding.estimate)].filter(Boolean);
         const r = new Adw.ActionRow({ title: finding.title, subtitle: lines.join('\n'), subtitle_lines: 0 });
         r.findingId = finding.id;
-        r.add_prefix(new Gtk.Image({ icon_name: SEVERITY_ICONS[finding.severity], valign: Gtk.Align.START, margin_top: 12 }));
+        r.add_prefix(new Gtk.Image({
+            icon_name: SEVERITY_ICONS[finding.severity], valign: Gtk.Align.START, margin_top: 12,
+            css_classes: [`rp-finding-${finding.severity}`],
+        }));
+        if (finding.action) r.add_css_class('rp-finding-actionable');
         if (finding.action) {
             const button = new Gtk.Button({ label: finding.action.label, valign: Gtk.Align.CENTER });
             button.connect('clicked', async () => {

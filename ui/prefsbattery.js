@@ -5,6 +5,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
+import PangoCairo from 'gi://PangoCairo';
 
 import { BatteryLedger, LedgerFormatError, DAYS_KEPT } from '../lib/batteryledger.js';
 import { ledgerPath, TRACK_INTERVAL_S } from '../lib/batterytracker.js';
@@ -106,12 +107,105 @@ export class HistorySource {
     }
 }
 
-function valueRow(title, subtitle = '') {
-    const row = new Adw.ActionRow({ title, subtitle });
-    const value = new Gtk.Label({ css_classes: ['dim-label'], valign: Gtk.Align.CENTER });
-    row.add_suffix(value);
-    row.value = value;
-    return row;
+/** A stat tile like the panel's cards: name, value, one line of detail. */
+function tile(title, tint = null) {
+    const box = new Gtk.Box({
+        orientation: Gtk.Orientation.VERTICAL, spacing: 2, hexpand: true,
+        css_classes: ['rp-tile', ...(tint ? [`rp-tint-${tint}`] : [])],
+    });
+    const label = new Gtk.Label({ label: title, xalign: 0, wrap: true, css_classes: ['rp-tile-label'] });
+    box.value = new Gtk.Label({ xalign: 0, wrap: true, css_classes: ['rp-tile-value'] });
+    box.detail = new Gtk.Label({ xalign: 0, wrap: true, css_classes: ['rp-tile-detail'] });
+    box.append(label);
+    box.append(box.value);
+    box.append(box.detail);
+    Object.defineProperty(box, 'title', { get: () => label.label, set: text => { label.label = text; } });
+    return box;
+}
+
+/** Show or hide a tile together with the flow box cell around it. */
+function showTile(t, shown) {
+    t.visible = shown;
+    if (t.get_parent()) t.get_parent().visible = shown;
+}
+
+function tileGrid(tiles) {
+    const grid = new Gtk.FlowBox({
+        selection_mode: Gtk.SelectionMode.NONE, homogeneous: true, min_children_per_line: 2, max_children_per_line: 2,
+        column_spacing: 8, row_spacing: 8,
+    });
+    for (const t of tiles) {
+        grid.append(t);
+        t.get_parent().can_focus = false;
+    }
+    return grid;
+}
+
+/**
+ * Battery use over the period as bars: one per hour (24 h and today) or per
+ * day (7 and 14 days); the part the processor used drawn inside in blue.
+ * @returns {Array<{t: number, battery: number, processor: number}>} Wh per bar
+ */
+export function drainPoints(ledger, from, now, batteryOnly) {
+    const perDay = now - from > 48 * HOUR_MS;
+    const step = perDay ? 24 * HOUR_MS : HOUR_MS;
+    const start = perDay ? new Date(new Date(from).setHours(0, 0, 0, 0)).getTime() : startOfHour(from);
+    const points = [];
+    for (let t = start; t <= now; t = perDay ? new Date(new Date(t).setDate(new Date(t).getDate() + 1)).getTime() : t + step)
+        points.push({ t, battery: 0, processor: 0 });
+    for (const b of ledger.buckets) {
+        if (b.t < start || (batteryOnly && !b.b)) continue;
+        const i = perDay ? points.findLastIndex(p => p.t <= b.t) : Math.floor((b.t - start) / step);
+        if (i < 0 || i >= points.length) continue;
+        points[i].battery += b.bw;
+        points[i].processor += b.pw - b.iw;
+    }
+    return points;
+}
+
+function drawDrain(area, cr, width, height, points) {
+    const fg = area.get_color();
+    const max = Math.max(0.001, ...points.map(p => Math.max(p.battery, p.processor)));
+    const left = 44;
+    const bottom = 18;
+    const plotH = height - bottom - 6;
+    const slot = (width - left) / Math.max(1, points.length);
+    const barW = Math.max(2, slot * 0.7);
+    // Text through Pango, in the widget's own font and antialiasing.
+    const text = (str, x, y, right = false) => {
+        const layout = area.create_pango_layout(str);
+        const [, logical] = layout.get_pixel_extents();
+        cr.moveTo(right ? x - logical.width : x, y - logical.height);
+        PangoCairo.show_layout(cr, layout);
+    };
+    cr.setSourceRGBA(fg.red, fg.green, fg.blue, 1);
+    text(formatWh(max), 0, 16);
+    text('0', 0, plotH + 10);
+    cr.setSourceRGBA(fg.red, fg.green, fg.blue, 0.25);
+    cr.rectangle(left, plotH + 6, width - left, 1);
+    cr.fill();
+    points.forEach((p, i) => {
+        const x = left + i * slot + (slot - barW) / 2;
+        const bh = plotH * p.battery / max;
+        const ph = plotH * Math.min(p.processor, p.battery || p.processor) / max;
+        cr.setSourceRGBA(0.18, 0.76, 0.494, 0.85);
+        cr.rectangle(x, plotH + 6 - bh, barW, bh);
+        cr.fill();
+        cr.setSourceRGBA(0.208, 0.518, 0.894, 0.95);
+        cr.rectangle(x + barW * 0.25, plotH + 6 - ph, barW * 0.5, ph);
+        cr.fill();
+    });
+    if (points.length > 0) {
+        cr.setSourceRGBA(fg.red, fg.green, fg.blue, 1);
+        const fmt = t => {
+            const d = new Date(t);
+            return points.length > 0 && points[1] && points[1].t - points[0].t > HOUR_MS
+                ? `${d.getDate()}.${d.getMonth() + 1}` : `${String(d.getHours()).padStart(2, '0')}:00`;
+        };
+        text(fmt(points[0].t), left, height);
+        text(fmt(points[points.length - 1].t), width, height, true);
+    }
+    cr.$dispose();
 }
 
 function appRow(app, total, hasEnergy) {
@@ -128,7 +222,7 @@ function appRow(app, total, hasEnergy) {
     const share = total > 0 ? (hasEnergy ? app.wh : app.cpu) / total : 0;
     const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4, valign: Gtk.Align.CENTER });
     box.append(new Gtk.Label({ label: hasEnergy ? formatWh(app.wh) : `${Math.round(share * 100)} %`, xalign: 1 }));
-    const bar = new Gtk.LevelBar({ min_value: 0, max_value: 1, value: Math.min(1, share), width_request: 96 });
+    const bar = new Gtk.LevelBar({ min_value: 0, max_value: 1, value: Math.min(1, share), width_request: 96, css_classes: ['rp-bar-battery'] });
     bar.remove_offset_value(Gtk.LEVEL_BAR_OFFSET_LOW);
     bar.remove_offset_value(Gtk.LEVEL_BAR_OFFSET_HIGH);
     bar.remove_offset_value(Gtk.LEVEL_BAR_OFFSET_FULL);
@@ -194,15 +288,35 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
             'The display, radios and the rest of the machine cannot be measured per app.',
     });
     page.add(summary);
-    for (const [key, title] of [
-        ['used', 'Battery used'], ['time', 'Time on battery'], ['drain', 'Average drain'], ['runtime', 'A full charge would last'],
-        ['apps', 'Processor, shared among apps'], ['graphics', 'of which graphics, by graphics time'], ['idle', 'Processor idle and platform'], ['rest', 'Display, radios and the rest'],
-        ['gap', 'While locked or asleep'],
-    ]) {
-        rows[key] = valueRow(title);
-        summary.add(rows[key]);
+    for (const [key, title] of [['used', 'Battery used'], ['drain', 'Average drain'], ['runtime', 'A full charge lasts'], ['time', 'Time on battery']])
+        rows[key] = tile(title, 'battery');
+    const batteryBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12 });
+    batteryBox.append(tileGrid([rows.used, rows.drain, rows.runtime, rows.time]));
+
+    // Battery use over the period.
+    const chartBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-chart'] });
+    const chartHead = new Gtk.Box({ spacing: 12 });
+    chartHead.append(new Gtk.Label({ label: 'Battery use', xalign: 0, hexpand: true, css_classes: ['rp-tile-label'] }));
+    for (const [text, colour] of [['battery', 'rp-c-battery'], ['processor', 'rp-c-cpu']]) {
+        const key = new Gtk.Box({ spacing: 4 });
+        key.append(new Gtk.Label({ label: '■', css_classes: [colour] }));
+        key.append(new Gtk.Label({ label: text, css_classes: ['rp-tile-detail'] }));
+        chartHead.append(key);
     }
-    rows.gap.subtitle = 'Not attributed: GNOME pauses extensions while the screen is locked';
+    chartBox.append(chartHead);
+    const area = new Gtk.DrawingArea({ content_height: 140, hexpand: true, css_classes: ['rp-chart-area'] });
+    rows.chart = { area, box: chartBox, points: [] };
+    area.set_draw_func((a, cr, width, height) => drawDrain(a, cr, width, height, rows.chart.points));
+    chartBox.append(area);
+    batteryBox.append(chartBox);
+
+    for (const [key, title] of [['apps', 'Processor, shared among apps'], ['graphics', 'of which graphics'], ['idle', 'Processor idle and platform'],
+        ['rest', 'Display, radios and the rest'], ['gap', 'While locked or asleep']])
+        rows[key] = tile(title);
+    rows.graphics.add_css_class('rp-tint-gpu');
+    rows.apps.add_css_class('rp-tint-cpu');
+    batteryBox.append(tileGrid([rows.apps, rows.graphics, rows.idle, rows.rest, rows.gap]));
+    summary.add(batteryBox);
     rows.summary = summary;
 
     const appsGroup = new Adw.PreferencesGroup({ title: 'Apps', description: 'Most first' });
@@ -231,25 +345,34 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
         summary.visible = sum.seconds > 0 || sum.gapWh > 0;
         const full = fullWh();
         const drain = sum.seconds > 0 && sum.batteryWh > 0 ? sum.batteryWh / (sum.seconds / 3600) : null;
-        rows.used.value.label = batteryOnly
-            ? `${formatWh(sum.batteryWh)}${full > 0 && sum.batteryWh > 0 ? ` · ${Math.round(sum.batteryWh / full * 100)} % of a full charge` : ''}`
-            : '—';
+        const ofBattery = wh => (sum.batteryWh > 0 ? `${Math.round(wh / sum.batteryWh * 100)} % of the battery used` : '');
+        rows.used.value.label = formatWh(sum.batteryWh);
+        rows.used.detail.label = full > 0 && sum.batteryWh > 0 ? `${Math.round(sum.batteryWh / full * 100)} % of a full charge` : '';
         rows.time.title = batteryOnly ? 'Time on battery' : 'Time recorded';
         rows.time.value.label = formatDuration(sum.seconds);
+        rows.time.detail.label = '';
         rows.drain.value.label = drain !== null ? `${drain.toFixed(1)} W` : '—';
-        rows.runtime.value.label = drain !== null && full > 0 ? `about ${formatDuration(full / drain * 3600)}` : '—';
-        rows.apps.value.label = sum.hasEnergy
-            ? `${formatWh(sum.attributedWh)}${sum.batteryWh > 0 ? ` · ${Math.round(sum.attributedWh / sum.batteryWh * 100)} %` : ''}`
-            : 'not measured';
+        rows.drain.detail.label = 'on average';
+        rows.runtime.value.label = drain !== null && full > 0 ? `${formatDuration(full / drain * 3600)}` : '—';
+        rows.runtime.detail.label = drain !== null && full > 0 ? 'at this drain' : '';
+        rows.apps.value.label = sum.hasEnergy ? formatWh(sum.attributedWh) : 'not measured';
+        rows.apps.detail.label = sum.hasEnergy ? ofBattery(sum.attributedWh) : 'power readings are not available';
         rows.idle.value.label = sum.hasEnergy ? formatWh(sum.idleWh) : 'not measured';
-        rows.graphics.visible = sum.graphicsWh > 0;
+        rows.idle.detail.label = sum.hasEnergy ? ofBattery(sum.idleWh) : '';
         rows.graphics.value.label = formatWh(sum.graphicsWh);
-        const rest = sum.batteryWh - sum.packageWh;
-        rows.rest.visible = batteryOnly && sum.hasEnergy && sum.batteryWh > 0;
-        rows.rest.value.label = `${formatWh(Math.max(0, rest))}${sum.batteryWh > 0 ? ` · ${Math.round(Math.max(0, rest) / sum.batteryWh * 100)} %` : ''}`;
-        rows.gap.visible = sum.gapWh > 0;
+        rows.graphics.detail.label = 'by graphics time';
+        const rest = Math.max(0, sum.batteryWh - sum.packageWh);
+        rows.rest.value.label = formatWh(rest);
+        rows.rest.detail.label = `${ofBattery(rest)}${ofBattery(rest) ? '; ' : ''}not measurable per app`;
         rows.gap.value.label = formatWh(sum.gapWh);
-        for (const key of ['used', 'drain', 'runtime']) rows[key].visible = batteryOnly;
+        rows.gap.detail.label = 'not attributed: extensions pause while the screen is locked';
+        showTile(rows.graphics, sum.graphicsWh > 0);
+        showTile(rows.rest, batteryOnly && sum.hasEnergy && sum.batteryWh > 0);
+        showTile(rows.gap, sum.gapWh > 0);
+        for (const key of ['used', 'drain', 'runtime']) showTile(rows[key], batteryOnly);
+        rows.chart.points = drainPoints(history.ledger, startOfHour(period.from(now)), now, batteryOnly);
+        rows.chart.box.visible = batteryOnly && rows.chart.points.some(p => p.battery > 0);
+        rows.chart.area.queue_draw();
 
         list.remove_all();
         rows.appRows = [];

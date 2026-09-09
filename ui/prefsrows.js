@@ -4,6 +4,7 @@
 // Clutter or shell modules itself).
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
+import Gdk from 'gi://Gdk';
 import Adw from 'gi://Adw';
 
 import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned } from '../lib/settingsmodel.js';
@@ -23,7 +24,21 @@ function pinSubtitle(position) {
  * @returns {{rows: Object, pinRows: Object, powerGroup: Adw.PreferencesGroup, dispose: function()}}
  *   rows and pinRows by settings / metric key; dispose() disconnects from the settings
  */
-export function buildPreferences(page, settings, power = new PowerSampler()) {
+/**
+ * The icon of a pinnable metric, as the panel shows it.
+ * @param {string} key
+ * @param {string} extensionPath where icons/ is
+ * @returns {Gio.Icon}
+ */
+export function metricIcon(key, extensionPath) {
+    const metric = METRICS.find(m => m.key === key);
+    const theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default());
+    if (metric.bundled && (!metric.icon || !theme.has_icon(metric.icon)))
+        return Gio.icon_new_for_string(`${extensionPath}/icons/${metric.bundled}-symbolic.svg`);
+    return Gio.ThemedIcon.new(metric.icon);
+}
+
+export function buildPreferences(page, settings, power = new PowerSampler(), iconFor = null) {
     const rows = {};
     const pinRows = {};
     // Rows that mirror a setting by hand (no property binding fits): each
@@ -44,6 +59,8 @@ export function buildPreferences(page, settings, power = new PowerSampler()) {
         const pinned = () => sanitizeMetricList(settings.get_strv(row.key));
         for (const { key, name } of METRICS) {
             const pinRow = new Adw.SwitchRow({ title: name });
+            const gicon = iconFor?.(key);
+            if (gicon) pinRow.add_prefix(new Gtk.Image({ gicon, css_classes: [`rp-c-${key}`] }));
             pinRow.connect('notify::active', () => {
                 if (following || pinRow.active === pinned().includes(key)) return;
                 settings.set_strv(row.key, togglePinned(pinned(), key));
