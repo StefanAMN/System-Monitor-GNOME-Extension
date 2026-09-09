@@ -20,7 +20,6 @@ import { NetworkSampler } from './lib/network.js';
 import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
-import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from './lib/raplfix.js';
 import { BatteryTracker, ledgerPath } from './lib/batterytracker.js';
 import { BatteryLedger, saveLedger } from './lib/batteryledger.js';
 import { appInfo as ledgerAppInfo } from './lib/appnames.js';
@@ -28,8 +27,6 @@ import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visib
 import { RingBuffer } from './lib/ringbuffer.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
-import { SettingRow, SwitchButton, SegmentedControl, Stepper, ActionButton, PinTile, Note } from './ui/settings.js';
-import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned } from './lib/settingsmodel.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
 
 // ─── Polling / history constants ─────────────────────────────────────────────
@@ -153,14 +150,14 @@ export default class ResourcePulseExtension extends Extension {
             const symbol = event.get_key_symbol();
             if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
                 if (this._activeTab !== 'overview') {
-                    this._activeTab = (this._activeTab === 'settings' && this._previousTab) ? this._previousTab : 'overview';
+                    this._activeTab = 'overview';
                     this._updateTabVisibility();
                     return Clutter.EVENT_STOP;
                 }
             }
             if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
                 const tabs = ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu'];
-                if (this._activeTab !== 'overview' && this._activeTab !== 'settings') {
+                if (this._activeTab !== 'overview') {
                     let idx = tabs.indexOf(this._activeTab);
                     if (idx !== -1) {
                         idx = symbol === Clutter.KEY_Right
@@ -269,8 +266,9 @@ export default class ResourcePulseExtension extends Extension {
         this._netFmtId = this._settings.connect('changed::network-top-format', () => { this._rebuildTopBar(); this._poll(); });
         this._tooltipsId = this._settings.connect('changed::show-tooltips', () => this._hideTooltip());
         this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
-        // Whoever changes a setting (this menu, the preferences window, gsettings), the page follows.
-        this._settingsUiId = this._settings.connect('changed', () => this._refreshSettingsUI());
+        // The panel size is reset from the preferences window: follow it.
+        this._sizeId = this._settings.connect('changed::menu-custom-width', () => this._queueDimensionsUpdate());
+        this._sizeHId = this._settings.connect('changed::menu-custom-height', () => this._queueDimensionsUpdate());
         // Battery tracking (off until the user starts it in the preferences window).
         this._trackingId = this._settings.connect('changed::battery-tracking', () => this._syncTracking());
         this._flushHistoryId = this._settings.connect('changed::action-flush-history', () => {
@@ -318,7 +316,9 @@ export default class ResourcePulseExtension extends Extension {
         if (this._netFmtId) this._settings.disconnect(this._netFmtId);
         if (this._tooltipsId) this._settings.disconnect(this._tooltipsId);
         if (this._pollId) this._settings.disconnect(this._pollId);
-        if (this._settingsUiId) this._settings.disconnect(this._settingsUiId);
+        if (this._sizeId) this._settings.disconnect(this._sizeId);
+        if (this._sizeHId) this._settings.disconnect(this._sizeHId);
+        if (this._sizeIdleId) GLib.source_remove(this._sizeIdleId);
         if (this._openMenuId) this._settings.disconnect(this._openMenuId);
         for (const id of [this._trackingId, this._flushHistoryId, this._clearHistoryId])
             if (id) this._settings.disconnect(id);
@@ -375,16 +375,6 @@ export default class ResourcePulseExtension extends Extension {
             GLib.source_remove(this._dragHoldTimerId);
             this._dragHoldTimerId = null;
         }
-        if (this._settingsPage) {
-            this._settingsPage.destroy();
-            this._settingsPage = null;
-        }
-        this._settingRows = null;
-        this._settingControls = null;
-        this._pinTiles = null;
-        this._sizeRow = null;
-        this._powerRow = null;
-        this._powerFixNote = null;
         this._resizeHandles = {};
 
         for (const [actor, id] of this._fitSignals ?? []) actor.disconnect(id);
@@ -691,6 +681,16 @@ export default class ResourcePulseExtension extends Extension {
         }
     }
 
+    /** Settings changed elsewhere (Reset in the preferences window): apply once, after both keys. */
+    _queueDimensionsUpdate() {
+        if (this._sizeIdleId || this._activeResizeCorner) return;
+        this._sizeIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._sizeIdleId = 0;
+            this._updateMenuDimensions();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     _saveCustomDimensions() {
         if (this._settings && this._currentWidth > 0 && this._currentHeight > 0) {
             this._settings.set_int('menu-custom-width', this._currentWidth);
@@ -842,241 +842,6 @@ export default class ResourcePulseExtension extends Extension {
             this._resizeHandles[c.id] = handle;
             this._popupStack.add_child(handle);
         });
-    }
-
-    _openSettingsView() {
-        if (this._activeTab === 'settings') {
-            this._activeTab = this._previousTab || 'overview';
-        } else {
-            this._previousTab = this._activeTab;
-            this._activeTab = 'settings';
-        }
-        this._ensureSettingsPage();
-        this._disarmPowerFix();
-        this._refreshSettingsUI();
-        this._updateTabVisibility();
-    }
-
-    _buildSettingsPage() {
-        this._settingsPage = new St.BoxLayout({
-            vertical: true,
-            style_class: 'rp-set-page',
-            x_expand: true,
-            y_expand: true,
-            visible: false
-        });
-
-        const header = new St.BoxLayout({ style_class: 'rp-set-header', x_expand: true });
-        const backBtn = new St.Button({ style_class: 'rp-chip-bg rp-set-back', can_focus: true, y_align: Clutter.ActorAlign.CENTER });
-        backBtn.set_child(new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'rp-fg rp-set-back-icon' }));
-        backBtn.connect('clicked', () => {
-            this._activeTab = this._previousTab || 'overview';
-            this._updateTabVisibility();
-        });
-        this._addClickAnimations(backBtn);
-        header.add_child(backBtn);
-        header.add_child(new St.Label({ text: 'Settings', style_class: 'rp-fg rp-set-heading', y_align: Clutter.ActorAlign.CENTER }));
-        this._settingsPage.add_child(header);
-
-        // Rows, controls and pin tiles by settings key; _refreshSettingsUI()
-        // is the only place that writes a stored value into them.
-        this._settingRows = {};
-        this._settingControls = {};
-        this._pinTiles = {};
-        for (const section of SETTINGS_SECTIONS) {
-            const box = this._addSettingsSection(section.title, section.hint);
-            for (const row of section.rows)
-                box.add_child(row.kind === 'pins' ? this._buildPinGrid(row) : this._buildSettingRow(row));
-        }
-
-        // Not settings but things to do with the panel itself.
-        const panelBox = this._addSettingsSection('Panel', 'drag a bottom corner to resize');
-        this._sizeRow = new SettingRow('Size', new ActionButton('Reset', () => this._resetMenuDimensions()));
-        panelBox.add_child(this._sizeRow);
-
-        // Offered only while the kernel withholds the energy counters.
-        this._powerRow = new SettingRow('CPU power', new ActionButton('Enable', () => this._onPowerFixClicked()));
-        this._powerRow.asideLabel.text = 'not readable';
-        this._powerRow.visible = false;
-        panelBox.add_child(this._powerRow);
-        this._powerFixNote = new Note();
-        panelBox.add_child(this._powerFixNote);
-        this._powerFixArmed = false;
-
-        // The page is longer than the panel: keyboard focus pulls the
-        // focused control into view.
-        const follow = actor => {
-            if (actor.can_focus) actor.connect('key-focus-in', () => this._scrollIntoView(actor));
-            actor.get_children().forEach(follow);
-        };
-        follow(this._settingsPage);
-
-        this._menuContainer.add_child(this._settingsPage);
-    }
-
-    _scrollIntoView(actor) {
-        const adj = this._scrollView?.get_vadjustment();
-        if (!adj) return;
-        const margin = 12;
-        const top = actor.get_transformed_position()[1] - this._scrollView.get_transformed_position()[1];
-        const bottom = top + actor.height;
-        if (top < margin) adj.set_value(adj.value + top - margin);
-        else if (bottom > adj.page_size - margin) adj.set_value(adj.value + bottom - adj.page_size + margin);
-    }
-
-    _addSettingsSection(title, hint = null) {
-        if (this._settingsPage.get_n_children() > 1)
-            this._settingsPage.add_child(new St.Widget({ style_class: 'rp-set-separator', x_expand: true }));
-        const box = new St.BoxLayout({ vertical: true, style_class: 'rp-set-section', x_expand: true });
-        const head = new St.BoxLayout({ style_class: 'rp-set-section-head', x_expand: true });
-        head.add_child(new St.Label({ text: title.toUpperCase(), style_class: 'rp-set-section-title', y_align: Clutter.ActorAlign.CENTER }));
-        if (hint)
-            head.add_child(new St.Label({ text: `·  ${hint}`, style_class: 'rp-set-hint', y_align: Clutter.ActorAlign.CENTER }));
-        box.add_child(head);
-        this._settingsPage.add_child(box);
-        return box;
-    }
-
-    _buildSettingRow(row) {
-        let control;
-        if (row.kind === 'switch') {
-            control = new SwitchButton(state => this._settings.set_boolean(row.key, state));
-        } else if (row.kind === 'choice') {
-            control = new SegmentedControl(row.choices, value => this._settings.set_string(row.key, value));
-        } else {
-            // The stored value need not be a multiple of the step (the
-            // preferences window accepts any value in range).
-            control = new Stepper(direction => {
-                const current = this._settings.get_int(row.key);
-                const next = stepSettingValue(row, current, direction);
-                if (next !== current) this._settings.set_int(row.key, next);
-            });
-        }
-        this._settingControls[row.key] = control;
-        this._settingRows[row.key] = new SettingRow(row.title, control);
-        return this._settingRows[row.key];
-    }
-
-    _buildPinGrid(row) {
-        const box = new St.BoxLayout({ vertical: true, style_class: 'rp-set-pins', x_expand: true });
-        const caption = new St.BoxLayout({ style_class: 'rp-set-caption', x_expand: true });
-        caption.add_child(new St.Label({ text: row.title, style_class: 'rp-set-title', x_expand: true, y_align: Clutter.ActorAlign.CENTER }));
-        caption.add_child(new St.Label({ text: row.hint, style_class: 'rp-set-aside', y_align: Clutter.ActorAlign.CENTER }));
-        box.add_child(caption);
-
-        const layout = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: true, column_spacing: 8, row_spacing: 8 });
-        const grid = new St.Widget({ layout_manager: layout, x_expand: true });
-        METRICS.forEach(({ key, name }, index) => {
-            const icon = this._setMetricIcon(new St.Icon({ style_class: 'rp-set-tile-icon' }), key);
-            const tile = new PinTile(icon, name, () =>
-                this._settings.set_strv(row.key, togglePinned(this._pinnedMetrics(), key)));
-            layout.attach(tile, index % 2, Math.floor(index / 2), 1, 1);
-            this._pinTiles[key] = tile;
-        });
-        box.add_child(grid);
-        return box;
-    }
-
-    /** Write every stored value into its control. Runs when the page opens and when a setting changes, never per sample. */
-    _refreshSettingsUI() {
-        if (!this._settings || !this._settingsPage) return;
-
-        const positions = pinPositions(this._pinnedMetrics());
-        for (const key in this._pinTiles) this._pinTiles[key].setPosition(positions[key]);
-
-        const tempUnit = this._settings.get_string('unit-temp');
-        for (const row of allSettingRows()) {
-            const control = this._settingControls[row.key];
-            if (!control) continue;
-            if (row.kind === 'switch') {
-                control.setState(this._settings.get_boolean(row.key));
-            } else if (row.kind === 'choice') {
-                control.setValue(this._settings.get_string(row.key));
-            } else {
-                const value = this._settings.get_int(row.key);
-                control.setText(formatSettingValue(row, value, tempUnit));
-                control.setLimits(value > row.min, value < row.max);
-            }
-        }
-
-        const customW = this._settings.get_int('menu-custom-width');
-        const customH = this._settings.get_int('menu-custom-height');
-        const custom = customW > 0 && customH > 0;
-        this._sizeRow.asideLabel.text = custom ? `${customW} × ${customH}` : 'automatic';
-        this._sizeRow.control.reactive = custom;
-
-        this._refreshHardwareRows();
-    }
-
-    /** Rows that only apply to hardware this machine has (or lacks). */
-    _refreshHardwareRows() {
-        if (!this._settingsPage) return;
-        const bat = this._lastData?.bat;
-        const batRow = this._settingRows['battery-top-format'];
-        if (bat && batRow.visible !== !!bat.present) batRow.visible = !!bat.present;
-        const blocked = !!this._lastPwr?.raplBlocked;
-        if (this._powerRow.visible !== blocked) this._powerRow.visible = blocked;
-    }
-
-    _setPowerFixNote(text, state = null) {
-        const note = this._powerFixNote;
-        if (!note) return;
-        note.text = text;
-        for (const name of ['ok', 'error']) {
-            if (name === state) note.add_style_class_name(name);
-            else note.remove_style_class_name(name);
-        }
-        note.visible = text.length > 0;
-    }
-
-    _disarmPowerFix() {
-        this._powerFixArmed = false;
-        if (!this._powerRow) return;
-        this._powerRow.control.label = 'Enable';
-        this._setPowerFixNote('');
-    }
-
-    /** First click explains what the fix does, the second one runs it. */
-    _onPowerFixClicked() {
-        if (!this._powerFixArmed) {
-            this._powerFixArmed = true;
-            this._powerRow.control.label = 'Confirm';
-            this._setPowerFixNote(`Asks for an administrator password. ${RAPL_FIX_WARNING}`);
-            return;
-        }
-        this._powerFixArmed = false;
-        this._powerRow.control.label = 'Enable';
-        this._runPowerFix();
-    }
-
-    _runPowerFix() {
-        const gen = this._gen;
-        const button = this._powerRow.control;
-        const done = (text, state) => {
-            if (gen !== this._gen) return;
-            button.reactive = true;
-            this._setPowerFixNote(text, state);
-        };
-        button.reactive = false;
-        this._setPowerFixNote('Requesting administrator permission…');
-        try {
-            const proc = Gio.Subprocess.new(RAPL_FIX_ARGV, Gio.SubprocessFlags.NONE);
-            proc.wait_check_async(null, (obj, res) => {
-                try {
-                    obj.wait_check_finish(res);
-                } catch (e) {
-                    done(`Failed: ${e.message}`, 'error');
-                    return;
-                }
-                if (gen !== this._gen) return;
-                done('CPU power is now readable.', 'ok');
-                // The cached probe still says "blocked": look again now.
-                this._pwr.forgetProbe();
-                this._poll();
-            });
-        } catch (e) {
-            done(`Failed: ${e.message}`, 'error');
-        }
     }
 
     _launchSystemMonitor(targetView = null) {
@@ -2351,22 +2116,13 @@ export default class ResourcePulseExtension extends Extension {
         const menuIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         menuIcon.set_pivot_point(0.5, 0.5);
         menuBtn.add_child(menuIcon);
-        menuBtn.connect('clicked', () => {
-            this._openSettingsView();
-        });
+        // All settings live in the preferences window.
+        menuBtn.connect('clicked', () => this._openDetailsWindow('settings'));
         this._overviewMenuBtn = menuBtn;
         this._overviewMenuIcon = menuIcon;
 
-        // Opens the preferences window: settings, battery tracking, diagnostics.
-        const detailsBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true, can_focus: true });
-        detailsBtn.add_child(new St.Icon({ icon_name: 'window-new-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' }));
-        detailsBtn.connect('clicked', () => this._openDetailsWindow());
-        this._overviewDetailsBtn = detailsBtn;
-
         this._addClickAnimations(refreshBtn);
         headerBox.add_child(refreshBtn);
-        this._addClickAnimations(detailsBtn);
-        headerBox.add_child(detailsBtn);
         this._addClickAnimations(menuBtn);
         headerBox.add_child(menuBtn);
         this._overviewPage.add_child(headerBox);
@@ -2519,9 +2275,7 @@ export default class ResourcePulseExtension extends Extension {
         const optIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         optIcon.set_pivot_point(0.5, 0.5);
         optBtn.add_child(optIcon);
-        optBtn.connect('clicked', () => {
-            this._openSettingsView();
-        });
+        optBtn.connect('clicked', () => this._openDetailsWindow('settings'));
         this._detailOptBtn = optBtn;
         this._detailOptIcon = optIcon;
 
@@ -2559,13 +2313,6 @@ export default class ResourcePulseExtension extends Extension {
         if (this._lastData) this._updateDashboardUI(this._lastData);
     }
 
-    _ensureSettingsPage() {
-        if (this._settingsPage || !this._menuContainer) return;
-        this._buildSettingsPage();
-        this._settingsPage.visible = false;
-        this._refreshSettingsUI();
-    }
-
     /** Whether the keyboard focus is on something inside the panel. */
     _focusInPanel() {
         const focus = global.stage.get_key_focus();
@@ -2579,12 +2326,11 @@ export default class ResourcePulseExtension extends Extension {
             this._shownTab = this._activeTab;
             this._scrollView?.get_vadjustment().set_value(0);
         }
-        if (this._activeTab === 'settings') this._ensureSettingsPage();
-        else if (this._activeTab !== 'overview') this._ensureDetailSection(this._activeTab);
+        if (this._activeTab !== 'overview') this._ensureDetailSection(this._activeTab);
         // Detail data (sensor list, mounts, processes) is only sampled for
         // the visible tab: fetch it now instead of after up to one interval.
         // _poll() itself coalesces bursts (keyboard navigation, re-renders).
-        if (this._menuOpen && this._activeTab !== 'settings') this._poll();
+        if (this._menuOpen) this._poll();
         if (this._activeTab === 'overview') {
             if (!this._overviewPage.visible) {
                 this._overviewPage.opacity = 0;
@@ -2596,22 +2342,8 @@ export default class ResourcePulseExtension extends Extension {
                 });
             }
             this._detailArea.visible = false;
-            if (this._settingsPage) this._settingsPage.visible = false;
-        } else if (this._activeTab === 'settings') {
-            this._overviewPage.visible = false;
-            this._detailArea.visible = false;
-            if (this._settingsPage) {
-                this._settingsPage.opacity = 0;
-                this._settingsPage.visible = true;
-                this._settingsPage.ease({
-                    opacity: 255,
-                    duration: 400,
-                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
-                });
-            }
         } else {
             this._overviewPage.visible = false;
-            if (this._settingsPage) this._settingsPage.visible = false;
             if (!this._detailArea.visible) {
                 this._detailArea.opacity = 0;
                 this._detailArea.visible = true;
@@ -3314,8 +3046,6 @@ export default class ResourcePulseExtension extends Extension {
         // ── Power ──
         if (data.pwr) {
             const pwr = data.pwr;
-            // The permission row of the settings page comes and goes with this.
-            this._refreshHardwareRows();
             const hasDraw = pwr.raplSupported || pwr.systemPower !== null;
             const sc = this._summaryCards?.power;
             

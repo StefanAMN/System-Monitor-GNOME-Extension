@@ -493,162 +493,6 @@
     border-bottom-left-radius: 14px;
 }
 
-/* ── In-panel settings page ──────────────────────────────────────────────────
-   One row template (.rp-set-row), one control column (.rp-set-control) and
-   three controls of one height: switch, segmented group, stepper. */
-
-.rp-set-header {
-    spacing: 10px;
-    padding-bottom: 8px;
-}
-.rp-set-back {
-    border-radius: 99px;
-    padding: 6px;
-}
-.rp-set-back-icon { icon-size: 16px; }
-.rp-set-heading {
-    font-size: 1.15em;
-    font-weight: bold;
-}
-
-.rp-set-section { padding: 10px 0 6px 0; }
-.rp-set-separator {
-    height: 1px;
-    background-color: rgba(255, 255, 255, 0.10);
-}
-.rp-set-section-head {
-    spacing: 6px;
-    padding-bottom: 2px;
-}
-.rp-set-section-title {
-    font-size: 0.8em;
-    font-weight: bold;
-    color: #a0a0b8;
-}
-.rp-set-hint,
-.rp-set-aside {
-    font-size: 0.85em;
-    color: #8c8c94;
-}
-
-.rp-set-row {
-    height: 40px;
-    spacing: 10px;
-}
-.rp-set-title { color: #ffffff; }
-.rp-set-control { width: 148px; }
-
-/* Segmented group and stepper share one box. */
-.rp-set-group {
-    height: 24px;
-    padding: 2px;
-    border-radius: 8px;
-    background-color: rgba(255, 255, 255, 0.08);
-}
-.rp-set-segment,
-.rp-set-step {
-    border-radius: 6px;
-    font-size: 0.9em;
-    color: #c0c0cc;
-    transition-duration: 100ms;
-}
-.rp-set-step {
-    width: 28px;
-    font-weight: bold;
-    color: #ffffff;
-}
-.rp-set-segment:hover,
-.rp-set-step:hover { background-color: rgba(255, 255, 255, 0.12); }
-.rp-set-step:active { background-color: rgba(53, 132, 228, 0.4); }
-.rp-set-step:insensitive { color: rgba(255, 255, 255, 0.25); }
-.rp-set-segment.active {
-    background-color: #3584e4;
-    color: #ffffff;
-    font-weight: bold;
-}
-.rp-set-value {
-    font-size: 0.9em;
-    font-weight: bold;
-    color: #ffffff;
-}
-
-.rp-set-action {
-    height: 28px;
-    border-radius: 8px;
-    background-color: rgba(255, 255, 255, 0.08);
-    font-size: 0.9em;
-    font-weight: bold;
-    color: #ffffff;
-    transition-duration: 100ms;
-}
-.rp-set-action:hover { background-color: rgba(255, 255, 255, 0.16); }
-.rp-set-action:active { background-color: rgba(53, 132, 228, 0.4); }
-.rp-set-action:insensitive { color: rgba(255, 255, 255, 0.3); }
-
-.rp-set-switch {
-    width: 40px;
-    height: 20px;
-    padding: 2px;
-    border-radius: 12px;
-    background-color: rgba(255, 255, 255, 0.18);
-    transition-duration: 100ms;
-}
-.rp-set-switch:hover { background-color: rgba(255, 255, 255, 0.26); }
-.rp-set-switch.active { background-color: #3584e4; }
-.rp-set-knob {
-    width: 20px;
-    height: 20px;
-    border-radius: 10px;
-    background-color: #ffffff;
-}
-
-/* Keyboard focus looks the same on every control. */
-.rp-set-segment:focus,
-.rp-set-step:focus,
-.rp-set-action:focus,
-.rp-set-switch:focus,
-.rp-set-tile:focus,
-.rp-set-back:focus { box-shadow: inset 0 0 0 2px rgba(120, 174, 237, 0.9); }
-
-.rp-set-pins { padding-bottom: 6px; }
-.rp-set-caption { height: 32px; }
-.rp-set-tile {
-    height: 34px;
-    padding: 0 8px 0 10px;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    background-color: rgba(255, 255, 255, 0.06);
-    color: #c0c0cc;
-    transition-duration: 100ms;
-}
-.rp-set-tile:hover { background-color: rgba(255, 255, 255, 0.12); }
-.rp-set-tile.active {
-    background-color: rgba(53, 132, 228, 0.20);
-    border-color: rgba(53, 132, 228, 0.75);
-    color: #ffffff;
-}
-.rp-set-tile-box { spacing: 8px; }
-.rp-set-tile-icon { icon-size: 16px; }
-.rp-set-badge {
-    width: 18px;
-    height: 18px;
-    border-radius: 9px;
-    background-color: #3584e4;
-    color: #ffffff;
-    font-size: 0.75em;
-    font-weight: bold;
-    text-align: center;
-}
-
-.rp-set-note {
-    font-size: 0.85em;
-    color: #a0a0b8;
-    padding-bottom: 8px;
-}
-.rp-set-note.ok { color: #57e389; }
-.rp-set-note.error { color: #ff7b63; }
-
-
 /* ── Semantic colour utilities (dark is the default) ──────────────────────── */
 
 .rp-fg { color: #ffffff; }
@@ -739,29 +583,18 @@
 .rp-light .resource-pulse-proc-icon,
 .rp-light .resource-pulse-process-name,
 .rp-light .resource-pulse-process-stat,
-.rp-light .resource-pulse-sysmon-label,
-.rp-light .rp-set-title,
-.rp-light .rp-set-value,
-.rp-light .rp-set-step,
-.rp-light .rp-set-action,
-.rp-light .rp-set-tile.active { color: #241f31; }
+.rp-light .resource-pulse-sysmon-label { color: #241f31; }
 
 .rp-light .rp-fg-dim,
 .rp-light .resource-pulse-card-title,
 .rp-light .resource-pulse-secondary-title,
 .rp-light .resource-pulse-hw-stats,
 .rp-light .resource-pulse-detail-label { color: #5e5c64 !important; }
-.rp-light .rp-set-section-title,
-.rp-light .rp-set-segment,
-.rp-light .rp-set-tile,
-.rp-light .rp-set-note { color: #5e5c64; }
 
 .rp-light .rp-fg-muted,
 .rp-light .resource-pulse-card-status,
 .rp-light .resource-pulse-secondary-subtext,
 .rp-light .resource-pulse-hw-stat-title { color: #77767b !important; }
-.rp-light .rp-set-hint,
-.rp-light .rp-set-aside { color: #77767b; }
 
 .rp-light .rp-fg-faint { color: rgba(0, 0, 0, 0.4); }
 .rp-light .rp-grip { color: rgba(0, 0, 0, 0.22); }
@@ -797,30 +630,6 @@
     border: 1px solid rgba(0, 0, 0, 0.08);
 }
 .rp-light .resource-pulse-hw-stat-col { background-color: rgba(0, 0, 0, 0.05); }
-
-.rp-light .rp-set-separator { background-color: rgba(0, 0, 0, 0.12); }
-.rp-light .rp-set-group,
-.rp-light .rp-set-action,
-.rp-light .rp-set-tile { background-color: rgba(0, 0, 0, 0.07); }
-.rp-light .rp-set-switch { background-color: rgba(0, 0, 0, 0.22); }
-.rp-light .rp-set-switch:hover { background-color: rgba(0, 0, 0, 0.30); }
-.rp-light .rp-set-switch.active { background-color: #3584e4; }
-.rp-light .rp-set-segment:hover,
-.rp-light .rp-set-step:hover,
-.rp-light .rp-set-action:hover,
-.rp-light .rp-set-tile:hover { background-color: rgba(0, 0, 0, 0.12); }
-.rp-light .rp-set-segment.active {
-    background-color: #3584e4;
-    color: #ffffff;
-}
-.rp-light .rp-set-tile.active {
-    background-color: rgba(53, 132, 228, 0.16);
-    border-color: rgba(53, 132, 228, 0.8);
-}
-.rp-light .rp-set-step:insensitive,
-.rp-light .rp-set-action:insensitive { color: rgba(0, 0, 0, 0.3); }
-.rp-light .rp-set-note.ok { color: #26a269; }
-.rp-light .rp-set-note.error { color: #c01c28; }
 
 /* Tinted cards: same hues, pastel instead of near-black. */
 .rp-light .tint-cpu { background-color: #e4eefb; border: 1px solid rgba(53, 132, 228, 0.45); }
