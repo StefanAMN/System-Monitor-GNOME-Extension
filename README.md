@@ -9,11 +9,11 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **Top Processes Card**: Current per-process CPU (delta of `/proc/[pid]/stat` ticks, 100% = one core) and resident memory, sampled only while the CPU or Memory tab is open.
 - **Light and Dark**: The dashboard follows the shell's style variant; all colours live in `stylesheet.css` (`.rp-light` overrides).
 - **Honest Readouts**: Metrics the machine cannot provide read `n/a` with the reason in the tooltip; "Disk %" always means space used on `/`.
-- **One Set of Settings, Two Places**: The panel's settings page (⋮ on the overview) and the Libadwaita preferences window are built from the same list (`lib/settingsmodel.js`): pinned metrics and their order, compact mode, tooltips, battery and network format, update interval (1–10 s), temperature and memory units, warning thresholds.
+- **Settings in One Window**: All settings live in the preferences window (⋮ on the overview or on any detail page opens it): pinned metrics and their order, compact mode, tooltips, battery and network format, update interval (1–10 s), temperature and memory units, warning thresholds, and resetting the panel's size. The rows come from one list, `lib/settingsmodel.js`.
 - **Battery Use per App (opt-in)**: Switched on in the details window's Tracking tab. Every 30 s the extension reads each app's CPU time from the session's cgroups (no privileges; short-lived processes included) and shares the CPU package energy above an idle baseline among the apps by that time; on Intel the integrated-graphics part goes to the apps by their GPU busy time (DRM fdinfo). The report shows battery used, average drain, how long a full charge would last, the apps ranked with their time in the background, and what cannot be attributed (idle and platform; display, radios and the rest; time while locked). 14 days of hourly totals, kept only in `~/.local/share/resource-pulse/battery-history.json`.
 - **Diagnostics**: Advice for longer runtime per charge and longer battery life, each with its evidence and, where it can be worked out, the minutes per charge it would save: apps working in the background, performance power mode on battery (one-click switch to Balanced), high screen brightness, a processor running hot on battery, battery wear, and a charge limit the battery supports but has off.
-- **Details Window**: The preferences window, with Settings, Tracking and Diagnostics tabs, opens from the overview header or from the battery page's "top app today" line.
-- **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and controls, Return or Space activates, Left / Right change a choice or a number, Backspace goes back a page, Escape closes the panel.
+- **Details Window in the Extension's Look**: The preferences window has Settings, Tracking and Diagnostics tabs and is styled like the panel: its dark and light surfaces, the metric tints and icons, panel-style stat tiles and a battery-use chart, and the extension's blue accent instead of the system accent. It opens from ⋮ or from the battery page's "top app today" line.
+- **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and buttons, Return or Space opens a card, Left / Right move between detail pages, Backspace goes back to the overview, Escape closes the panel.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
 ## File Structure
@@ -28,7 +28,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ├── icons/                # Bundled symbolic icons (thermal, CPU fallback)
 ├── ui/
 │   ├── widgets.js        # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
-│   ├── settings.js       # Settings page widgets: row, switch, segmented choice, stepper, pin tile
+│   ├── prefsstyle.js     # The preferences window's stylesheet (panel look, blue accent)
 │   ├── prefsrows.js      # Preferences rows (GTK side, never loaded by the shell)
 │   ├── prefsbattery.js   # Tracking tab: switch, history, battery report (GTK side)
 │   └── prefsdiagnostics.js # Diagnostics tab (GTK side)
@@ -79,7 +79,7 @@ Every push and pull request runs the lint and the unit tests on GitHub Actions (
 
 - **One battery, one GPU**: the first battery and the first GPU found are shown.
 - **GPU**: Intel, AMD and NVIDIA are supported, but only the Intel path has been run on real hardware. Integrated GPUs report no dedicated memory, fan or power draw (and often no temperature or clock); the GPU page leaves those fields out.
-- **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; while that is the case the settings page (Panel section) and the preferences window offer a one-time fix. On battery it is the battery's discharge rate.
+- **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; while that is the case the preferences window (Settings › Troubleshooting) offers a one-time fix. On battery it is the battery's discharge rate.
 - **Temperature**: the top bar shows the CPU package sensor, else the first core, else the hottest sensor.
 - **Process CPU**: 100% means one full core, as in `top`. The list needs two samples, so it stays dimmed for about half a second after the tab opens.
 - **Units**: rates are decimal (1 MB/s = 1 000 000 bytes/s). Memory follows the GB / GiB setting.
