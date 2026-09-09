@@ -501,3 +501,18 @@ Whole-project checks on the final code (2026-10-14):
 - Lint clean; 297 unit checks pass; `./dev.sh test-ui` passes on GNOME 50 (host), including the 85 GTK checks of `prefs-check.js`.
 - `./dev.sh test-compat`: 46.10 and 47.10 pass; 48 and 49 first failed to build their images (the Fedora registry could not be reached), and passed when rerun alone: unit, headless and UI tests on all four.
 - `./dev.sh test-overhead` (600 s soak, one run, GPU time included): menu closed +0.47 % of one core, tracking 28 ms CPU per sample (+0.093 %), together +0.56 % (budget 1 %); overview +0.77 %, CPU tab +1.07 % (budget 5 %); soak RSS 283.6 -> 282.1 MB, slope 0.195 MB/min; fds 75 -> 75. The churn rounds counted 808, 808, 813 actors: the network tab grew from 46 to 51 actors in the third round (an interface appearing on the host, within the test's tolerance); not investigated further.
+
+---
+
+# One settings window in the extension's look (2026-10-14, branch `details-window`) — approved by the owner 2026-10-14
+
+Owner's decisions: all settings live in the details (preferences) window only; the window takes the panel's look with the extension's blue accent instead of the system accent.
+
+| # | Milestone | Layer | Proof |
+|---|-----------|-------|-------|
+| W1 | Panel settings page removed; ⋮ (overview and detail pages) opens the window on Settings; the separate details button goes (⋮ does its job); "Panel size → Reset" moves into the window and the extension follows `menu-custom-width/height` when they change elsewhere; the panel power-fix row goes (the window's Troubleshooting has it) | UI | `test-ui`: a real click on ⋮ opens the window on the Settings tab; Reset in the window (GTK check) clears the size and the panel follows; no settings-page code left |
+| W2 | Window stylesheet (`prefs.css`, loaded by prefs.js for this window only): panel surfaces, metric tints, blue accent for GNOME 46 (named colours) and 47+ (CSS variables), dark and light | UI | screenshots dark / light next to the panel on 50; `test-compat` 46–49 screenshots not kept, so 46 is checked by its CSS parsing without warnings in the GTK client |
+| W3 | Tracking tab: summary as stat tiles, apps with tinted bars, battery drain chart (Gtk.DrawingArea, Cairo) | UI | `prefs-check.js` on the fixture: tiles show the summary values, chart has the hourly points; screenshots |
+| W4 | Diagnostics and Settings tabs restyled (cards, severity tints) | UI | screenshots; existing checks unchanged |
+
+Panel tests that drove the in-panel settings page (layout, pointer, keyboard, power row, stepper clamp, threshold unit) are retired with the page; what they protected now lives in the GTK checks of the window (rows write and follow settings, ranges and steps match the schema).
