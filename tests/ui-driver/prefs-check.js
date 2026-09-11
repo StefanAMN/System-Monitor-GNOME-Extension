@@ -3,8 +3,10 @@
 // the sandboxed shell: gjs -m prefs-check.js <extension directory>
 // Prints one PREFS-CHECK line per failure and a final verdict, then shows a
 // freshly built window for a few seconds so the driver can screenshot it.
+import Gdk from 'gi://Gdk?version=4.0';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Graphene from 'gi://Graphene';
 import Gtk from 'gi://Gtk?version=4.0';
 import Adw from 'gi://Adw?version=1';
 import System from 'system';
@@ -172,6 +174,13 @@ async function main() {
 
     const battery = await batteryPages(styleWindow);
 
+    // What the window really shows, read back from its rendering: the test
+    // shell carries a third-party theme as the user stylesheet (dev.sh), which
+    // GTK ranks above application stylesheets, so a look that only holds
+    // without it fails here.
+    if (Gdk.Display.get_default()) await renderedLook(shown);
+    else print('PREFS-CHECK SKIP: no display, the rendered look is not checked');
+
     print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} checks passed`);
     // Leave windows up for the driver's screenshots, one page at a time; the
     // driver shoots on each SHOW line.
@@ -207,6 +216,84 @@ async function main() {
     shown.dispose();
     battery.dispose();
     battery.window.destroy();
+}
+
+function findAll(widget, test, out = []) {
+    if (test(widget)) out.push(widget);
+    for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) findAll(child, test, out);
+    return out;
+}
+
+// RGBA bytes of a widget as drawn on its own (its background and children).
+function render(widget) {
+    const width = widget.get_width();
+    const height = widget.get_height();
+    const snapshot = new Gtk.Snapshot();
+    new Gtk.WidgetPaintable({ widget }).snapshot(snapshot, width, height);
+    const node = snapshot.to_node();
+    if (!node) return null;
+    const texture = widget.get_native().get_renderer().render_texture(node, new Graphene.Rect().init(0, 0, width, height));
+    const downloader = Gdk.TextureDownloader.new(texture);
+    downloader.set_format(Gdk.MemoryFormat.R8G8B8A8);
+    const [bytes, stride] = downloader.download_bytes();
+    const data = bytes.toArray();
+    return { width, height, at: (x, y) => Array.from(data.slice(Math.round(y) * stride + Math.round(x) * 4, Math.round(y) * stride + Math.round(x) * 4 + 4)) };
+}
+
+const hex = colour => [1, 3, 5].map(i => parseInt(colour.slice(i, i + 2), 16));
+const near = (rgb, colour, tolerance = 14) => hex(colour).every((v, i) => Math.abs(v - rgb[i]) <= tolerance);
+const show = rgb => `rgb(${rgb.slice(0, 3).join(', ')})`;
+
+async function renderedLook(shown) {
+    const { palette } = await import(`file://${root}/ui/prefsstyle.js`);
+    const manager = Adw.StyleManager.get_default();
+    const window = shown.window;
+    window.set_default_size(640, 660);
+    window.present();
+    const row = shown.pinRows.cpu;
+    const toggle = findAll(row, w => w instanceof Gtk.Switch)[0];
+    const title = findAll(row, w => w instanceof Gtk.Label && w.label === row.title)[0];
+    ok(row.active && toggle && title, 'look: the CPU pin row, its switch and title were not found');
+    for (const [variant, scheme] of [['dark', Adw.ColorScheme.FORCE_DARK], ['light', Adw.ColorScheme.FORCE_LIGHT]]) {
+        manager.color_scheme = scheme;
+        await sleep(600);
+        const p = palette(variant === 'dark');
+        const shot = render(window);
+        if (!shot) {
+            ok(false, `look (${variant}): the window rendered nothing`);
+            continue;
+        }
+        const point = (widget, x, y) => {
+            const [okPoint, out] = widget.compute_point(window, new Graphene.Point().init(x, y));
+            return okPoint ? shot.at(out.x, out.y) : [0, 0, 0, 0];
+        };
+        // Beside the page's column, the window's own background.
+        const bg = shot.at(8, shot.height / 2);
+        ok(near(bg, p.window), `look (${variant}): window background is ${show(bg)}, not ${p.window}`);
+        const header = findAll(window, w => w instanceof Adw.HeaderBar)[0];
+        const headerBg = header ? point(header, header.get_width() * 0.3, 3) : bg;
+        ok(near(headerBg, p.header), `look (${variant}): header is ${show(headerBg)}, not ${p.header}`);
+        // Inside the row's left padding: the card surface.
+        const card = point(row, 5, row.get_height() / 2);
+        ok(near(card, p.card), `look (${variant}): card is ${show(card)}, not ${p.card}`);
+        // The checked switch's track, left of the knob: the extension's blue.
+        const track = point(toggle, toggle.get_width() * 0.22, toggle.get_height() / 2);
+        ok(near(track, '#3584e4', 30), `look (${variant}): a checked switch is ${show(track)}, not the extension's blue`);
+        // The row title's ink: light on dark, dark on light.
+        const text = render(title);
+        let ink = null;
+        for (let y = 0; text && y < text.height; y++) {
+            for (let x = 0; x < text.width; x++) {
+                const px = text.at(x, y);
+                if (px[3] > 200) ink = px;
+            }
+        }
+        const lightness = ink ? (ink[0] + ink[1] + ink[2]) / 3 : -1;
+        ok(variant === 'dark' ? lightness > 200 : lightness >= 0 && lightness < 90,
+            `look (${variant}): row text is ${ink ? show(ink) : 'not drawn'}`);
+    }
+    manager.color_scheme = Adw.ColorScheme.DEFAULT;
+    window.hide();
 }
 
 function findScrolled(widget) {
