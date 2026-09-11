@@ -533,3 +533,9 @@ Found on the way: the tracking test ranked the burner by CPU over the whole hour
 Deviation: the header shows the extension's mark only; with the name as well the tab switcher was cut off ("Diagno…").
 
 Checks on the final code: lint clean; 297 unit checks; `test-ui` on 50 (94 GTK checks of the window); `test-compat` 46.10, 47.10, 48.8, 49.10 pass. `test-overhead` was not rerun: sampling is unchanged and the panel lost a page rather than gained work.
+
+### W5 (2026-10-15): the whole window in the panel's blue
+
+Owner's correction: the first pass only styled the new widgets; the window itself stayed the neutral grey of the system theme. Now the entire window takes the panel's CPU-card look: navy background and header (pale blue in light), every list card and tile in the CPU card's surface with its thin blue border, blue-tinted buttons, a blue selected tab, blue hover on rows and in popovers.
+
+Proof: lint clean; GTK check that the stylesheet parses (dark and light) in the running libadwaita; `test-ui` on 50, now screenshotting Settings, Tracking and Diagnostics top to bottom in light and dark; `test-compat` 46–49 for the named-colour path.
