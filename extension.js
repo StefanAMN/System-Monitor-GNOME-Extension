@@ -1026,8 +1026,11 @@ export default class ResourcePulseExtension extends Extension {
         alertCard.add_child(memThreshRow.row);
 
         // 4.3 Temp Threshold
-        const tempThreshRow = this._buildStepperRow('Temperature Alert Threshold', 40, 100, 5, 'threshold-temp', '°C');
+        // Stored in °C; shown in the unit the rest of the UI uses.
+        const tempThreshRow = this._buildStepperRow('Temperature Alert Threshold', 40, 100, 5, 'threshold-temp',
+            v => formatTemp(v, this._settings.get_string('unit-temp')));
         this._tempThreshLbl = tempThreshRow.valLbl;
+        this._tempThreshInc = tempThreshRow.incBtn;
         alertCard.add_child(tempThreshRow.row);
 
         this._settingsPage.add_child(alertCard);
@@ -1078,7 +1081,9 @@ export default class ResourcePulseExtension extends Extension {
         this._menuContainer.add_child(this._settingsPage);
     }
 
-    _buildStepperRow(labelText, min, max, step, settingKey, unitSuffix) {
+    /** @param {string|function(number): string} unit suffix, or a formatter for the stored value */
+    _buildStepperRow(labelText, min, max, step, settingKey, unit) {
+        const format = typeof unit === 'function' ? unit : v => `${v}${unit}`;
         const row = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
         const info = new St.BoxLayout({ vertical: true, x_expand: true });
         info.add_child(new St.Label({ text: labelText, style_class: 'resource-pulse-setting-label' }));
@@ -1086,7 +1091,7 @@ export default class ResourcePulseExtension extends Extension {
 
         const controls = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
         const decBtn = new St.Button({ label: '−', style_class: 'resource-pulse-stepper-btn', reactive: true });
-        const valLbl = new St.Label({ text: `${this._settings.get_int(settingKey)}${unitSuffix}`, style: 'font-size: 0.9em; font-weight: bold; min-width: 44px; text-align: center;' });
+        const valLbl = new St.Label({ text: format(this._settings.get_int(settingKey)), style: 'font-size: 0.9em; font-weight: bold; min-width: 44px; text-align: center;' });
         const incBtn = new St.Button({ label: '+', style_class: 'resource-pulse-stepper-btn', reactive: true });
 
         // Preferences step by 1, so the stored value need not be a multiple
@@ -1096,7 +1101,7 @@ export default class ResourcePulseExtension extends Extension {
             const cur = this._settings.get_int(settingKey);
             const next = Math.max(min, Math.min(max, cur + delta));
             if (next !== cur) this._settings.set_int(settingKey, next);
-            valLbl.text = `${this._settings.get_int(settingKey)}${unitSuffix}`;
+            valLbl.text = format(this._settings.get_int(settingKey));
         };
         decBtn.connect('clicked', () => stepBy(-step));
         incBtn.connect('clicked', () => stepBy(step));
@@ -1179,7 +1184,7 @@ export default class ResourcePulseExtension extends Extension {
         // Thresholds
         if (this._cpuThreshLbl) this._cpuThreshLbl.text = `${this._settings.get_int('threshold-cpu')}%`;
         if (this._memThreshLbl) this._memThreshLbl.text = `${this._settings.get_int('threshold-mem')}%`;
-        if (this._tempThreshLbl) this._tempThreshLbl.text = `${this._settings.get_int('threshold-temp')}°C`;
+        if (this._tempThreshLbl) this._tempThreshLbl.text = formatTemp(this._settings.get_int('threshold-temp'), this._settings.get_string('unit-temp'));
 
         // Dimensions
         const customW = this._settings.get_int('menu-custom-width') || 0;
