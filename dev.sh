@@ -470,7 +470,7 @@ cmd_pack() {
     log_title "Packaging Extension"
     check_syntax
     compile_schemas
-    (cd "$SCRIPT_DIR" && gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons --force)
+    (cd "$SCRIPT_DIR" && gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons --extra-source=LICENSE --force)
     log_success "Extension packaged: $SCRIPT_DIR/$UUID.shell-extension.zip"
 }
 
