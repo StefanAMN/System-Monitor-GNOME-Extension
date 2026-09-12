@@ -166,6 +166,12 @@ How each was checked:
 - Not shown failing on the old code: the stepper click (the old-code run stopped earlier, on the test's own missing button reference; the rejected 98 -> 103 write was observed by hand during the audit), the stuck collector, the bogus pinned list, and unit tests of functions that did not exist before.
 - Commit `5d5dc6e` (keyboard) was split out of a tree that was UI-tested together with `3678985`; it was not UI-tested on its own.
 
+Overhead (`./dev.sh test-overhead`, standard 600 s soak): passed. Menu closed +0.70 %, overview +0.67 %, CPU tab +1.27 % of one core; soak RSS 263.4 -> 265.9 MB, slope 0.224 MB/min (budget 0.5), fds 75 -> 75, actors 788 -> 788.
+
+- These CPU figures are higher than the 2026-10-03 ones (+0.23 / +0.37 / +0.90). An A/B run of `c4f204c` (before this branch) against HEAD, alternating, 45 s windows, two rounds each, shows the same level for both: menu closed old +0.44 / +0.60, new +0.49 / +0.60; overview old +0.87 / +1.07, new +0.82 / +0.89; CPU tab old +1.40 / +1.49, new +1.29 / +1.40. So this branch did not add cost; why the machine measures higher than a week ago was not investigated.
+- A first run with a shortened 120 s soak failed on RSS slope (0.69 MB/min over six samples, RSS falling 267.1 -> 264.3 MB overall). The window is too short for the slope budget; the standard run is the one that counts.
+- One churn round in the standard run counted 793 instead of 788 actors (network tab 46 -> 51); the check only fails on growth in every round. Not investigated.
+
 Not executed on this machine, so not marked as passed:
 
 - `nvidia-smi` timeout against a real hung `nvidia-smi` (the kill path is tested with `sleep 30`); every NVIDIA / AMD code path.
