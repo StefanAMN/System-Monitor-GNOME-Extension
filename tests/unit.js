@@ -16,7 +16,7 @@ import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, Thermal
 import { raplWatts } from '../lib/power.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
 
 let failed = 0;
 let passed = 0;
@@ -42,8 +42,11 @@ eq(formatBytes(0.5), '0 B', 'bytes fractional (used to index units[-1])');
 eq(formatBytes(1536, true), '1.5 KiB', 'bytes IEC');
 eq(formatBytes(1e21), '1000000.0 PB', 'bytes beyond unit table stays in last unit');
 eq(formatSpeed(0.2), '0 B/s', 'speed fractional');
-eq(formatSpeed(5 * 1024 ** 5), '5242880.0 GB/s', 'speed beyond unit table');
-eq(formatSpeed(1024 * 1024), '1.0 MB/s', 'speed MB');
+eq(formatSpeed(5e15), '5000000.0 GB/s', 'speed beyond unit table');
+eq([formatSpeed(1e6), formatSpeed(1500), formatSpeed(999)], ['1.0 MB/s', '1.5 KB/s', '999.0 B/s'], 'speed: decimal units, as labelled');
+eq([formatBytes(999949), formatBytes(999950), formatBytes(1e6)], ['999.9 KB', '1.0 MB', '1.0 MB'], 'bytes: a value that rounds to a full step moves to the next unit');
+eq([formatBytes(1024 ** 3 - 1, true), formatSpeed(999.96), formatSpeed(999960)], ['1.0 GiB', '1.0 KB/s', '1.0 MB/s'], 'bytes / speed: no "1024.0 MiB" or "1000.0 KB/s"');
+eq(formatBytes(999.96e15), '1000.0 PB', 'bytes: the last unit has nowhere to roll over to');
 eq(formatTemp(100, 'F'), '212°F', 'temp F');
 eq(formatUptime(90061), '1d 1h', 'uptime');
 eq(formatDuration(3660), '1h 1m', 'duration');
@@ -192,10 +195,13 @@ docker0: 1 2 3
         '/dev/sdb1 /media/me/USB\\040Stick vfat rw 0 0',
         '/dev/sdb1 /mnt/again vfat rw 0 0',
         '/dev/sdc1 /srv/data ext4 rw 0 0',
+        '/dev/sdd1 /run/media/me/CAMERA exfat rw 0 0',
+        '/dev/sde1 /mnt/win ntfs3 rw 0 0',
         '/dev/loop3 /snap/core/1 squashfs ro 0 0'
     ].join('\n'));
-    eq(mounts, [{ device: '/dev/nvme0n1p3', mount: '/home' }, { device: '/dev/sdb1', mount: '/media/me/USB Stick' }],
-        'mounts: user-facing real filesystems, one per device, \\040 decoded to a space');
+    eq(mounts, [{ device: '/dev/nvme0n1p3', mount: '/home' }, { device: '/dev/sdb1', mount: '/media/me/USB Stick' },
+        { device: '/dev/sdd1', mount: '/run/media/me/CAMERA' }, { device: '/dev/sde1', mount: '/mnt/win' }],
+        'mounts: user-facing real filesystems incl. exFAT and ntfs3, one per device, \\040 decoded to a space');
 }
 
 // ── collectors: thermal ──
@@ -262,6 +268,11 @@ docker0: 1 2 3
     eq(powerReadout({ raplSupported: true, packagePower: 9, systemPower: 14.5 }).value, 14.5, 'power: system draw preferred on battery');
     eq(thermalUnavailable({ packageTemp: 0, sensors: [], fans: [] }), true, 'thermal: no sensors is unavailable');
     eq(thermalUnavailable({ packageTemp: 51, sensors: [{}], fans: [] }), false, 'thermal: reading present');
+    eq(gpuTooltip({ present: true, brand: 'Intel', percent: 12.4, memTotal: 0, memPercent: 0, temp: 0 }), 'Intel: 12%',
+        'gpu tooltip: integrated GPU shows no "VRAM: 0%" or "Temp: 0°C"');
+    eq(gpuTooltip({ present: true, brand: 'NVIDIA', percent: 37, memTotal: 8e9, memPercent: 25, temp: 61 }, 'F'), 'NVIDIA: 37%\nVRAM: 25% · Temp: 142°F',
+        'gpu tooltip: dedicated GPU shows memory and temperature');
+    ok(/not available/.test(gpuTooltip({ present: false })), 'gpu tooltip: absent');
 }
 
 {
@@ -280,7 +291,7 @@ docker0: 1 2 3
     ok(fits('thermal', { tempUnit: 'C' }, [formatTemp(99, 'C'), 'n/a']), 'template: thermal C');
     eq(labelTemplate('battery', { batFmt: 'percent-time' }), '100%', 'template: no room reserved for a battery time estimate that may be absent');
 
-    eq([0, 500, 1024, 9.94 * 1024, 9.96 * 1024, 999.4 * 1024, 999.6 * 1024, 5 * 1024 ** 2, 2.5 * 1024 ** 3, NaN, -4].map(formatSpeedCompact),
+    eq([0, 500, 1000, 9.94 * 1000, 9.96 * 1000, 999.4 * 1000, 999.6 * 1000, 5 * 1000 ** 2, 2.5 * 1000 ** 3, NaN, -4].map(formatSpeedCompact),
         ['0.0 KB/s', '0.5 KB/s', '1.0 KB/s', '9.9 KB/s', '10 KB/s', '999 KB/s', '1.0 MB/s', '5.0 MB/s', '2.5 GB/s', '0.0 KB/s', '0.0 KB/s'],
         'compact speed: never more than three digits');
     const speeds = [0, 1, 999, 1024, 20000, 1023 * 1024, 1024 ** 2, 7e8, 3e9, 9e11];
