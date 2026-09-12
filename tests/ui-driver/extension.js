@@ -313,6 +313,13 @@ async function run() {
     let ext = Main.extensionManager.lookup(TARGET);
     check(ext?.stateObj, 'target extension not enabled');
 
+    // A stored list with an unknown key and a duplicate (GSettings accepts
+    // both) must not put a broken or repeated metric in the top bar.
+    ext.stateObj._settings.set_strv('pinned-metrics', ['cpu', 'bogus', 'cpu', 'memory']);
+    await sleep(800);
+    check(Object.keys(ext.stateObj._topBarWidgets).join() === 'cpu,memory' && ext.stateObj._indicatorBox.get_n_children() === 3,
+        `bogus pinned list built ${Object.keys(ext.stateObj._topBarWidgets)} with ${ext.stateObj._indicatorBox.get_n_children()} children`);
+
     // Pin everything (sandboxed dconf) so every top-bar label is exercised.
     ext.stateObj._settings.set_strv('pinned-metrics',
         ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu']);

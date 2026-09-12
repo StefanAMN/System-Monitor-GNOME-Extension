@@ -13,11 +13,19 @@
       <description>Update interval in seconds (1 to 10).</description>
     </key>
     <key name="unit-temp" type="s">
+      <choices>
+        <choice value='C'/>
+        <choice value='F'/>
+      </choices>
       <default>'C'</default>
       <summary>Temperature Unit</summary>
       <description>Temperature unit (C or F).</description>
     </key>
     <key name="unit-mem" type="s">
+      <choices>
+        <choice value='GB'/>
+        <choice value='GiB'/>
+      </choices>
       <default>'GB'</default>
       <summary>Memory Unit</summary>
       <description>Memory unit (GB or GiB).</description>
@@ -45,22 +53,26 @@
       <summary>Temperature Alert Threshold</summary>
       <description>Temperature threshold to trigger warning style.</description>
     </key>
-    <key name="density-mode" type="s">
-      <default>'compact'</default>
-      <summary>Density Mode</summary>
-      <description>Density mode for the dashboard cards ('compact' or 'detailed').</description>
-    </key>
     <key name="show-tooltips" type="b">
       <default>true</default>
       <summary>Show Tooltips</summary>
       <description>Show rich contextual hover tooltips on panel indicators.</description>
     </key>
     <key name="battery-top-format" type="s">
+      <choices>
+        <choice value='percent'/>
+        <choice value='percent-time'/>
+      </choices>
       <default>'percent'</default>
       <summary>Battery Top Bar Format</summary>
       <description>Format of battery metric in top bar ('percent' or 'percent-time').</description>
     </key>
     <key name="network-top-format" type="s">
+      <choices>
+        <choice value='download'/>
+        <choice value='upload'/>
+        <choice value='both'/>
+      </choices>
       <default>'download'</default>
       <summary>Network Top Bar Format</summary>
       <description>Format of network metric in top bar ('download', 'upload', or 'both').</description>

@@ -416,6 +416,7 @@ cmd_test_overhead() {
 # ------------------------------------------------------------------------------
 cmd_test_unit() {
     check_syntax
+    compile_schemas
     log_info "Running parser / engine unit tests (gjs, no shell needed)..."
     if gjs -m "$SCRIPT_DIR/tests/unit.js"; then
         log_success "Unit tests passed"
