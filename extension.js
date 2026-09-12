@@ -10,6 +10,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 
 import { CpuSampler } from './lib/cpu.js';
 import { MemorySampler } from './lib/memory.js';
@@ -26,6 +27,7 @@ import { BatteryLedger, saveLedger } from './lib/batteryledger.js';
 import { appInfo as ledgerAppInfo } from './lib/appnames.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
+import { AlertMonitor, alertReadings, alertLine } from './lib/alerts.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
@@ -47,6 +49,20 @@ const CARD_SLOT_HEIGHT = 22;
 const METRIC_NAMES = {
     cpu: 'CPU', memory: 'Memory', battery: 'Battery', power: 'Power',
     disk: 'Disk', network: 'Network', thermal: 'Temperature', gpu: 'GPU'
+};
+// Alerts watch metrics that are not pinned too; the slower ones less often.
+const ALERT_DISK_EVERY_US = 60e6;
+const ALERT_GPU_EVERY_US = 30e6;
+// Share of time some program waited for memory (PSI "full", avg10) that alerts.
+const PRESSURE_LIMIT = 10;
+// Panel page and wording per alert.
+const ALERTS = {
+    cpu: { tab: 'cpu', name: 'CPU', title: 'CPU usage is high' },
+    memory: { tab: 'memory', name: 'Memory', title: 'Memory is almost full' },
+    thermal: { tab: 'thermal', name: 'Temperature', title: 'The processor is hot' },
+    gpu: { tab: 'gpu', name: 'GPU', title: 'GPU usage is high' },
+    disk: { tab: 'disk', name: 'Disk /', title: 'Disk space is running out' },
+    pressure: { tab: 'memory', name: 'Waiting for memory', title: 'The system is short of memory' },
 };
 const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 
@@ -86,6 +102,13 @@ export default class ResourcePulseExtension extends Extension {
         this._net = new NetworkSampler();
         this._thm = new ThermalSampler();
         this._gpu = new GpuSampler();
+        this._alerts = new AlertMonitor();
+        this._alertSampled = { dsk: 0, gpu: 0 };
+        this._alertCauses = {};
+        this._alertProc = null;
+        this._causeTimerId = 0;
+        this._causeResolve = null;
+        this._notifySource = null;
 
         // Poll state. The generation token invalidates polls that are still
         // awaiting I/O when the extension is disabled or re-enabled.
@@ -446,6 +469,16 @@ export default class ResourcePulseExtension extends Extension {
         this._thm = null;
         this._gpu?.destroy();
         this._gpu = null;
+        if (this._causeTimerId) GLib.source_remove(this._causeTimerId);
+        this._causeTimerId = 0;
+        this._causeResolve?.();
+        this._causeResolve = null;
+        this._alertProc?.destroy();
+        this._alertProc = null;
+        this._notifySource?.destroy();
+        this._notifySource = null;
+        this._alerts = null;
+        this._dangerBox = null;
 
         // Pages are built lazily, so a field left over from the previous
         // session would not be overwritten by the next enable(). Drop them
@@ -1089,7 +1122,7 @@ export default class ResourcePulseExtension extends Extension {
 
             // While the menu is open every sampler runs so all graphs keep a
             // continuous history; only the expensive detail reads follow the tab.
-            const need = {
+            const shown = {
                 cpu: isOpen || pinned.includes('cpu'),
                 mem: isOpen || pinned.includes('memory'),
                 bat: isOpen || pinned.includes('battery') || pinned.includes('power'),
@@ -1099,6 +1132,19 @@ export default class ResourcePulseExtension extends Extension {
                 gpu: isOpen || pinned.includes('gpu'),
                 pwr: isOpen || pinned.includes('power')
             };
+            // Alerts also watch what is not shown: the cheap metrics on every
+            // poll, disk space and the GPU less often. Graphs record only
+            // what is shown, so their time axis stays continuous.
+            const need = {
+                ...shown,
+                cpu: true,
+                mem: true,
+                thm: true,
+                dsk: shown.dsk || now - this._alertSampled.dsk >= ALERT_DISK_EVERY_US,
+                gpu: shown.gpu || now - this._alertSampled.gpu >= ALERT_GPU_EVERY_US,
+            };
+            if (need.dsk) this._alertSampled.dsk = now;
+            if (need.gpu) this._alertSampled.gpu = now;
 
             const deadline = new Promise(resolve => {
                 this._pollDeadlineId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POLL_DEADLINE_MS, () => {
@@ -1171,9 +1217,10 @@ export default class ResourcePulseExtension extends Extension {
             }
 
             const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes, procSort };
-            if (tick || this._recordPending) this._recordHistory(data, need, now);
+            if (tick || this._recordPending) this._recordHistory(data, shown, now);
             this._lastData = data;
             this._render(data);
+            this._updateAlerts(data, now);
             // Fetch the second reading now instead of at the next tick.
             if (procWarmingUp) this._deferPoll(MIN_RESAMPLE_US);
         } catch (e) {
@@ -1242,6 +1289,20 @@ export default class ResourcePulseExtension extends Extension {
             tempUnit: this._settings.get_string('unit-temp')
         };
 
+        // Shown while any metric, pinned or not, is in alert; its tooltip
+        // says which.
+        this._dangerBox = new St.BoxLayout({ reactive: true, track_hover: true, visible: false, style_class: 'resource-pulse-danger' });
+        this._dangerBox.add_child(new St.Icon({
+            icon_name: 'dialog-warning-symbolic',
+            // Not system-status-icon: its panel padding makes the ⚠ wider
+            // than a value, so showing it would hide two values instead of one.
+            style_class: 'resource-pulse-danger-icon',
+            y_align: Clutter.ActorAlign.CENTER
+        }));
+        this._dangerBox.connect('enter-event', () => this._showTooltip(this._dangerBox, this._alertText()));
+        this._dangerBox.connect('leave-event', () => this._hideTooltip());
+        this._indicatorBox.add_child(this._dangerBox);
+
         pinned.forEach((key, index) => {
             if (index > 0) {
                 this._indicatorBox.add_child(new St.Label({
@@ -1307,6 +1368,7 @@ export default class ResourcePulseExtension extends Extension {
             this._topBarWidgets[key] = { box, label, icon };
         });
         this._applyTopBarCollapse();
+        this._showDanger();
         this._fitTopBar();
     }
 
@@ -1484,12 +1546,130 @@ export default class ResourcePulseExtension extends Extension {
             if (key === 'cpu' && data.cpu && data.cpu.total >= cpuWarn) warn = true;
             if (key === 'memory' && data.mem && data.mem.percent >= memWarn) warn = true;
             if (key === 'thermal' && data.thm && data.thm.packageTemp >= tempWarn) warn = true;
+            if (key === 'gpu' && data.gpu?.present && data.gpu.percent >= this._settings.get_int('threshold-gpu')) warn = true;
+            if (key === 'disk' && data.dsk?.mounts?.[0]?.percent >= this._settings.get_int('threshold-disk')) warn = true;
             if (warn) widget.label.add_style_class_name('resource-pulse-label-warn');
             else widget.label.remove_style_class_name('resource-pulse-label-warn');
         });
         // A value that grew wider changes what the panel is asked for
         // without changing what it is given, so no signal reports it.
         this._fitTopBar();
+    }
+
+    // ── Alerts ────────────────────────────────────────────────────────────────
+
+    _updateAlerts(data, now) {
+        if (!this._alerts) return;
+        const s = this._settings;
+        const limits = {
+            cpu: s.get_int('threshold-cpu'),
+            memory: s.get_int('threshold-mem'),
+            thermal: s.get_int('threshold-temp'),
+            gpu: s.get_int('threshold-gpu'),
+            disk: s.get_int('threshold-disk'),
+            pressure: PRESSURE_LIMIT,
+        };
+        const { raised, cleared } = this._alerts.update(alertReadings(data, limits, thermalUnavailable), now);
+        for (const key of cleared) delete this._alertCauses[key];
+        for (const key of raised) this._onAlertRaised(key, now);
+        if (raised.length || cleared.length) this._showDanger();
+    }
+
+    /** The ⚠ in the top bar, and the pinned values of the metrics in alert. */
+    _showDanger() {
+        if (!this._dangerBox || !this._alerts) return;
+        const active = new Set(this._alerts.active().map(a => ALERTS[a.key].tab));
+        this._dangerBox.visible = active.size > 0;
+        for (const [key, widget] of Object.entries(this._topBarWidgets)) {
+            if (!widget.label) continue;
+            if (active.has(key)) widget.label.add_style_class_name('resource-pulse-label-danger');
+            else widget.label.remove_style_class_name('resource-pulse-label-danger');
+        }
+    }
+
+    _alertLine(alert, now) {
+        const tempUnit = this._settings.get_string('unit-temp') || 'C';
+        const info = ALERTS[alert.key];
+        if (alert.key === 'disk') {
+            const free = this._lastDsk?.mounts?.[0]?.free;
+            return `${info.name} ${Math.round(alert.value)} % full${free !== undefined ? ` · ${formatBytes(free, this._settings.get_string('unit-mem') === 'GiB')} free` : ''}`;
+        }
+        const format = alert.key === 'thermal' ? v => formatTemp(v, tempUnit) : v => `${Math.round(v)} %`;
+        const line = alertLine(alert, now, { name: info.name, format });
+        const cause = this._alertCauses[alert.key];
+        return cause ? `${line} — ${cause}` : line;
+    }
+
+    /** Tooltip of the ⚠: one line per metric in alert. */
+    _alertText() {
+        const now = GLib.get_monotonic_time();
+        const lines = this._alerts?.active().map(a => this._alertLine(a, now)) ?? [];
+        return lines.length ? lines.join('\n') : 'No alerts';
+    }
+
+    async _onAlertRaised(key, now) {
+        const gen = this._gen;
+        if (key === 'cpu' || key === 'memory') {
+            const cause = await this._alertCause(key);
+            if (gen !== this._gen || !this._alerts?.isActive(key)) return;
+            if (cause) this._alertCauses[key] = cause;
+        }
+        if (this._settings.get_boolean('alert-notify') && this._alerts.takeNotification(key, now)) {
+            const alert = this._alerts.active().find(a => a.key === key);
+            if (alert) this._notifyAlert(key, this._alertLine(alert, GLib.get_monotonic_time()));
+        }
+    }
+
+    /**
+     * The process behind a CPU or memory alert: one scan for memory, two a
+     * second apart for CPU (rates need a baseline). A separate sampler, so
+     * the panel's process list keeps its own baseline.
+     */
+    async _alertCause(key) {
+        this._alertProc ??= new ProcessSampler();
+        const memTotal = this._lastMem?.total || 0;
+        const byMemory = key === 'memory';
+        let result = await this._alertProc.sample(memTotal, byMemory, 1);
+        if (!byMemory && result) {
+            // disable() ends the wait early through _causeResolve.
+            await new Promise(resolve => {
+                this._causeResolve = resolve;
+                this._causeTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+                    this._causeTimerId = 0;
+                    this._causeResolve = null;
+                    resolve();
+                    return GLib.SOURCE_REMOVE;
+                });
+            });
+            if (!this._alertProc) return '';
+            result = await this._alertProc.sample(memTotal, false, 1);
+        }
+        this._alertProc?.reset();
+        const top = result?.top?.[0];
+        if (!top) return '';
+        const name = top.count > 1 ? `${top.comm} ×${top.count}` : top.comm;
+        // Process CPU is per core (100 = one core), so say it in cores.
+        return byMemory
+            ? `${name} using ${formatBytes(top.rssBytes, this._settings.get_string('unit-mem') === 'GiB')}`
+            : `${name} using ${(top.cpu / 100).toFixed(1)} cores`;
+    }
+
+    _notifyAlert(key, body) {
+        if (!this._notifySource) {
+            this._notifySource = new MessageTray.Source({ title: 'Resource Pulse', iconName: 'dialog-warning-symbolic' });
+            this._notifySource.connect('destroy', () => {
+                this._notifySource = null;
+            });
+            Main.messageTray.add(this._notifySource);
+        }
+        const notification = new MessageTray.Notification({ source: this._notifySource, title: ALERTS[key].title, body });
+        notification.connect('activated', () => {
+            if (!this._indicator) return;
+            this._activeTab = ALERTS[key].tab;
+            this._updateTabVisibility();
+            this._indicator.menu.open();
+        });
+        this._notifySource.addNotification(notification);
     }
 
     // ── Overview Page ─────────────────────────────────────────────────────────

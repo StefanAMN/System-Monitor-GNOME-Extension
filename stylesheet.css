@@ -677,3 +677,9 @@
     border: 1px solid rgba(0, 0, 0, 0.14);
     color: #241f31;
 }
+
+/* ── Alerts ───────────────────────────────────────────────────────────────── */
+/* A metric that stayed above its limit: ⚠ in the top bar, its value red
+   (same weight, so it keeps the width reserved for it). */
+.resource-pulse-danger-icon { color: #ff3b30; icon-size: 16px; padding: 0 3px; }
+.resource-pulse-label-danger { color: #ff3b30; }

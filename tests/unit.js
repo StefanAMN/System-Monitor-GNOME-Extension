@@ -21,6 +21,7 @@ import { parseDrmFdinfo, GpuUsageSampler } from '../lib/gpuusage.js';
 import { diagnose, minutesGained } from '../lib/diagnostics.js';
 import { batteryFromProperties, readBacklight } from '../lib/systemstate.js';
 import { appInfo } from '../lib/appnames.js';
+import { AlertMonitor, alertReadings, alertLine } from '../lib/alerts.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
@@ -400,6 +401,52 @@ docker0: 1 2 3
         [95, 100, 100, 50, 1], 'settings model: a step clamps to the range, also from an off-grid value');
     eq(pinPositions(['memory', 'cpu']), { cpu: 2, memory: 1, battery: 0, power: 0, disk: 0, network: 0, thermal: 0, gpu: 0 }, 'pins: positions follow the pinned order');
     eq([togglePinned(['cpu', 'memory'], 'gpu'), togglePinned(['cpu', 'memory'], 'cpu')], [['cpu', 'memory', 'gpu'], ['memory']], 'pins: toggling appends or removes');
+}
+
+// ── alerts: sustain, recovery, unavailable values, notification gap ──
+{
+    const S = 1e6;
+    const a = new AlertMonitor({ sustainUs: 30 * S, recoverUs: 10 * S, hysteresis: 5, notifyGapUs: 600 * S });
+    const at = (value, t) => a.update({ cpu: { value, threshold: 90 } }, t * S);
+    eq(at(95, 0), { raised: [], cleared: [] }, 'alerts: not raised on the first high reading');
+    eq(at(95, 29), { raised: [], cleared: [] }, 'alerts: not raised before 30 s');
+    eq(at(95, 30), { raised: ['cpu'], cleared: [] }, 'alerts: raised after 30 s at or above the threshold');
+    eq(a.active().map(x => [x.key, x.since]), [['cpu', 0]], 'alerts: active since the first high reading');
+    eq(at(88, 31), { raised: [], cleared: [] }, 'alerts: a dip inside the hysteresis band does not clear');
+    eq(at(84, 32), { raised: [], cleared: [] }, 'alerts: below the band, recovery starts');
+    eq(at(95, 35), { raised: [], cleared: [] }, 'alerts: back up, recovery restarts');
+    at(84, 36);
+    eq(at(84, 45), { raised: [], cleared: [] }, 'alerts: not cleared before 10 s below');
+    eq(at(84, 46), { raised: [], cleared: ['cpu'] }, 'alerts: cleared after 10 s below the band');
+    ok(!a.isActive('cpu'), 'alerts: inactive after clearing');
+    at(95, 50);
+    eq(at(70, 60), { raised: [], cleared: [] }, 'alerts: an interrupted run does not raise');
+    eq(at(95, 85), { raised: [], cleared: [] }, 'alerts: the run restarts from the new high reading');
+    eq(at(95, 115), { raised: ['cpu'], cleared: [] }, 'alerts: raised 30 s after the restart');
+    eq(a.update({ cpu: null }, 116 * S), { raised: [], cleared: ['cpu'] }, 'alerts: a metric that became unreadable clears');
+    eq(a.update({ cpu: { value: NaN, threshold: 90 } }, 200 * S), { raised: [], cleared: [] }, 'alerts: NaN never alerts');
+    ok(a.takeNotification('cpu', 0), 'alerts: first notification allowed');
+    ok(!a.takeNotification('cpu', 599 * S), 'alerts: second within 10 min refused');
+    ok(a.takeNotification('memory', 1 * S), 'alerts: the gap is per metric');
+    ok(a.takeNotification('cpu', 600 * S), 'alerts: allowed again after 10 min');
+    // The threshold is read on every update: lowering it below the value starts the run.
+    const b = new AlertMonitor({ sustainUs: 30 * S });
+    b.update({ memory: { value: 80, threshold: 90 } }, 0);
+    b.update({ memory: { value: 80, threshold: 75 } }, 1 * S);
+    eq(b.update({ memory: { value: 80, threshold: 75 } }, 31 * S).raised, ['memory'], 'alerts: a lowered threshold applies');
+
+    const unavailable = thm => !(thm.sensors?.length > 0);
+    const limits = { cpu: 90, memory: 90, thermal: 80, gpu: 95, disk: 95, pressure: 10 };
+    const r = alertReadings({
+        cpu: { total: 50 }, mem: { total: 8e9, percent: 60 },
+        thm: { packageTemp: 0, sensors: [] }, gpu: { present: false, percent: 0 },
+        dsk: { mounts: [] }, psi: null,
+    }, limits, unavailable);
+    eq([r.cpu, r.memory, r.thermal, r.gpu, r.disk, r.pressure], [{ value: 50, threshold: 90 }, { value: 60, threshold: 90 }, null, null, null, null],
+        'alerts: readings for what is missing are null, never 0');
+    const r2 = alertReadings({ dsk: { mounts: [{ percent: 97 }] }, psi: { memory: { full: 12.5 } }, thm: { packageTemp: 85, sensors: [{}] } }, limits, unavailable);
+    eq([r2.disk, r2.pressure, r2.thermal], [{ value: 97, threshold: 95 }, { value: 12.5, threshold: 10 }, { value: 85, threshold: 80 }], 'alerts: disk, pressure and temperature readings');
+    eq(alertLine({ value: 97.2, since: 0 }, 95 * S, { name: 'CPU', format: v => `${Math.round(v)} %` }), 'CPU 97 % for 2 min', 'alerts: line names the metric, value and duration');
 }
 
 // ── live: process churn, bounded state, no fd leak ──

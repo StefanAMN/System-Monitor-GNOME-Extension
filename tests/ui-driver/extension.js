@@ -681,6 +681,74 @@ async function stuckCollector(rp) {
     check(!rp._outstanding.network && rp._lastNet?.interfaces, 'stuck collector: network did not recover');
 }
 
+// A real CPU load past the limit: the ⚠ appears in the top bar, the pinned
+// CPU value turns red, the ⚠'s tooltip (real hover) names CPU, a notification
+// names the cause, clicking its banner opens the CPU page, and all of it
+// clears once the load is gone. The 30 s / 10 s timing is unit-tested; here
+// it is shortened so the scenario stays quick.
+async function alertsRaise(rp) {
+    const { AlertMonitor } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/alerts.js`);
+    const settings = rp._settings;
+    const threshold = settings.get_int('threshold-cpu');
+    settings.set_int('threshold-cpu', 50);
+    rp._alerts = new AlertMonitor({ sustainUs: 4e6, recoverUs: 4e6 });
+    check(!rp._dangerBox.visible, 'alerts: ⚠ shown before any load');
+    const collapsedBefore = rp._topBarCollapsed;
+    const centreBefore = Math.round(Main.panel._centerBox.width);
+    const burners = [];
+    const n = GLib.get_num_processors();
+    try {
+        for (let i = 0; i < n; i++)
+            burners.push(Gio.Subprocess.new(['sh', '-c', 'while :; do :; done'], Gio.SubprocessFlags.NONE));
+        for (let i = 0; i < 40 && !rp._dangerBox.visible; i++) await sleep(500);
+        check(rp._dangerBox.visible, `alerts: no ⚠ after 20 s of ${n} burners (CPU ${rp._lastCpu?.total?.toFixed(0)} %)`);
+        check(rp._topBarWidgets.cpu.label.has_style_class_name('resource-pulse-label-danger'), 'alerts: the pinned CPU value is not red');
+        // The ⚠ is narrower than a value, so it may hide at most one more.
+        await sleep(2500);
+        const widths = Object.entries(rp._topBarWidgets).map(([k, w]) => `${k} ${Math.round(w.box.width)}${w.label?.visible ? '' : ' (hidden)'}`).join(', ');
+        console.log(`RP-UITEST alerts: ⚠ ${Math.round(rp._dangerBox.width)} px; centre box ${centreBefore} -> ${Math.round(Main.panel._centerBox.width)} px; hidden values ${collapsedBefore} -> ${rp._topBarCollapsed}; ${widths}`);
+        check(rp._topBarCollapsed <= collapsedBefore + 1, `alerts: the ⚠ hid ${rp._topBarCollapsed - collapsedBefore} values (${widths})`);
+        const shortest = Math.min(...rp._topBarLabels().map(l => l.get_preferred_width(-1)[1]));
+        check(rp._dangerBox.width < shortest, `alerts: the ⚠ (${Math.round(rp._dangerBox.width)} px) is wider than a value (${Math.round(shortest)} px)`);
+        check(!rp._topBarWidgets.memory.label.has_style_class_name('resource-pulse-label-danger'), 'alerts: memory marked although only CPU is high');
+        // The cause needs two process scans a second apart.
+        await sleep(2500);
+        const source = Main.messageTray.getSources().find(src => src.title === 'Resource Pulse');
+        const note = source?.notifications.at(-1);
+        check(note?.title === 'CPU usage is high', `alerts: notification is '${note?.title}'`);
+        check(/^CPU \d+ % for \d+ min — sh( ×\d+)? using [\d.]+ cores$/.test(note.body ?? ''), `alerts: notification body '${note.body}' does not name the burner`);
+
+        if (!pointer) await clickActor(rp._dangerBox).catch(() => {});
+        const [x, y] = rp._dangerBox.get_transformed_position();
+        const [w, h] = rp._dangerBox.get_transformed_size();
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + w / 2, y + h / 2);
+        await sleep(600);
+        check(rp._tooltip?.visible && /^CPU \d+ % for \d+ min — sh( ×\d+)? using [\d.]+ cores$/.test(rp._tooltip.text), `alerts: ⚠ tooltip is '${rp._tooltip?.text}'`);
+        await shot('alert-topbar');
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+        await sleep(300);
+
+        // The banner, clicked: the panel opens on the CPU page.
+        const banner = Main.messageTray._banner;
+        if (banner) {
+            await clickActor(banner);
+            for (let i = 0; i < 10 && !rp._indicator.menu.isOpen; i++) await sleep(200);
+            check(rp._indicator.menu.isOpen && rp._activeTab === 'cpu', `alerts: banner click left the menu ${rp._indicator.menu.isOpen ? `on ${rp._activeTab}` : 'closed'}`);
+            rp._indicator.menu.close();
+            await sleep(300);
+        } else {
+            console.log('RP-UITEST alerts: no banner on screen to click (notification went straight to the tray)');
+        }
+    } finally {
+        for (const b of burners) b.force_exit();
+    }
+    for (let i = 0; i < 40 && rp._dangerBox.visible; i++) await sleep(500);
+    check(!rp._dangerBox.visible, 'alerts: ⚠ still shown 20 s after the load ended');
+    check(!rp._topBarWidgets.cpu.label.has_style_class_name('resource-pulse-label-danger'), 'alerts: CPU value still red after recovery');
+    settings.set_int('threshold-cpu', threshold);
+    rp._alerts = new AlertMonitor();
+}
+
 async function run() {
     await sleep(1500);
     enabledAt = GLib.get_monotonic_time() - 4000000;
@@ -691,8 +759,8 @@ async function run() {
     // both) must not put a broken or repeated metric in the top bar.
     ext.stateObj._settings.set_strv('pinned-metrics', ['cpu', 'bogus', 'cpu', 'memory']);
     await sleep(800);
-    check(Object.keys(ext.stateObj._topBarWidgets).join() === 'cpu,memory' && ext.stateObj._indicatorBox.get_n_children() === 3,
-        `bogus pinned list built ${Object.keys(ext.stateObj._topBarWidgets)} with ${ext.stateObj._indicatorBox.get_n_children()} children`);
+    check(Object.keys(ext.stateObj._topBarWidgets).join() === 'cpu,memory' && ext.stateObj._indicatorBox.get_n_children() === 4,
+        `bogus pinned list built ${Object.keys(ext.stateObj._topBarWidgets)} with ${ext.stateObj._indicatorBox.get_n_children()} children (⚠, cpu, divider, memory expected)`);
 
     // Pin everything (sandboxed dconf) so every top-bar label is exercised.
     ext.stateObj._settings.set_strv('pinned-metrics',
@@ -742,6 +810,7 @@ async function run() {
     await batteryTracking(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await stuckCollector(ext.stateObj);
+    await alertsRaise(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.
     const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
