@@ -1,6 +1,6 @@
 # PLAN.md — Audit remediation (branch `audit-fixes`)
 
-Source: read-only audit of 2026-10-01. `plan.md` (lower-case) is the original product spec; this file tracks milestones.
+Source: read-only audit of 2026-10-01. `docs/spec.md` is the original product spec; this file tracks milestones.
 
 Target: GNOME Shell 50.1 / Wayland / Linux 7.0, unprivileged user. Verified hardware: Intel 12-thread, Iris Xe (i915), BAT1.
 NVIDIA and AMD GPU paths cannot be executed on this machine and are never marked as passed.
