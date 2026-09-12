@@ -2147,6 +2147,21 @@ export default class ResourcePulseExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         };
 
+        // Keyboard: a focused card shows the hover highlight and opens its
+        // details page on Return or Space, as a click does.
+        card.connect('key-focus-in', () => card.add_style_class_name('rp-hover'));
+        card.connect('key-focus-out', () => {
+            if (!card.hover) card.remove_style_class_name('rp-hover');
+        });
+        card.connect('key-press-event', (actor, event) => {
+            const sym = event.get_key_symbol();
+            if (sym !== Clutter.KEY_Return && sym !== Clutter.KEY_KP_Enter && sym !== Clutter.KEY_space)
+                return Clutter.EVENT_PROPAGATE;
+            this._activeTab = key;
+            this._updateTabVisibility();
+            return Clutter.EVENT_STOP;
+        });
+
         card.connect('button-press-event', (actor, event) => {
             if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
             const [x, y] = event.get_coords();
