@@ -419,6 +419,21 @@ async function batteryPages(styleWindow) {
     ok(profileCalls.join() === 'balanced' && !found().some(row => row.findingId === 'power-profile'),
         `diagnostics: switching to Balanced (${profileCalls.join()}) removes the finding`);
 
+    // Copy report: the findings and the state, as text on the clipboard.
+    diagnostics.copy.emit('clicked');
+    const copied = await new Promise(resolve => diagnostics.copy.get_clipboard().read_text_async(null, (cb, res) => {
+        try {
+            resolve(cb.read_text_finish(res));
+        } catch (e) {
+            resolve(`(clipboard: ${e.message})`);
+        }
+    }));
+    ok(/^Resource Pulse diagnostics, \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\nSystem: on battery, .*battery holds 72 % of its design capacity after 610 cycles, charge limit off/.test(copied ?? ''),
+        `copy report: header and system line ('${(copied ?? '').split('\n').slice(0, 2).join(' / ')}')`);
+    ok(/\nLonger runtime per charge\n- \[\w+\] chat works in the background: /.test(copied ?? '') && /\nLonger battery life\n/.test(copied ?? ''),
+        'copy report: findings grouped by goal');
+    ok(diagnostics.copy.label === 'Copied', `copy report: the button says '${diagnostics.copy.label}'`);
+
     // The file changes (the extension saved): both pages follow.
     ok(r.summary.visible, 'tracking: the summary is shown when there are figures');
     // File monitor + debounce + asynchronous load: well under a second with

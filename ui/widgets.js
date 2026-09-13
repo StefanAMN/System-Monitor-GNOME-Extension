@@ -327,54 +327,79 @@ export const Sparkline = GObject.registerClass({
         }
 
         const n = hist.length;
-        if (n >= 2) {
-            const step = graphW / (hist.capacity - 1);
-            const right = padL + graphW;
-            const base = padT + graphH;
-            const firstX = right - (n - 1) * step;
-
-            // Filled area
-            cr.moveTo(firstX, base);
-            for (let i = 0; i < n; i++) {
-                const v = Math.min(max, Math.max(0, hist.get(i)));
-                cr.lineTo(firstX + i * step, base - (v / max) * graphH);
+        const step = graphW / (hist.capacity - 1);
+        const right = padL + graphW;
+        const base = padT + graphH;
+        const firstX = right - (n - 1) * step;
+        const yOf = v => base - (Math.min(max, Math.max(0, v)) / max) * graphH;
+        // Runs of consecutive samples; a NaN (a bucket nothing was read in)
+        // breaks the line instead of dropping it to zero.
+        const runs = [];
+        for (let i = 0, start = -1; i <= n; i++) {
+            const ok = i < n && Number.isFinite(hist.get(i));
+            if (ok && start < 0) start = i;
+            if (!ok && start >= 0) {
+                runs.push([start, i - 1]);
+                start = -1;
             }
-            cr.lineTo(right, base);
+        }
+        for (const [a, b] of runs) {
+            if (a === b) {
+                // A lone sample between gaps: a dot.
+                cr.setSourceRGBA(color[0], color[1], color[2], color[3]);
+                cr.arc(firstX + a * step, yOf(hist.get(a)), 1.5, 0, 2 * Math.PI);
+                cr.fill();
+                continue;
+            }
+            cr.moveTo(firstX + a * step, base);
+            for (let i = a; i <= b; i++) cr.lineTo(firstX + i * step, yOf(hist.get(i)));
+            cr.lineTo(firstX + b * step, base);
             cr.closePath();
             cr.setSourceRGBA(color[0], color[1], color[2], opt.fillOpacity);
             cr.fill();
 
-            // Line
             cr.setLineWidth(opt.lineWidth);
             cr.setSourceRGBA(color[0], color[1], color[2], color[3]);
-            for (let i = 0; i < n; i++) {
-                const v = Math.min(max, Math.max(0, hist.get(i)));
-                const x = firstX + i * step;
-                const y = base - (v / max) * graphH;
-                if (i === 0) cr.moveTo(x, y);
-                else cr.lineTo(x, y);
+            for (let i = a; i <= b; i++) {
+                if (i === a) cr.moveTo(firstX + i * step, yOf(hist.get(i)));
+                else cr.lineTo(firstX + i * step, yOf(hist.get(i)));
             }
             cr.stroke();
+
+            // Bucketed history: the peak of each bucket, faint, above the average.
+            if (hist.peakAt) {
+                cr.setLineWidth(1);
+                cr.setSourceRGBA(color[0], color[1], color[2], 0.45);
+                for (let i = a; i <= b; i++) {
+                    if (i === a) cr.moveTo(firstX + i * step, yOf(hist.peakAt(i)));
+                    else cr.lineTo(firstX + i * step, yOf(hist.peakAt(i)));
+                }
+                cr.stroke();
+            }
         }
 
         const hover = this._hoverX >= 0 ? hoverIndex(this._hoverX, padL, graphW, hist.capacity, n) : -1;
         if (hover >= 0) {
-            const step = graphW / (hist.capacity - 1);
             const raw = hist.get(hover);
+            const has = Number.isFinite(raw);
             const x = padL + graphW - (n - 1 - hover) * step;
-            const y = padT + graphH - (Math.min(max, Math.max(0, raw)) / max) * graphH;
+            const y = has ? yOf(raw) : base;
 
             cr.setLineWidth(1);
             cr.setSourceRGBA(fg[0], fg[1], fg[2], 0.35);
             cr.moveTo(x, padT);
             cr.lineTo(x, padT + graphH);
             cr.stroke();
-            cr.setSourceRGBA(color[0], color[1], color[2], 1);
-            cr.arc(x, y, 3, 0, 2 * Math.PI);
-            cr.fill();
+            if (has) {
+                cr.setSourceRGBA(color[0], color[1], color[2], 1);
+                cr.arc(x, y, 3, 0, 2 * Math.PI);
+                cr.fill();
+            }
 
             const ago = this.sampleSeconds > 0 ? ` · ${agoLabel(n - 1 - hover, this.sampleSeconds)}` : '';
-            const text = `${opt.formatValue(raw)}${ago}`;
+            let value = has ? opt.formatValue(raw) : 'no data';
+            if (has && hist.peakAt) value = `${value} avg, ${opt.formatValue(hist.peakAt(hover))} peak`;
+            const text = `${value}${ago}`;
             cr.setFontSize(10);
             cr.selectFontFace('Sans', Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
             const ext = cr.textExtents(text);
