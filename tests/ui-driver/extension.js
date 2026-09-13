@@ -727,7 +727,7 @@ async function historyAndUsage(rp) {
             await sleep(400);
             row = (rp._dskProcWidgets ?? []).find(w => w.group?.comm === 'dd' || w.group?.comm === 'rpdiskwriter');
         }
-        const listed = (rp._dskProcWidgets ?? []).map(w => `${w.group?.comm} ${w.statLbl.text}`).join(', ');
+        const listed = (rp._dskProcWidgets ?? []).filter(w => w.item.visible).map(w => `${w.group?.comm} ${w.statLbl.text}`).join(', ');
         if (!row && listed === '')
             console.log('RP-UITEST disk list: no per-process I/O counters readable here; the writer check was not run');
         else {
