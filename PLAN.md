@@ -584,4 +584,10 @@ Found on the way:
 - `Gdk.Clipboard.set_text` is not introspectable, so the report goes through a bytes content provider.
 - The network-usage load compared a generation counter captured before `enable()` bumps it, so the saved totals were never attached. It now uses a per-enable token.
 
+- A click on a process's ✕ could be lost. The press also reached the row, whose press animation shrinks it about its centre, so the ✕ moved about 13 px from under the pointer before the release (GNOME 49 container). The row's handlers now skip presses on the ✕. Stopping the event after the button instead broke the button's own click.
+- In the containers the top bar had 1 px to spare. Under load the CPU value ("100%") is wider than the room reserved for normal values, so it can hide one value of its own. The ⚠ test therefore checks the guarantee (the ⚠ is narrower than any value) and only logs the count.
+- The test now waits for the panel's scroll animation to settle before clicking.
+
+Soak after the row reuse: menu closed +0.50 % (budget 1 %), with tracking +0.60 %; RSS slope 0.098 MB/min (0.387 before rows were reused); fds 75 → 75.
+
 Not run: real NVIDIA / AMD GPUs (GPU alerts use the same reading as the GPU page); a kernel without PSI (fixture only); traffic across a real screen lock (the boot-id path is unit-tested).
