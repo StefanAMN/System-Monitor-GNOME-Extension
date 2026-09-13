@@ -9,7 +9,7 @@ import System from 'system';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-const TARGET = 'resource-pulse@yourdomain.example';
+const TARGET = 'resource-pulse@stefanamn.github.io';
 const ALL_METRICS = ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu'];
 const TABS = ['overview', 'cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu'];
 const CLK_TCK = 100;

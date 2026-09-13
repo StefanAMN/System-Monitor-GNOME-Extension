@@ -76,10 +76,10 @@ glib-compile-schemas schemas/
 ```
 
 ### 2. Dev Symlink
-Symlink the extension folder to your local GNOME Shell extensions directory (replace the directory name with your target UUID):
+Symlink the extension folder into your local GNOME Shell extensions directory; the directory name must be the UUID from `metadata.json`:
 ```bash
 mkdir -p ~/.local/share/gnome-shell/extensions/
-ln -sfn "$(pwd)" ~/.local/share/gnome-shell/extensions/resource-pulse@yourdomain.example
+ln -sfn "$(pwd)" ~/.local/share/gnome-shell/extensions/resource-pulse@stefanamn.github.io
 ```
 
 ### 3. Reload GNOME Shell
@@ -89,7 +89,7 @@ ln -sfn "$(pwd)" ~/.local/share/gnome-shell/extensions/resource-pulse@yourdomain
 ### 4. Enable Extension
 Enable the extension via CLI:
 ```bash
-gnome-extensions enable resource-pulse@yourdomain.example
+gnome-extensions enable resource-pulse@stefanamn.github.io
 ```
 
 ## Pack for Distribution
@@ -98,7 +98,7 @@ To bundle the extension for upload or sharing:
 ```bash
 gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons --extra-source=LICENSE
 ```
-This generates `resource-pulse@yourdomain.example.shell-extension.zip`.
+This generates `resource-pulse@stefanamn.github.io.shell-extension.zip`.
 
 ## License
 
