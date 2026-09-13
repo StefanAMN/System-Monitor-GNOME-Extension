@@ -187,3 +187,18 @@ Audit findings still open:
 - Tests: nothing drives `prefs.js`, card drag, or window resize; memory parsing has no pure function to test; dead CSS (about 67 classes look unused, several are built dynamically) and 197 inline style strings are untouched.
 
 To resume: `git switch audit-fixes`, then `./dev.sh test-unit && ./dev.sh test-ui`.
+
+---
+
+# Owner decisions (2026-10-11, branch `audit-fixes`)
+
+| # | Decision | Change | Proof |
+|---|----------|--------|-------|
+| D1 | MIT license | `LICENSE`, packed into the zip | zip listing |
+| D2 | AGENTS.md removed | procfs exception restated in `lib/process.js` | review |
+| D3 | UUID `resource-pulse@stefanamn.github.io` | metadata, `dev.sh`, drivers, README | `test-unit`, `test-ui` |
+| D4 | Top bar never ellipsizes: when the pinned metrics do not fit, the last-pinned ones drop to icon-only (value in the tooltip) until everything fits | UI | `test-ui` on a narrow virtual monitor with all eight pinned: no ellipsized label, indicator inside the panel, labels return when room returns |
+| D5 | Lint and CI | ESLint flat config (run through `npx`), GitHub Actions job: syntax, lint, unit tests | lint runs clean locally; the workflow itself can only be proven by a push |
+| D6 | `shell-version` lists only versions the extension was actually run on | `./dev.sh test-compat`: unit tests and a headless enable in containers with other GNOME Shell versions | per-version result table; a version that cannot be run is not listed |
+
+Translations: not wanted for now.
