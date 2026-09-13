@@ -341,6 +341,59 @@ async function thresholdFollowsUnit(rp) {
     await sleep(400);
 }
 
+// Eight pinned metrics do not fit a 1280 px panel next to the clock. The
+// panel must stay inside its room without ellipsizing: trailing metrics drop
+// to their icon, and get their label back once there is room again.
+async function topBarFits(rp) {
+    const right = Main.panel._rightBox;
+    const state = () => {
+        const labels = Object.entries(rp._topBarWidgets).map(([key, w]) => ({ key, label: w.label }));
+        return {
+            labels,
+            wanted: right.get_preferred_width(-1)[1],
+            got: right.allocation.get_width(),
+            shown: labels.filter(l => l.label.visible).map(l => l.key),
+            ellipsized: labels.filter(l => l.label.visible && l.label.clutter_text.get_layout().is_ellipsized()).map(l => l.key)
+        };
+    };
+    let s = state();
+    check(s.wanted <= s.got + 1, `top bar: the panel's right side wants ${s.wanted}px and gets ${s.got}px with all 8 pinned`);
+    check(s.ellipsized.length === 0, `top bar: ellipsized labels: ${s.ellipsized.map(k => `${k} '${rp._topBarWidgets[k].label.text}'`).join(', ')}`);
+    check(right.get_transformed_position()[0] + right.width <= global.stage.width + 1, 'top bar: the right side runs off the screen');
+    check(s.shown.length > 0 && s.shown.length < 8, `top bar: expected some labels collapsed at 1280px, ${s.shown.length} of 8 shown`);
+    check(s.shown.join() === s.labels.slice(0, s.shown.length).map(l => l.key).join(),
+        `top bar: collapsed out of order, shown: ${s.shown.join()}`);
+    const collapsedKey = s.labels[s.shown.length].key;
+
+    // A collapsed metric still tells its value: on hover, in the tooltip.
+    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    const box = rp._topBarWidgets[collapsedKey].box;
+    const [bx, by] = box.get_transformed_position();
+    // The tooltip is composed when the pointer enters; a poll may change
+    // the value right after, so compare with the value at that moment.
+    const values = [rp._topBarWidgets[collapsedKey].label.text];
+    pointer.notify_absolute_motion(GLib.get_monotonic_time(), bx + box.width / 2, by + box.height / 2);
+    await sleep(150);
+    values.push(rp._topBarWidgets[collapsedKey].label.text);
+    await sleep(550);
+    const firstLine = rp._tooltip?.text.split('\n')[0];
+    check(rp._tooltip?.visible && values.some(v => firstLine.endsWith(`: ${v}`)),
+        `top bar: tooltip of collapsed ${collapsedKey} starts '${firstLine}', value was '${values.join("' / '")}'`);
+    pointer.notify_absolute_motion(GLib.get_monotonic_time(), 300, 400);
+    await sleep(400);
+
+    // Room returns: every label comes back.
+    rp._settings.set_strv('pinned-metrics', ['cpu', 'memory', 'thermal']);
+    await sleep(1500);
+    s = state();
+    check(s.shown.length === 3 && rp._topBarCollapsed === 0, `top bar: with 3 pinned, labels shown: ${s.shown.join() || 'none'}`);
+
+    rp._settings.set_strv('pinned-metrics', ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu']);
+    await sleep(1500);
+    s = state();
+    check(s.wanted <= s.got + 1 && s.ellipsized.length === 0, `top bar: after re-pinning all 8 wants ${s.wanted}px, gets ${s.got}px`);
+}
+
 // A collector that never answers (a hung nvidia-smi, a dead mount) must
 // cost its own metric only: the others keep updating and it is not started
 // again while the first call is outstanding.
@@ -387,6 +440,7 @@ async function run() {
         // No pinned label may reserve much more room than its text needs.
         const rp = ext.stateObj;
         for (const [key, w] of Object.entries(rp._topBarWidgets)) {
+            if (!w.label.visible) continue;
             const [textW] = w.label.clutter_text.get_layout().get_pixel_size();
             const slack = w.label.width - textW;
             check(slack <= 14, `top-bar ${key} reserves ${slack}px beyond its text '${w.label.text}'`);
@@ -394,6 +448,7 @@ async function run() {
         const kids = rp._indicatorBox.get_children();
         check(kids.filter(k => k.style_class === 'resource-pulse-divider' && k.width > 0).length === 7, 'top-bar dividers missing');
     }
+    await topBarFits(ext.stateObj);
 
     // Pages are built on first visit, not in enable().
     check(Object.keys(ext.stateObj._detailSections).length === 0 && !ext.stateObj._settingsPage,

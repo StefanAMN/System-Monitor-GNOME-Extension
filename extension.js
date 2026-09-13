@@ -35,6 +35,13 @@ const MIN_RESAMPLE_US = 500000;
 // A collector that has not answered by then is skipped for this poll (its
 // previous value stands in) so one stuck read cannot freeze every metric.
 const POLL_DEADLINE_MS = 3000;
+// Free panel space required beyond a hidden top-bar label's own width before
+// it is shown again, so a value changing width cannot make it flap.
+const TOP_BAR_FIT_MARGIN_PX = 16;
+const METRIC_NAMES = {
+    cpu: 'CPU', memory: 'Memory', battery: 'Battery', power: 'Power',
+    disk: 'Disk', network: 'Network', thermal: 'Temperature', gpu: 'GPU'
+};
 const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 
 const WATT_SCALE = { autoScale: true, maxVal: 10, formatValue: v => `${v < 10 ? v.toFixed(1) : Math.round(v)}W` };
@@ -252,6 +259,13 @@ export default class ResourcePulseExtension extends Extension {
             }
         });
 
+        // The panel gives its right side only the room the centre leaves.
+        // Re-fit whenever any of the three changes size.
+        this._topBarCollapsed = 0;
+        this._fitIdleId = 0;
+        this._fitSignals = [Main.panel, Main.panel._centerBox, Main.panel._rightBox]
+            .filter(actor => actor)
+            .map(actor => [actor, actor.connect('notify::allocation', () => this._queueFitTopBar())]);
         this._rebuildTopBar();
         // Initial poll
         this._startPolling();
@@ -320,6 +334,13 @@ export default class ResourcePulseExtension extends Extension {
             this._settingsPage = null;
         }
         this._resizeHandles = {};
+
+        for (const [actor, id] of this._fitSignals ?? []) actor.disconnect(id);
+        this._fitSignals = [];
+        if (this._fitIdleId) {
+            GLib.source_remove(this._fitIdleId);
+            this._fitIdleId = 0;
+        }
 
         // Destroying an open menu leaves the shell allocating a disposed BoxPointer.
         this._indicator.menu.close(false);
@@ -1696,7 +1717,9 @@ export default class ResourcePulseExtension extends Extension {
 
             box.connect('enter-event', () => {
                 if (this._tooltipTexts[key]) {
-                    this._showTooltip(box, this._tooltipTexts[key]);
+                    // A label hidden for lack of room: its value leads the tooltip.
+                    const hidden = label && !label.visible ? `${METRIC_NAMES[key]}: ${label.text}\n` : '';
+                    this._showTooltip(box, hidden + this._tooltipTexts[key]);
                 }
             });
             box.connect('leave-event', () => {
@@ -1706,6 +1729,70 @@ export default class ResourcePulseExtension extends Extension {
             this._indicatorBox.add_child(box);
             this._topBarWidgets[key] = { box, label, icon };
         });
+        this._applyTopBarCollapse();
+        this._queueFitTopBar();
+    }
+
+    /** Pinned metrics that have a text label, in pinned order. */
+    _topBarLabels() {
+        return Object.values(this._topBarWidgets).map(w => w.label).filter(l => l);
+    }
+
+    /** Hide the labels of the last `_topBarCollapsed` pinned metrics. */
+    _applyTopBarCollapse() {
+        const labels = this._topBarLabels();
+        this._topBarCollapsed = Math.max(0, Math.min(this._topBarCollapsed, labels.length));
+        labels.forEach((label, i) => {
+            label.visible = i < labels.length - this._topBarCollapsed;
+        });
+    }
+
+    _queueFitTopBar() {
+        if (this._fitIdleId || !this._indicator) return;
+        this._fitIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._fitIdleId = 0;
+            this._fitTopBar();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    /**
+     * Keep the top bar inside the room the panel has. When the panel's right
+     * side asks for more than it can get, labels would be ellipsized and the
+     * system menu squeezed: instead the last pinned metrics still showing a
+     * label drop to their icon. When room returns, labels come back in the
+     * opposite order.
+     */
+    _fitTopBar() {
+        const right = Main.panel._rightBox;
+        const center = Main.panel._centerBox;
+        const labels = this._topBarLabels();
+        if (!this._indicator || !right || !center || labels.length === 0 ||
+            !center.has_allocation() || !Main.panel.has_allocation()) return;
+
+        // The panel places its centre box at x = side width and gives each
+        // side at most that much. Both figures are read from the centre's
+        // allocation, which does not depend on what this extension shows.
+        // The side is further limited to what is left beside the centre
+        // (they differ when a dock shifts the work area).
+        const rtl = Main.panel.get_text_direction() === Clutter.TextDirection.RTL;
+        const beside = rtl ? center.allocation.x1 : Main.panel.allocation.get_width() - center.allocation.x2;
+        const room = Math.floor(Math.min(center.allocation.x1, beside));
+        const wanted = () => right.get_preferred_width(-1)[1];
+
+        const before = this._topBarCollapsed;
+        while (wanted() > room && this._topBarCollapsed < labels.length) {
+            this._topBarCollapsed++;
+            this._applyTopBarCollapse();
+        }
+        if (this._topBarCollapsed !== before) return;
+
+        while (this._topBarCollapsed > 0) {
+            const next = labels[labels.length - this._topBarCollapsed];
+            if (wanted() + next.get_preferred_width(-1)[1] + TOP_BAR_FIT_MARGIN_PX > room) break;
+            this._topBarCollapsed--;
+            this._applyTopBarCollapse();
+        }
     }
 
     _updateTopBarUI(data) {
@@ -1818,6 +1905,9 @@ export default class ResourcePulseExtension extends Extension {
             if (warn) widget.label.add_style_class_name('resource-pulse-label-warn');
             else widget.label.remove_style_class_name('resource-pulse-label-warn');
         });
+        // A value that grew wider changes what the panel is asked for
+        // without changing what it is given, so no signal reports it.
+        this._queueFitTopBar();
     }
 
     // ── Overview Page ─────────────────────────────────────────────────────────
