@@ -364,17 +364,20 @@ async function panelKeyboard(rp) {
 // the settings: the open panel must follow.
 async function panelSizeFollows(rp) {
     const s = rp._settings;
+    // The laid-out width: the width property answers the requested size
+    // while a relayout is pending, which values changing many times a
+    // second make likely.
     rp._indicator.menu.open();
     await sleep(600);
-    const auto = Math.round(rp._menuViewport.width);
+    const auto = Math.round(rp._menuViewport.allocation.get_width());
     s.set_int('menu-custom-width', 460);
     s.set_int('menu-custom-height', 600);
     await sleep(800);
-    check(Math.round(rp._menuViewport.width) === 460, `panel size: ${Math.round(rp._menuViewport.width)} px wide after a stored 460`);
+    check(Math.round(rp._menuViewport.allocation.get_width()) === 460, `panel size: ${Math.round(rp._menuViewport.allocation.get_width())} px wide after a stored 460`);
     s.set_int('menu-custom-width', 0);
     s.set_int('menu-custom-height', 0);
     await sleep(800);
-    check(Math.round(rp._menuViewport.width) === auto, `panel size: ${Math.round(rp._menuViewport.width)} px after a reset, ${auto} before`);
+    check(Math.round(rp._menuViewport.allocation.get_width()) === auto, `panel size: ${Math.round(rp._menuViewport.allocation.get_width())} px after a reset, ${auto} before`);
     rp._indicator.menu.close();
     await sleep(400);
 }
@@ -552,6 +555,8 @@ async function gpuPageFollowsReadings(rp) {
     rp._indicator.menu.open();
     rp._activeTab = 'gpu';
     rp._updateTabVisibility();
+    // Exact readings on the page: smoothing (tested in smoothGlide) is off here.
+    rp._settings.set_boolean('smooth-transitions', false);
     const wait = rp._settings.get_int('poll-interval') * 1000 + 1500;
     const feed = async reading => {
         rp._gpu.sample = () => Promise.resolve(reading);
@@ -602,6 +607,7 @@ async function gpuPageFollowsReadings(rp) {
     delete rp._gpu.sample;
     await sleep(wait);
     check(rp._gpuHwCard.visible === !!rp._lastGpu?.present, 'gpu page: did not follow the real reading again');
+    rp._settings.set_boolean('smooth-transitions', true);
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
     rp._indicator.menu.close();
@@ -753,6 +759,59 @@ async function historyAndUsage(rp) {
         writer.force_exit();
         await sleep(300);
         GLib.spawn_command_line_sync(`rm -rf ${dir}`);
+        rp._indicator.menu.close();
+        await sleep(300);
+    }
+}
+
+// Values glide to each reading over one polling interval: with polling
+// paused, two known readings are shown; memory (not averaged) passes
+// through in-between values and lands exactly on the reading, CPU lands on
+// the average of the two. The live charts slide instead of stepping.
+async function smoothGlide(rp) {
+    check(rp._settings.get_boolean('smooth-transitions'), 'glide: smooth changes are off by default');
+    rp._indicator.menu.open();
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    await sleep(800);
+    GLib.source_remove(rp._timeoutId);
+    rp._timeoutId = null;
+    try {
+        const base = rp._lastData;
+        const reading = (mem, cpu) => ({ ...base, mem: { ...base.mem, percent: mem }, cpu: { ...base.cpu, total: cpu } });
+        const mem = () => parseInt(rp._summaryCards.memory.valueLabel.text, 10);
+        const cpu = () => parseInt(rp._summaryCards.cpu.valueLabel.text, 10);
+        rp._smoothPrev = null;
+        rp._shownTo = null;
+        rp._present(reading(20, 10));
+        await sleep(rp._intervalUs / 1000 + 300);
+        check(mem() === 20 && cpu() === 10, `glide: first reading shown as ${mem()} / ${cpu()}`);
+        const t0 = GLib.get_monotonic_time();
+        rp._present(reading(80, 90));
+        const seen = [];
+        while (GLib.get_monotonic_time() - t0 < rp._intervalUs - 150000) {
+            await sleep(120);
+            seen.push(mem());
+        }
+        await sleep(450);
+        const between = new Set(seen.filter(v => v > 20 && v < 80));
+        check(between.size >= 4, `glide: memory showed ${[...between].join(', ')} on the way (want ≥ 4 in-between values)`);
+        check(seen.every((v, i) => i === 0 || v >= seen[i - 1]), `glide: memory went back on the way (${seen.join(', ')})`);
+        check(mem() === 80, `glide: memory ended at ${mem()}, not the reading 80`);
+        check(cpu() === 50, `glide: CPU ended at ${cpu()}, not the average 50 of 10 and 90`);
+        check(rp._topBarWidgets.memory.label.text === '80%', `glide: top bar memory ends at '${rp._topBarWidgets.memory.label.text}'`);
+        console.log(`RP-UITEST glide: memory 20 -> ${seen.join(' ')} -> ${mem()} over ${(rp._intervalUs / 1e6).toFixed(0)} s`);
+
+        // Charts: a sample was just added, so they start shifted and slide in.
+        rp._histPushAt = GLib.get_monotonic_time();
+        rp._present(reading(80, 90));
+        await sleep(200);
+        const spark = rp._summaryCards.cpu.spark ?? rp._sparklines.find(sp => sp.histKey === 'cpu' && sp.is_mapped());
+        check(spark && spark.phase > 0 && spark.phase < 1, `glide: the CPU chart is not sliding (phase ${spark?.phase})`);
+        await sleep(rp._intervalUs / 1000);
+        check(spark.phase === 1, `glide: the CPU chart did not come to rest (phase ${spark.phase})`);
+    } finally {
+        rp._startPolling();
         rp._indicator.menu.close();
         await sleep(300);
     }
@@ -997,6 +1056,7 @@ async function run() {
     await alertsRaise(ext.stateObj);
     await endProcesses(ext.stateObj);
     await historyAndUsage(ext.stateObj);
+    await smoothGlide(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.
     const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
