@@ -485,6 +485,27 @@ export default class ResourcePulseExtension extends Extension {
                     this._dragGrab.dismiss();
                     this._dragGrab = null;
                 }
+                if (this._cardDragGrab) {
+                    this._cardDragGrab.dismiss();
+                    this._cardDragGrab = null;
+                }
+                if (this._dragHoldTimerId) {
+                    GLib.source_remove(this._dragHoldTimerId);
+                    this._dragHoldTimerId = null;
+                }
+                if (this._summaryCards) {
+                    for (const k of Object.keys(this._summaryCards)) {
+                        const b = this._summaryCards[k]?.box;
+                        if (b) {
+                            b.remove_all_transitions();
+                            b.set_translation(0, 0, 0);
+                        }
+                    }
+                }
+                this._pendingPreviewOrder = null;
+                this._previewTargetIndex = null;
+                this._activeCardDrag = null;
+                this._draggedCardActor = null;
             }
         });
 
@@ -494,6 +515,7 @@ export default class ResourcePulseExtension extends Extension {
 
         // Settings listeners
         this._pinnedId = this._settings.connect('changed::pinned-metrics', () => this._rebuildTopBar());
+        this._cardOrderId = this._settings.connect('changed::overview-card-order', () => this._onCardOrderChanged());
         this._compactId = this._settings.connect('changed::compact-label', () => this._rebuildTopBar());
         this._batFmtId = this._settings.connect('changed::battery-top-format', () => this._poll());
         this._netFmtId = this._settings.connect('changed::network-top-format', () => this._poll());
@@ -515,6 +537,7 @@ export default class ResourcePulseExtension extends Extension {
 
     disable() {
         if (this._pinnedId) this._settings.disconnect(this._pinnedId);
+        if (this._cardOrderId) this._settings.disconnect(this._cardOrderId);
         if (this._compactId) this._settings.disconnect(this._compactId);
         if (this._batFmtId) this._settings.disconnect(this._batFmtId);
         if (this._netFmtId) this._settings.disconnect(this._netFmtId);
@@ -546,6 +569,14 @@ export default class ResourcePulseExtension extends Extension {
             this._dragGrab.dismiss();
             this._dragGrab = null;
         }
+        if (this._cardDragGrab) {
+            this._cardDragGrab.dismiss();
+            this._cardDragGrab = null;
+        }
+        if (this._dragHoldTimerId) {
+            GLib.source_remove(this._dragHoldTimerId);
+            this._dragHoldTimerId = null;
+        }
         if (this._settingsPage) {
             this._settingsPage.destroy();
             this._settingsPage = null;
@@ -559,6 +590,13 @@ export default class ResourcePulseExtension extends Extension {
         this._tooltipTexts = {};
         this._settings = null;
         this._overviewPage = null;
+        this._overviewGrid = null;
+        this._overviewGridLayout = null;
+        this._cardOrder = null;
+        this._activeCardDrag = null;
+        this._draggedCardActor = null;
+        this._pendingPreviewOrder = null;
+        this._previewTargetIndex = null;
         this._detailArea = null;
         this._detailSections = null;
         this._summaryCards = null;
@@ -1675,6 +1713,326 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
     // ── Overview Page ─────────────────────────────────────────────────────────
 
 
+    _sanitizeCardOrder(list) {
+        const defaultOrder = ['cpu', 'memory', 'battery', 'disk', 'network', 'thermal', 'power', 'gpu'];
+        const result = [];
+        if (Array.isArray(list)) {
+            for (const key of list) {
+                if (defaultOrder.includes(key) && !result.includes(key)) {
+                    result.push(key);
+                }
+            }
+        }
+        for (const key of defaultOrder) {
+            if (!result.includes(key)) {
+                result.push(key);
+            }
+        }
+        return result;
+    }
+
+    _saveCardOrder() {
+        if (!this._settings || !this._cardOrder) return;
+        this._isInternalOrderUpdate = true;
+        try {
+            this._settings.set_strv('overview-card-order', this._cardOrder);
+
+            let pinned = this._settings.get_strv('pinned-metrics');
+            if (pinned && pinned.length > 1) {
+                pinned.sort((a, b) => this._cardOrder.indexOf(a) - this._cardOrder.indexOf(b));
+                this._settings.set_strv('pinned-metrics', pinned);
+            }
+        } finally {
+            this._isInternalOrderUpdate = false;
+        }
+    }
+
+    _onCardOrderChanged() {
+        if (this._isInternalOrderUpdate) return;
+        const saved = this._getStrv('overview-card-order', null);
+        if (saved && saved.length > 0) {
+            this._cardOrder = this._sanitizeCardOrder(saved);
+            this._attachCardsToGrid(this._cardOrder);
+        }
+    }
+
+    _attachCardsToGrid(order) {
+        if (!this._overviewGrid || !this._overviewGridLayout || !this._summaryCards) return;
+
+        for (const key of Object.keys(this._summaryCards)) {
+            const box = this._summaryCards[key]?.box;
+            if (box && box.get_parent() === this._overviewGrid) {
+                this._overviewGrid.remove_child(box);
+            }
+        }
+
+        order.forEach((key, idx) => {
+            const cardObj = this._summaryCards[key];
+            if (cardObj?.box) {
+                const col = idx % 2;
+                const row = Math.floor(idx / 2);
+                this._overviewGridLayout.attach(cardObj.box, col, row, 1, 1);
+            }
+        });
+    }
+
+    _handleCardDragMotion(draggedKey, currX, currY) {
+        if (!this._cardOrder || !this._summaryCards || !this._overviewGrid) return;
+        const currentOrder = this._cardOrder;
+        const currentIndex = currentOrder.indexOf(draggedKey);
+        if (currentIndex === -1) return;
+
+        const [gridX, gridY] = this._overviewGrid.get_transformed_position();
+        const [gridW, gridH] = this._overviewGrid.get_transformed_size();
+
+        const colWidth = gridW > 0 ? gridW / 2 : 190;
+        const rowHeight = gridH > 0 ? gridH / 4 : 95;
+
+        let targetIndex = currentIndex;
+        let minDistance = Infinity;
+
+        for (let i = 0; i < currentOrder.length; i++) {
+            const col = i % 2;
+            const row = Math.floor(i / 2);
+            const slotCenterX = gridX + (col + 0.5) * colWidth;
+            const slotCenterY = gridY + (row + 0.5) * rowHeight;
+            const dist = Math.hypot(currX - slotCenterX, currY - slotCenterY);
+            if (dist < minDistance) {
+                minDistance = dist;
+                targetIndex = i;
+            }
+        }
+
+        if (this._previewTargetIndex === targetIndex) return;
+        this._previewTargetIndex = targetIndex;
+
+        const previewOrder = [...currentOrder];
+        previewOrder.splice(currentIndex, 1);
+        previewOrder.splice(targetIndex, 0, draggedKey);
+        this._pendingPreviewOrder = previewOrder;
+
+        for (let i = 0; i < currentOrder.length; i++) {
+            const k = currentOrder[i];
+            if (k === draggedKey) continue;
+            const box = this._summaryCards[k]?.box;
+            if (!box) continue;
+
+            const previewIdx = previewOrder.indexOf(k);
+            const deltaCol = (previewIdx % 2) - (i % 2);
+            const deltaRow = Math.floor(previewIdx / 2) - Math.floor(i / 2);
+
+            const targetTx = deltaCol * colWidth;
+            const targetTy = deltaRow * rowHeight;
+
+            box.ease({
+                translation_x: targetTx,
+                translation_y: targetTy,
+                duration: 160,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+        }
+    }
+
+    _makeCardDraggable(card, key, normalStyle, hoverStyle, gripIcon) {
+        if (!card) return;
+        card.set_pivot_point(0.5, 0.5);
+        card.reactive = true;
+        card.track_hover = true;
+
+        let isCandidate = false;
+        let isDragging = false;
+        let startX = 0, startY = 0;
+        let holdTimerId = null;
+
+        card.connect('enter-event', () => {
+            if (!this._activeCardDrag) {
+                if (hoverStyle) card.style = hoverStyle;
+                if (gripIcon) gripIcon.style = 'icon-size: 13px; color: rgba(255,255,255,0.6);';
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('leave-event', () => {
+            if (!this._activeCardDrag) {
+                if (normalStyle) card.style = normalStyle;
+                if (gripIcon) gripIcon.style = 'icon-size: 13px; color: rgba(255,255,255,0.2);';
+                if (!isDragging) {
+                    card.ease({
+                        scale_x: 1.0,
+                        scale_y: 1.0,
+                        duration: 100,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                    });
+                }
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        const cancelHoldTimer = () => {
+            if (holdTimerId) {
+                GLib.source_remove(holdTimerId);
+                holdTimerId = null;
+            }
+            if (this._dragHoldTimerId === holdTimerId) {
+                this._dragHoldTimerId = null;
+            }
+        };
+
+        const startDrag = () => {
+            if (isDragging) return;
+            cancelHoldTimer();
+            isDragging = true;
+            this._activeCardDrag = key;
+            this._draggedCardActor = card;
+            this._cardDragGrab = global.stage.grab(card);
+
+            card.add_style_class_name('resource-pulse-metric-card-dragging');
+            if (card.get_parent()) {
+                card.get_parent().set_child_above_sibling(card, null);
+            }
+            card.ease({
+                scale_x: 1.05,
+                scale_y: 1.05,
+                duration: 120,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+        };
+
+        const finishDrag = (wasDrag) => {
+            cancelHoldTimer();
+            if (wasDrag && isDragging) {
+                if (this._cardDragGrab) {
+                    this._cardDragGrab.dismiss();
+                    this._cardDragGrab = null;
+                }
+                isDragging = false;
+                this._activeCardDrag = null;
+                this._draggedCardActor = null;
+                card.remove_style_class_name('resource-pulse-metric-card-dragging');
+                if (normalStyle) card.style = normalStyle;
+                if (gripIcon) gripIcon.style = 'icon-size: 13px; color: rgba(255,255,255,0.2);';
+
+                if (this._pendingPreviewOrder) {
+                    this._cardOrder = this._pendingPreviewOrder;
+                    this._pendingPreviewOrder = null;
+                }
+                this._previewTargetIndex = null;
+
+                // Reset translations on all cards and reattach to grid
+                for (const k of Object.keys(this._summaryCards)) {
+                    const b = this._summaryCards[k]?.box;
+                    if (b) {
+                        b.remove_all_transitions();
+                        b.set_translation(0, 0, 0);
+                    }
+                }
+
+                this._attachCardsToGrid(this._cardOrder);
+
+                // Animate drop back to zero translation and 1.0 scale
+                card.ease({
+                    translation_x: 0,
+                    translation_y: 0,
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    duration: 180,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+
+                // Finalize order in GSettings
+                this._saveCardOrder();
+                return Clutter.EVENT_STOP;
+            }
+
+            isDragging = false;
+            isCandidate = false;
+            return Clutter.EVENT_PROPAGATE;
+        };
+
+        card.connect('button-press-event', (actor, event) => {
+            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+            const [x, y] = event.get_coords();
+            startX = x;
+            startY = y;
+            isCandidate = true;
+            isDragging = false;
+
+            card.ease({
+                scale_x: 0.98,
+                scale_y: 0.98,
+                duration: 80,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+
+            cancelHoldTimer();
+            holdTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+                holdTimerId = null;
+                this._dragHoldTimerId = null;
+                if (isCandidate && !isDragging) {
+                    startDrag();
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+            this._dragHoldTimerId = holdTimerId;
+
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('button-release-event', (actor, event) => {
+            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+            cancelHoldTimer();
+
+            if (isDragging) {
+                return finishDrag(true);
+            }
+
+            if (isCandidate) {
+                isCandidate = false;
+                card.ease({
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    duration: 100,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+                // Quick click -> open details page
+                this._activeTab = key;
+                this._updateTabVisibility();
+                return Clutter.EVENT_STOP;
+            }
+
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('event', (actor, event) => {
+            const type = event.type();
+            if (type === Clutter.EventType.MOTION || type === Clutter.EventType.TOUCH_UPDATE) {
+                const [currX, currY] = event.get_coords();
+                const dist = Math.hypot(currX - startX, currY - startY);
+
+                if (isCandidate && !isDragging && dist > 8) {
+                    startDrag();
+                }
+
+                if (isDragging) {
+                    const deltaX = currX - startX;
+                    const deltaY = currY - startY;
+                    card.set_translation(deltaX, deltaY, 0);
+
+                    // Find hover target slot among cards
+                    this._handleCardDragMotion(key, currX, currY);
+                    return Clutter.EVENT_STOP;
+                }
+            } else if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END || type === Clutter.EventType.TOUCH_CANCEL) {
+                if (isDragging) {
+                    return finishDrag(true);
+                }
+                cancelHoldTimer();
+                isCandidate = false;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
     _addCardInteractions(card, normalStyle, hoverStyle) {
         if (!card) return;
         card.set_pivot_point(0.5, 0.5);
@@ -1789,9 +2147,11 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
         headerBox.add_child(menuBtn);
         this._overviewPage.add_child(headerBox);
 
-        // Horizontal Row for CPU, Memory, Battery
-        this._primaryRow = new St.BoxLayout({ style: 'spacing: 12px; margin-bottom: 12px;', x_expand: true });
-        this._overviewPage.add_child(this._primaryRow);
+        // Unified 2-Column Reorderable Card Grid
+        const grid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
+        this._overviewGridLayout = grid;
+        this._overviewGrid = new St.Widget({ layout_manager: grid, style_class: 'resource-pulse-overview-grid', x_expand: true });
+        this._overviewPage.add_child(this._overviewGrid);
 
         this._summaryCards = {};
 
@@ -1802,25 +2162,21 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             style: cpuNormal,
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
-        const cpuHead = new St.BoxLayout({ style: 'spacing: 6px;' });
+        const cpuHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
         const cpuIcon = new St.Icon({ icon_name: this._getIconName('cpu'), style: 'icon-size: 16px; color: #3584e4;' });
         cpuHead.add_child(cpuIcon);
-        cpuHead.add_child(new St.Label({ text: 'CPU', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;' }));
+        cpuHead.add_child(new St.Label({ text: 'CPU', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+        const cpuGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style: 'icon-size: 13px; color: rgba(255,255,255,0.2);' });
+        cpuHead.add_child(cpuGrip);
         cpuCard.add_child(cpuHead);
-        const cpuVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
+        const cpuVal = new St.Label({ text: '--%', style: 'font-size: 1.7em; font-weight: bold; color: #ffffff;' });
         cpuCard.add_child(cpuVal);
-        const cpuSpark = new Sparkline(-1, 38, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
+        const cpuSpark = new Sparkline(-1, 30, 100, false, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
         cpuSpark.x_expand = true;
         cpuCard.add_child(cpuSpark);
         const cpuBar = new ProgressBar(4, 0.208, 0.518, 0.894);
         cpuCard.add_child(cpuBar);
-        cpuCard.connect('button-press-event', () => {
-            this._activeTab = 'cpu';
-            this._updateTabVisibility();
-            return Clutter.EVENT_STOP;
-        });
-        this._addCardInteractions(cpuCard, cpuNormal, cpuHover);
-        this._primaryRow.add_child(cpuCard);
+        this._makeCardDraggable(cpuCard, 'cpu', cpuNormal, cpuHover, cpuGrip);
         this._summaryCards['cpu'] = { box: cpuCard, valueLabel: cpuVal, pbar: cpuBar, spark: cpuSpark };
 
         // 2. Memory Card
@@ -1830,25 +2186,21 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             style: memNormal,
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
-        const memHead = new St.BoxLayout({ style: 'spacing: 6px;' });
+        const memHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
         const memIcon = new St.Icon({ icon_name: this._getIconName('memory'), style: 'icon-size: 16px; color: #9141ac;' });
         memHead.add_child(memIcon);
-        memHead.add_child(new St.Label({ text: 'Memory', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;' }));
+        memHead.add_child(new St.Label({ text: 'Memory', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+        const memGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style: 'icon-size: 13px; color: rgba(255,255,255,0.2);' });
+        memHead.add_child(memGrip);
         memCard.add_child(memHead);
-        const memVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
+        const memVal = new St.Label({ text: '--%', style: 'font-size: 1.7em; font-weight: bold; color: #ffffff;' });
         memCard.add_child(memVal);
-        const memSpark = new Sparkline(-1, 38, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
+        const memSpark = new Sparkline(-1, 30, 100, false, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
         memSpark.x_expand = true;
         memCard.add_child(memSpark);
         const memBar = new ProgressBar(4, 0.569, 0.255, 0.675);
         memCard.add_child(memBar);
-        memCard.connect('button-press-event', () => {
-            this._activeTab = 'memory';
-            this._updateTabVisibility();
-            return Clutter.EVENT_STOP;
-        });
-        this._addCardInteractions(memCard, memNormal, memHover);
-        this._primaryRow.add_child(memCard);
+        this._makeCardDraggable(memCard, 'memory', memNormal, memHover, memGrip);
         this._summaryCards['memory'] = { box: memCard, valueLabel: memVal, pbar: memBar, spark: memSpark };
 
         // 3. Battery Card
@@ -1858,67 +2210,47 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             style: batNormal,
             vertical: true, reactive: true, can_focus: true, x_expand: true
         });
-        const batHead = new St.BoxLayout({ style: 'spacing: 6px;' });
+        const batHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
         const batIcon = new St.Icon({ icon_name: this._getIconName('battery'), style: 'icon-size: 16px; color: #2ec27e;' });
         batHead.add_child(batIcon);
-        const batTitle = new St.Label({ text: 'Battery', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true });
-        batHead.add_child(batTitle);
-        batHead.add_child(new St.Icon({ icon_name: 'battery-good-symbolic', style: 'icon-size: 14px; color: rgba(255,255,255,0.4);' }));
+        batHead.add_child(new St.Label({ text: 'Battery', style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+        const batGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style: 'icon-size: 13px; color: rgba(255,255,255,0.2);' });
+        batHead.add_child(batGrip);
         batCard.add_child(batHead);
-        const batVal = new St.Label({ text: '--%', style: 'font-size: 1.9em; font-weight: bold; color: #ffffff;' });
+        const batVal = new St.Label({ text: '--%', style: 'font-size: 1.7em; font-weight: bold; color: #ffffff;' });
         batCard.add_child(batVal);
-        const batBar = new ProgressBar(6, 0.18, 0.76, 0.494);
-        batCard.add_child(batBar);
-        const batStatus = new St.Label({ text: 'Discharging', style: 'font-size: 0.75em; color: #8c8c94; margin-top: 2px;' });
+        const batStatus = new St.Label({ text: 'Discharging', style: 'font-size: 0.75em; color: #8c8c94; margin-bottom: 4px;' });
         batCard.add_child(batStatus);
-        batCard.connect('button-press-event', () => {
-            this._activeTab = 'battery';
-            this._updateTabVisibility();
-            return Clutter.EVENT_STOP;
-        });
-        this._addCardInteractions(batCard, batNormal, batHover);
-        this._primaryRow.add_child(batCard);
+        const batBar = new ProgressBar(4, 0.18, 0.76, 0.494);
+        batCard.add_child(batBar);
+        this._makeCardDraggable(batCard, 'battery', batNormal, batHover, batGrip);
         this._summaryCards['battery'] = { box: batCard, valueLabel: batVal, pbar: batBar, statusLbl: batStatus };
 
-        // Secondary Grid Layout (2x2)
-        const grid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
-        this._secondaryBox = new St.Widget({ layout_manager: grid, style_class: 'resource-pulse-secondary-grid', x_expand: true });
-        this._overviewPage.add_child(this._secondaryBox);
-
+        // 4. Secondary Metrics (Disk, Network, Thermal, Power, GPU)
         const secondaryMetrics = [
-            { key: 'disk', label: 'Disk', tint: 'tint-disk', r: 0.96, g: 0.83, b: 0.18 },
-            { key: 'network', label: 'Network', tint: 'tint-network', r: 0.88, g: 0.11, b: 0.14 },
-            { key: 'thermal', label: 'Thermal', tint: 'tint-thermal', r: 1.0, g: 0.47, b: 0.0 },
-            { key: 'power', label: 'Power', tint: 'tint-power', r: 0.96, g: 0.83, b: 0.18 },
-            { key: 'gpu', label: 'GPU', tint: 'tint-gpu', r: 0.2, g: 0.82, b: 0.48 }
+            { key: 'disk', label: 'Disk', r: 0.96, g: 0.83, b: 0.18, iconColor: '#f6d32d', bg: '#22200a', border: 'rgba(246,211,45,0.35)', hoverBg: '#2d2b0e', hoverBorder: 'rgba(246,211,45,0.9)' },
+            { key: 'network', label: 'Network', r: 0.88, g: 0.11, b: 0.14, iconColor: '#e01b24', bg: '#22100f', border: 'rgba(224,27,36,0.35)', hoverBg: '#2f1615', hoverBorder: 'rgba(224,27,36,0.9)' },
+            { key: 'thermal', label: 'Thermal', r: 1.0, g: 0.47, b: 0.0, iconColor: '#ff7800', bg: '#221608', border: 'rgba(255,120,0,0.35)', hoverBg: '#2f1f0b', hoverBorder: 'rgba(255,120,0,0.9)' },
+            { key: 'power', label: 'Power', r: 0.96, g: 0.83, b: 0.18, iconColor: '#f6d32d', bg: '#22200a', border: 'rgba(246,211,45,0.35)', hoverBg: '#2d2b0e', hoverBorder: 'rgba(246,211,45,0.9)' },
+            { key: 'gpu', label: 'GPU', r: 0.2, g: 0.82, b: 0.48, iconColor: '#33d17a', bg: '#0b2014', border: 'rgba(51,209,122,0.35)', hoverBg: '#10301e', hoverBorder: 'rgba(51,209,122,0.9)' }
         ];
 
-        secondaryMetrics.forEach((m, idx) => {
-            // Dark tinted backgrounds per metric type
-            const bgMap = {
-                disk:    { bg: '#22200a', border: 'rgba(246,211,45,0.35)', hoverBg: '#2d2b0e', hoverBorder: 'rgba(246,211,45,0.9)' },
-                network: { bg: '#22100f', border: 'rgba(224,27,36,0.35)',  hoverBg: '#2f1615', hoverBorder: 'rgba(224,27,36,0.9)' },
-                thermal: { bg: '#221608', border: 'rgba(255,120,0,0.35)', hoverBg: '#2f1f0b', hoverBorder: 'rgba(255,120,0,0.9)' },
-                power:   { bg: '#22200a', border: 'rgba(246,211,45,0.35)', hoverBg: '#2d2b0e', hoverBorder: 'rgba(246,211,45,0.9)' },
-                gpu:     { bg: '#0b2014', border: 'rgba(51,209,122,0.35)', hoverBg: '#10301e', hoverBorder: 'rgba(51,209,122,0.9)' }
-            };
-            const colors = bgMap[m.key] || { bg: '#222', border: 'rgba(255,255,255,0.15)', hoverBg: '#2a2a2a', hoverBorder: 'rgba(255,255,255,0.5)' };
-            const normalStyle = `background-color: ${colors.bg}; border: 1px solid ${colors.border}; border-radius: 12px; padding: 12px;`;
-            const hoverStyle  = `background-color: ${colors.hoverBg}; border: 1px solid ${colors.hoverBorder}; border-radius: 12px; padding: 12px;`;
+        secondaryMetrics.forEach(m => {
+            const normalStyle = `background-color: ${m.bg}; border: 1px solid ${m.border}; border-radius: 12px; padding: 12px;`;
+            const hoverStyle  = `background-color: ${m.hoverBg}; border: 1px solid ${m.hoverBorder}; border-radius: 12px; padding: 12px;`;
             const card = new St.BoxLayout({
                 style: normalStyle,
                 vertical: true, reactive: true, can_focus: true, x_expand: true
             });
 
-            const iconColorMap = {
-                disk: '#f6d32d', network: '#e01b24', thermal: '#ff7800', power: '#f6d32d', gpu: '#33d17a'
-            };
-            const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;' });
-            head.add_child(new St.Icon({ icon_name: this._getIconName(m.key), style: `icon-size: 16px; color: ${iconColorMap[m.key] || '#fff'};` }));
-            head.add_child(new St.Label({ text: m.label, style: 'font-size: 0.85em; font-weight: 600; color: #a0a0b8;' }));
+            const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
+            head.add_child(new St.Icon({ icon_name: this._getIconName(m.key), style: `icon-size: 16px; color: ${m.iconColor};` }));
+            head.add_child(new St.Label({ text: m.label, style: 'font-size: 0.9em; font-weight: 600; color: #a0a0b8;', x_expand: true }));
+            const grip = new St.Icon({ icon_name: 'view-grid-symbolic', style: 'icon-size: 13px; color: rgba(255,255,255,0.2);' });
+            head.add_child(grip);
             card.add_child(head);
 
-            const val = new St.Label({ text: '--', style: 'font-size: 1.5em; font-weight: bold; color: #ffffff; margin-bottom: 2px;' });
+            const val = new St.Label({ text: '--', style: 'font-size: 1.7em; font-weight: bold; color: #ffffff;' });
             card.add_child(val);
 
             const subtext = new St.Label({ text: '', style: 'font-size: 0.75em; color: #8c8c94; margin-bottom: 4px;', visible: false });
@@ -1927,16 +2259,13 @@ chmod a+r /sys/class/powercap/intel-rapl*/energy_uj 2>/dev/null || true
             const pbar = new ProgressBar(4, m.r, m.g, m.b);
             card.add_child(pbar);
 
-            card.connect('button-press-event', () => {
-                this._activeTab = m.key;
-                this._updateTabVisibility();
-                return Clutter.EVENT_STOP;
-            });
-
-            this._addCardInteractions(card, normalStyle, hoverStyle);
-            grid.attach(card, idx % 2, Math.floor(idx / 2), 1, 1);
+            this._makeCardDraggable(card, m.key, normalStyle, hoverStyle, grip);
             this._summaryCards[m.key] = { box: card, valueLabel: val, subLabel: subtext, pbar };
         });
+
+        // Initialize and attach cards according to saved/default order
+        this._cardOrder = this._sanitizeCardOrder(this._getStrv('overview-card-order', null));
+        this._attachCardsToGrid(this._cardOrder);
 
         // Hardware Info Card
         const hwNormal = 'background-color: #242424; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; margin-top: 10px;';
