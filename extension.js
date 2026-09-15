@@ -62,9 +62,13 @@ const ALERT_GPU_EVERY_US = 30e6;
 const BACKGROUND_EVERY_US = 60e6;
 // Network day totals are written at most this often (and on disable).
 const NET_USAGE_SAVE_US = 5 * 60e6;
-// Gliding between readings: frames per second while the menu is open; with
-// it closed only the top bar moves, in this many steps per interval.
-const GLIDE_FRAME_MS = 66;
+// Gliding between readings. Any visible change redraws the open panel, and
+// in the software-rendered test shell each redraw costs about 0.5 % of a
+// core per frame per second whatever changed (measured: one label or one
+// bar at 15 fps, +7-8 %). 4 frames a second (8 steps per 2 s glide) stays
+// within the menu-open budget. With the menu closed only the top bar
+// moves, in this many steps per interval.
+const GLIDE_FRAME_MS = 250;
 const GLIDE_TOPBAR_STEPS = 4;
 // Share of time (PSI "some", 10 s average) in which programs waited for
 // memory that raises an alert: well past the occasional reclaim stall.
