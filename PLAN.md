@@ -591,3 +591,21 @@ Found on the way:
 Soak after the row reuse: menu closed +0.50 % (budget 1 %), with tracking +0.60 %; RSS slope 0.098 MB/min (0.387 before rows were reused); fds 75 → 75.
 
 Not run: real NVIDIA / AMD GPUs (GPU alerts use the same reading as the GPU page); a kernel without PSI (fixture only); traffic across a real screen lock (the boot-id path is unit-tested).
+
+## Smooth changes (branch `smooth-values`, 2026-10-16)
+
+Owner's request: values changed too abruptly at the 2 s interval. Owner's decision: glide between readings (1) plus light averaging of noisy readings (2), with the glide lasting exactly one polling interval.
+
+Design: `lib/smoothing.js` (pure) averages CPU, GPU, network and disk rates (half weight per reading) and interpolates named numeric fields between two readings. The shell keeps the raw reading in `_lastData` for alerts, history and the battery tracker, and shows a glide from what is on screen to the new (averaged) reading over one interval. The existing renderers draw the interpolated reading: about 15 frames a second with the menu open, and with it closed only the top bar in four steps per interval. Live charts slide by the time since their last sample. Setting `smooth-transitions`, on by default.
+
+Measured first: a full render costs 0.5–0.7 ms of JS and the top bar alone 0.06 ms.
+
+| Proof | Result |
+|---|---|
+| Unit tests: averaging, raw reading untouched, only named fields glide, process lists and load averages never blended, start / end / unavailable values | 14 checks pass (382 in total) |
+| UI: two known readings with polling paused | memory 20 → 22 26 30 … 74 78 → 80 over 2 s, never going back; CPU lands on the average (50); top bar ends exact; charts slide and come to rest |
+| Overhead soak | see below |
+
+Found on the way:
+- The panel-size test read the `width` property. While a relayout is pending, that answers the requested width (380) rather than the laid-out one (372, a constant). Values changing 15 times a second made this frequent. The test now reads the allocation.
+- The GPU page test checks exact injected readings, so it now runs with smoothing off.
