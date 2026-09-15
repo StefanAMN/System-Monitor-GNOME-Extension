@@ -1168,7 +1168,7 @@ export default class ResourcePulseExtension extends Extension {
 
         // Pinned
         const pinned = this._pinnedMetrics();
-        for (const [key, btn] of Object.entries(this._pinButtons || {})) {
+        for (const key of Object.keys(this._pinButtons || {})) {
             this._updatePinButtonState(key, pinned.includes(key));
         }
 
@@ -1937,7 +1937,7 @@ export default class ResourcePulseExtension extends Extension {
         try {
             this._settings.set_strv('overview-card-order', this._cardOrder);
 
-            let pinned = this._pinnedMetrics();
+            const pinned = this._pinnedMetrics();
             if (pinned && pinned.length > 1) {
                 pinned.sort((a, b) => this._cardOrder.indexOf(a) - this._cardOrder.indexOf(b));
                 this._settings.set_strv('pinned-metrics', pinned);
@@ -2103,7 +2103,7 @@ export default class ResourcePulseExtension extends Extension {
 
             // Safety net: stage-level button release listener
             if (!this._stageReleaseId) {
-                this._stageReleaseId = global.stage.connect('button-release-event', (stage, ev) => {
+                this._stageReleaseId = global.stage.connect('button-release-event', () => {
                     if (isDragging) {
                         finishDrag(true);
                         return Clutter.EVENT_STOP;
