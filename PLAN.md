@@ -606,6 +606,20 @@ Measured first: a full render costs 0.5–0.7 ms of JS and the top bar alone 0.0
 | UI: two known readings with polling paused | memory 20 → 22 26 30 … 74 78 → 80 over 2 s, never going back; CPU lands on the average (50); top bar ends exact; charts slide and come to rest |
 | Overhead soak | see below |
 
+Overhead, measured (software-rendered test shell, % of one core over the extension disabled):
+
+| Variant | Menu closed | Menu open (overview / CPU tab) | Memory slope (limit 0.5 MB/min) |
+|---|---|---|---|
+| Before smoothing | +0.50 | +0.90 / +1.43 | 0.098 |
+| Glide at 15 fps | +0.57 | +11.80 / +14.36 (fail) | — |
+| Bars as plain actors, charts only on samples, 15 fps | +0.77 | +12.57 / +15.63 (fail) | — |
+| 4 fps | +0.87 (with tracking +0.99) | +3.40 / +4.53 | 0.479 |
+| 4 fps, reused buffer, no tooltip rebuild on frames | +0.87 (with tracking +1.00) | +3.77 / +4.23 | 0.552 (fail; total RSS fell 293.3 → 287.9 MB) |
+
+Per-component probe at 15 fps with the menu open: any visible change costs about the same (+7-8 %: one label, one bar, or the whole panel), because each change redraws the open panel in software. The cost is per frame, not per widget.
+
+Stopped after repeated budget failures (CLAUDE.md, two failed attempts). Open question for the owner: the closed-menu top-bar glide adds about 0.3 % and leaves the closed budget at its edge with tracking on. Running: a 30 min soak with the memory series logged, to tell a leak from garbage-collector growth.
+
 Found on the way:
 - The panel-size test read the `width` property. While a relayout is pending, that answers the requested width (380) rather than the laid-out one (372, a constant). Values changing 15 times a second made this frequent. The test now reads the allocation.
 - The GPU page test checks exact injected readings, so it now runs with smoothing off.
