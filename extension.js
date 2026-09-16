@@ -30,7 +30,7 @@ import { RingBuffer } from './lib/ringbuffer.js';
 import { AlertMonitor, alertReadings, alertLine } from './lib/alerts.js';
 import { PressureSampler } from './lib/pressure.js';
 import { BucketSeries, RANGES } from './lib/longhistory.js';
-import { smoothReading, interpolateReading } from './lib/smoothing.js';
+import { smoothReading, interpolateReading, glideBuffer } from './lib/smoothing.js';
 import { loadNetUsage, saveNetUsage, netUsagePath, readBootId } from './lib/netusage.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
@@ -1091,7 +1091,7 @@ export default class ResourcePulseExtension extends Extension {
      *   (Cairo, costly to repaint) change only with a new sample
      */
     _render(data, topBarOnly = false, frame = false) {
-        this._updateTopBarUI(data);
+        this._updateTopBarUI(data, frame);
         if (!topBarOnly) this._updateDashboardUI(data, frame);
     }
 
@@ -1100,10 +1100,10 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     /** The reading as shown right now: part of the way through the glide. */
-    _shownNow(now = GLib.get_monotonic_time()) {
+    _shownNow(now = GLib.get_monotonic_time(), out = null) {
         if (!this._shownTo) return null;
         const t = this._intervalUs > 0 ? (now - this._shownAt) / this._intervalUs : 1;
-        return interpolateReading(this._shownFrom, this._shownTo, t);
+        return interpolateReading(this._shownFrom, this._shownTo, t, out);
     }
 
     /**
@@ -1138,7 +1138,11 @@ export default class ResourcePulseExtension extends Extension {
         this._glideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, period, () => {
             const now = GLib.get_monotonic_time();
             const done = !this._smoothOn() || now - this._shownAt >= this._intervalUs;
-            const shown = done ? this._shownTo : this._shownNow(now);
+            // Frames write into one reused buffer; a new reading copies it
+            // as the next glide's start (_present), so no frame allocates a
+            // whole new reading.
+            this._glideBuf ??= glideBuffer();
+            const shown = done ? this._shownTo : this._shownNow(now, this._glideBuf);
             if (shown) this._render(shown, !this._menuOpen, true);
             if (done) {
                 this._glideId = 0;
@@ -1654,7 +1658,7 @@ export default class ResourcePulseExtension extends Extension {
         }
     }
 
-    _updateTopBarUI(data) {
+    _updateTopBarUI(data, frame = false) {
         if (!this._settings || !this._indicator) return;
         const tempUnit = this._settings.get_string('unit-temp') || 'C';
         const useGiB = this._settings.get_string('unit-mem') === 'GiB';
@@ -1664,51 +1668,53 @@ export default class ResourcePulseExtension extends Extension {
         const batFmt = this._settings.get_string('battery-top-format') || 'percent';
         const netFmt = this._settings.get_string('network-top-format') || 'download';
 
-        // 1. Compute rich tooltips
-        if (data.cpu) {
-            const loadStr = data.cpu.loadavg ? data.cpu.loadavg.map(v => v.toFixed(2)).join(', ') : '--';
-            this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || 'CPU'}\nLoad: ${loadStr}${data.cpu.frequency ? `\nFreq: ${data.cpu.frequency}` : ''}`;
-        }
-        if (data.mem) {
-            const usedStr = formatBytes(data.mem.used, useGiB);
-            const totalStr = formatBytes(data.mem.total, useGiB);
-            const availStr = formatBytes(data.mem.available, useGiB);
-            this._tooltipTexts['memory'] = `Used: ${usedStr} / ${totalStr}\nAvailable: ${availStr}\nSwap: ${Math.round(data.mem.swapPercent || 0)}%`;
-        }
-        if (data.bat && !data.bat.present)
-            this._tooltipTexts['battery'] = 'Battery not available\nNo battery was detected.';
-        if (data.bat && data.bat.present) {
-            const state = batteryStateLabel(data.bat.state);
-            let timeStr = '';
-            if (data.bat.timeRemaining > 0)
-                timeStr = ` · ${formatDuration(data.bat.timeRemaining)} ${data.bat.state === 'charging' ? 'to full' : 'left'}`;
-            this._tooltipTexts['battery'] = `Battery: ${data.bat.percent.toFixed(1)}% (${state}${timeStr})\nHealth: ${data.bat.health.toFixed(1)}% · Rate: ${(data.bat.energyRate || 0).toFixed(1)}W`;
-        }
-        if (data.pwr) {
-            const readout = powerReadout(data.pwr);
-            if (readout.value === null) {
-                this._tooltipTexts['power'] = `Power draw not available\n${readout.reason}`;
-            } else {
-                const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : 'n/a on AC';
-                this._tooltipTexts['power'] = `System Draw: ${sys}\nCPU Package: ${data.pwr.packagePower !== null ? data.pwr.packagePower.toFixed(1) + 'W' : 'n/a'}`;
+        // 1. Compute rich tooltips: they describe the reading, not the glide.
+        if (!frame) {
+            if (data.cpu) {
+                const loadStr = data.cpu.loadavg ? data.cpu.loadavg.map(v => v.toFixed(2)).join(', ') : '--';
+                this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || 'CPU'}\nLoad: ${loadStr}${data.cpu.frequency ? `\nFreq: ${data.cpu.frequency}` : ''}`;
             }
+            if (data.mem) {
+                const usedStr = formatBytes(data.mem.used, useGiB);
+                const totalStr = formatBytes(data.mem.total, useGiB);
+                const availStr = formatBytes(data.mem.available, useGiB);
+                this._tooltipTexts['memory'] = `Used: ${usedStr} / ${totalStr}\nAvailable: ${availStr}\nSwap: ${Math.round(data.mem.swapPercent || 0)}%`;
+            }
+            if (data.bat && !data.bat.present)
+                this._tooltipTexts['battery'] = 'Battery not available\nNo battery was detected.';
+            if (data.bat && data.bat.present) {
+                const state = batteryStateLabel(data.bat.state);
+                let timeStr = '';
+                if (data.bat.timeRemaining > 0)
+                    timeStr = ` · ${formatDuration(data.bat.timeRemaining)} ${data.bat.state === 'charging' ? 'to full' : 'left'}`;
+                this._tooltipTexts['battery'] = `Battery: ${data.bat.percent.toFixed(1)}% (${state}${timeStr})\nHealth: ${data.bat.health.toFixed(1)}% · Rate: ${(data.bat.energyRate || 0).toFixed(1)}W`;
+            }
+            if (data.pwr) {
+                const readout = powerReadout(data.pwr);
+                if (readout.value === null) {
+                    this._tooltipTexts['power'] = `Power draw not available\n${readout.reason}`;
+                } else {
+                    const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : 'n/a on AC';
+                    this._tooltipTexts['power'] = `System Draw: ${sys}\nCPU Package: ${data.pwr.packagePower !== null ? data.pwr.packagePower.toFixed(1) + 'W' : 'n/a'}`;
+                }
+            }
+            if (data.dsk && data.dsk.mounts && data.dsk.mounts.length > 0) {
+                const root = data.dsk.mounts[0];
+                this._tooltipTexts['disk'] = `Space used on /: ${Math.round(root.percent)}% (${formatBytes(root.free, useGiB)} free)\nBusy: ${Math.round(data.dsk.diskPercent || 0)}% · Read ${formatSpeed(data.dsk.readRate || 0)} · Write ${formatSpeed(data.dsk.writeRate || 0)}`;
+            }
+            if (data.net && data.net.total) {
+                const sessRx = formatBytes(data.net.sessionRx || 0, useGiB);
+                const sessTx = formatBytes(data.net.sessionTx || 0, useGiB);
+                this._tooltipTexts['network'] = `Download: ${formatSpeed(data.net.total.rxRate)}\nUpload: ${formatSpeed(data.net.total.txRate)}\nSession: ↓ ${sessRx}  ↑ ${sessTx}`;
+            }
+            if (data.thm) {
+                const fanInfo = data.thm.fans && data.thm.fans.length > 0 ? `\nFan: ${data.thm.fans[0].rpm} RPM` : '';
+                this._tooltipTexts['thermal'] = thermalUnavailable(data.thm)
+                    ? 'Temperature not available\nNo readable hwmon or thermal-zone sensor was found.'
+                    : `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
+            }
+            if (data.gpu) this._tooltipTexts['gpu'] = gpuTooltip(data.gpu, tempUnit);
         }
-        if (data.dsk && data.dsk.mounts && data.dsk.mounts.length > 0) {
-            const root = data.dsk.mounts[0];
-            this._tooltipTexts['disk'] = `Space used on /: ${Math.round(root.percent)}% (${formatBytes(root.free, useGiB)} free)\nBusy: ${Math.round(data.dsk.diskPercent || 0)}% · Read ${formatSpeed(data.dsk.readRate || 0)} · Write ${formatSpeed(data.dsk.writeRate || 0)}`;
-        }
-        if (data.net && data.net.total) {
-            const sessRx = formatBytes(data.net.sessionRx || 0, useGiB);
-            const sessTx = formatBytes(data.net.sessionTx || 0, useGiB);
-            this._tooltipTexts['network'] = `Download: ${formatSpeed(data.net.total.rxRate)}\nUpload: ${formatSpeed(data.net.total.txRate)}\nSession: ↓ ${sessRx}  ↑ ${sessTx}`;
-        }
-        if (data.thm) {
-            const fanInfo = data.thm.fans && data.thm.fans.length > 0 ? `\nFan: ${data.thm.fans[0].rpm} RPM` : '';
-            this._tooltipTexts['thermal'] = thermalUnavailable(data.thm)
-                ? 'Temperature not available\nNo readable hwmon or thermal-zone sensor was found.'
-                : `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
-        }
-        if (data.gpu) this._tooltipTexts['gpu'] = gpuTooltip(data.gpu, tempUnit);
 
         // 2. Update top bar text & icons
         const batWidget = this._topBarWidgets['battery'];
