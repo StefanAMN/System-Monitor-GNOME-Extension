@@ -12,3 +12,4 @@ schemas/gschemas.compiled
 scratch/
 __pycache__/
 *.pyc
+node_modules/

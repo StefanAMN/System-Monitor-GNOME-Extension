@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # gjs runs the unit tests; glib-compile-schemas builds the settings
+      # schema they inspect. The UI tests need GNOME Shell 50 and stay local
+      # (./dev.sh test-ui).
+      - name: Install gjs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gjs libglib2.0-bin pciutils
+
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Syntax and unit tests
+        run: ./dev.sh test-unit
