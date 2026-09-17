@@ -66,10 +66,10 @@ const NET_USAGE_SAVE_US = 5 * 60e6;
 // in the software-rendered test shell each redraw costs about 0.5 % of a
 // core per frame per second whatever changed (measured: one label or one
 // bar at 15 fps, +7-8 %). 4 frames a second (8 steps per 2 s glide) stays
-// within the menu-open budget. With the menu closed only the top bar
-// moves, in this many steps per interval.
+// within the menu-open budget. With the menu closed there are no frames at
+// all: gliding the top bar cost about 0.4 % around the clock, which broke
+// the 1 % menu-closed budget; it shows the averaged values once per reading.
 const GLIDE_FRAME_MS = 250;
-const GLIDE_TOPBAR_STEPS = 4;
 // Share of time (PSI "some", 10 s average) in which programs waited for
 // memory that raises an alert: well past the occasional reclaim stall.
 const PRESSURE_LIMIT = 20;
@@ -128,7 +128,6 @@ export default class ResourcePulseExtension extends Extension {
         this._shownAt = 0;
         this._smoothPrev = null;
         this._glideId = 0;
-        this._glidePeriod = 0;
         // Network data per day: counted from the file's last counters once loaded.
         this._netUsage = null;
         this._netUsageDirty = false;
@@ -282,8 +281,6 @@ export default class ResourcePulseExtension extends Extension {
         this._menuOpen = false;
         this._openStateId = this._indicator.menu.connect('open-state-changed', (menu, open) => {
             this._menuOpen = open;
-            // Frame rate follows the menu: every frame open, top bar only closed.
-            if (this._glideId) this._runGlide();
             if (open) {
                 this._updateMenuDimensions();
                 this._hideTooltip();
@@ -1122,6 +1119,14 @@ export default class ResourcePulseExtension extends Extension {
         }
         const target = smoothReading(this._smoothPrev, data);
         this._smoothPrev = target;
+        if (!this._menuOpen) {
+            // Closed: averaged values, once per reading, no frames.
+            this._shownFrom = null;
+            this._shownTo = target;
+            this._shownAt = now;
+            this._render(target, true);
+            return;
+        }
         this._shownFrom = this._shownNow(now);
         this._shownTo = target;
         this._shownAt = now;
@@ -1129,15 +1134,12 @@ export default class ResourcePulseExtension extends Extension {
         this._runGlide();
     }
 
-    /** Frames until the glide and the charts' scroll are done; restarted for the menu's rate. */
+    /** Frames, while the menu is open, until the glide has arrived. */
     _runGlide() {
-        const period = this._menuOpen ? GLIDE_FRAME_MS : Math.max(100, Math.round(this._intervalUs / 1000 / GLIDE_TOPBAR_STEPS));
-        if (this._glideId && this._glidePeriod === period) return;
-        if (this._glideId) GLib.source_remove(this._glideId);
-        this._glidePeriod = period;
-        this._glideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, period, () => {
+        if (this._glideId) return;
+        this._glideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, GLIDE_FRAME_MS, () => {
             const now = GLib.get_monotonic_time();
-            const done = !this._smoothOn() || now - this._shownAt >= this._intervalUs;
+            const done = !this._smoothOn() || !this._menuOpen || now - this._shownAt >= this._intervalUs;
             // Frames write into one reused buffer; a new reading copies it
             // as the next glide's start (_present), so no frame allocates a
             // whole new reading.

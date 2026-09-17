@@ -803,6 +803,15 @@ async function smoothGlide(rp) {
         check(rp._summaryCards.memory.pbar.pct === 80, `glide: the memory bar ends at ${rp._summaryCards.memory.pbar.pct} %`);
         console.log(`RP-UITEST glide: memory 20 -> ${seen.join(' ')} -> ${mem()} over ${(rp._intervalUs / 1e6).toFixed(0)} s`);
 
+        // Menu closed: no frames at all (the budget is 1 %); the top bar
+        // shows the averaged value at once.
+        rp._indicator.menu.close();
+        await sleep(400);
+        rp._present(reading(40, 10));
+        check(!rp._glideId, 'glide: frames run with the menu closed');
+        check(rp._topBarWidgets.memory.label.text === '40%' && rp._topBarWidgets.cpu.label.text === '30%',
+            `glide: closed top bar shows '${rp._topBarWidgets.memory.label.text}' / '${rp._topBarWidgets.cpu.label.text}', not 40% / the average 30%`);
+
     } finally {
         rp._startPolling();
         rp._indicator.menu.close();
@@ -1088,8 +1097,15 @@ async function run() {
     Main.extensionManager.enableExtension(TARGET);
     await sleep(2500);
     const last = Main.extensionManager.lookup(TARGET);
-    check(last?.stateObj?._indicator && last.stateObj._summaryCards.cpu.valueLabel.text !== '--%',
-        'extension did not come back and poll after the final re-enable');
+    // With the menu closed only the top bar is drawn (the panel is filled
+    // when it opens), so the top bar shows that it polls.
+    check(last?.stateObj?._indicator && /^\d+%$/.test(last.stateObj._topBarWidgets.cpu?.label.text ?? ''),
+        `extension did not come back and poll after the final re-enable (top bar '${last?.stateObj?._topBarWidgets.cpu?.label.text}')`);
+    last.stateObj._indicator.menu.open();
+    await sleep(800);
+    check(last.stateObj._summaryCards.cpu.valueLabel.text !== '--%', 'the panel was not filled when it opened');
+    last.stateObj._indicator.menu.close();
+    await sleep(300);
 }
 
 export default class Driver extends Extension {
