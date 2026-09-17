@@ -618,7 +618,15 @@ Overhead, measured (software-rendered test shell, % of one core over the extensi
 
 Per-component probe at 15 fps with the menu open: any visible change costs about the same (+7-8 %: one label, one bar, or the whole panel), because each change redraws the open panel in software. The cost is per frame, not per widget.
 
-Stopped after repeated budget failures (CLAUDE.md, two failed attempts). Open question for the owner: the closed-menu top-bar glide adds about 0.3 % and leaves the closed budget at its edge with tracking on. Running: a 30 min soak with the memory series logged, to tell a leak from garbage-collector growth.
+| Top bar not gliding while the menu is closed (owner's decision), five process rows built up front | +0.63 (with tracking +0.75) | +4.00 / +4.53 | 0.077 over a 30 min soak |
+
+Stopped after repeated budget failures (CLAUDE.md, two failed attempts) and asked the owner. A further 10 min soak measured +1.00 % closed (+1.13 % with tracking), so the closed-menu top-bar glide was the cause. Owner's decision: with the menu closed the top bar shows the averaged values once per reading and no frames run.
+
+Memory: the 10 min soaks after the glide gave slopes of 0.48–0.62 MB/min. The 30 min soak with the series logged shows a plateau: the 5-minute means are 291.0, 290.8, 294.0, 294.7, 294.2 and 294.3 MB, and RSS went 301.0 → 292.3 MB. The 10 min slope was catching the garbage collector's settling, not a leak.
+
+Also: the Disk list added rows as more processes became active, so the actor count grew 913 → 939 (flagged as drift). All five rows are now built up front.
+
+Intermittent test (not caused by this work): opening the window from the battery line failed twice in many runs, once in the GNOME 46 container before any smoothing code; the next runs passed.
 
 Found on the way:
 - The panel-size test read the `width` property. While a relayout is pending, that answers the requested width (380) rather than the laid-out one (372, a constant). Values changing 15 times a second made this frequent. The test now reads the allocation.
