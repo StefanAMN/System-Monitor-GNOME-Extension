@@ -70,6 +70,8 @@ const NET_USAGE_SAVE_US = 5 * 60e6;
 // all: gliding the top bar cost about 0.4 % around the clock, which broke
 // the 1 % menu-closed budget; it shows the averaged values once per reading.
 const GLIDE_FRAME_MS = 250;
+// Rows in each top-process list (the sampler is asked for this many).
+const PROCESS_ROWS = 5;
 // Share of time (PSI "some", 10 s average) in which programs waited for
 // memory that raises an alert: well past the occasional reclaim stall.
 const PRESSURE_LIMIT = 20;
@@ -1415,7 +1417,7 @@ export default class ResourcePulseExtension extends Extension {
                 // A baseline older than a couple of intervals (the menu sat
                 // on another tab) would turn the rates into long averages.
                 const procResult = await this._guarded('processes', deadline,
-                    () => this._proc.sample(mem.total, isDetailedMem, 5, 2.5 * this._sampleSeconds, { io: isDetailedDsk }), null);
+                    () => this._proc.sample(mem.total, isDetailedMem, PROCESS_ROWS, 2.5 * this._sampleSeconds, { io: isDetailedDsk }), null);
                 if (gen !== this._gen) return;
                 // null: the sampler was destroyed or is still reading.
                 // CPU and disk rates need two readings; memory is valid from the first.
@@ -3951,11 +3953,12 @@ export default class ResourcePulseExtension extends Extension {
         if (!container) return;
         if (!this[targetWidgetsKey]) this[targetWidgetsKey] = [];
 
-        // Rows are only added, never rebuilt: a list whose length changes
-        // from poll to poll (the Disk page shows only active processes)
-        // hides the spare rows instead of creating actors every time.
-        if (this[targetWidgetsKey].length < processes.length) {
-            for (let i = this[targetWidgetsKey].length; i < processes.length; i++) {
+        // All rows are built on first use and never rebuilt: a list whose
+        // length changes from poll to poll (the Disk page shows only active
+        // processes) hides the spare rows, so its actor count stays fixed.
+        const rowsWanted = Math.max(processes.length, PROCESS_ROWS);
+        if (this[targetWidgetsKey].length < rowsWanted) {
+            for (let i = this[targetWidgetsKey].length; i < rowsWanted; i++) {
                 const item = new St.BoxLayout({
                     style: 'padding: 6px 8px; spacing: 8px; border-radius: 8px;',
                     style_class: 'resource-pulse-process-item',
