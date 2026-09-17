@@ -110,7 +110,7 @@ make_sandbox() {
 }
 
 # Lines in a shell log that mean this extension misbehaved.
-BAD_LOG_PATTERN="RP-UITEST FAIL|JS ERROR|Clutter-ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove"
+BAD_LOG_PATTERN="RP-UITEST FAIL|Extension resource-pulse@[^ ]*: |JS ERROR|Clutter-ERROR|ResourcePulse poll error|Error in .* sample|already disposed|was not found when attempting to remove"
 
 # Shell / session output goes to log files unless --show-logs was given;
 # with it, the same files are streamed to the terminal while the test runs.
@@ -427,6 +427,76 @@ cmd_test_unit() {
 }
 
 # ------------------------------------------------------------------------------
+# Command: Run the tests against other GNOME Shell versions (needs docker)
+#   Each version runs in a Fedora container that ships it (tests/compat).
+#   Software rendering, no logind, no hardware sensors: this proves the
+#   extension loads and its UI works on that shell, not its readings.
+# ------------------------------------------------------------------------------
+compat_fedora() {
+    case "$1" in
+        45) echo 39 ;; 46) echo 40 ;; 47) echo 41 ;; 48) echo 42 ;; 49) echo 43 ;;
+        *) return 1 ;;
+    esac
+}
+
+cmd_test_compat() {
+    local VERSIONS=("$@")
+    [ "${#VERSIONS[@]}" -gt 0 ] || VERSIONS=(45 46 47 48 49)
+    log_title "Compatibility tests: GNOME Shell ${VERSIONS[*]}"
+    if ! command -v docker >/dev/null 2>&1; then
+        log_error "docker not found: other GNOME Shell versions were NOT tested."
+        exit 1
+    fi
+    compile_schemas >/dev/null
+
+    local OUT v fed img t name actual line failed=0
+    OUT="$(mktemp -d /tmp/rp-compat.XXXXXX)"
+    local SUMMARY=()
+    for v in "${VERSIONS[@]}"; do
+        if ! fed="$(compat_fedora "$v")"; then
+            log_error "No container image known for GNOME Shell $v"
+            exit 1
+        fi
+        img="rp-compat:gnome-$v"
+        log_info "GNOME Shell $v: building $img (Fedora $fed, a few minutes the first time)..."
+        if ! docker build -q --build-arg "FEDORA=$fed" -t "$img" "$SCRIPT_DIR/tests/compat" > "$OUT/gnome-$v-build.log" 2>&1; then
+            SUMMARY+=("$v|not run|image build failed, see $OUT/gnome-$v-build.log")
+            failed=1
+            continue
+        fi
+        actual="$(docker run --rm -v "$SCRIPT_DIR":/src:ro "$img" gnome-shell --version 2>/dev/null | awk '{print $3}')"
+        line="$v|$actual"
+        for t in "test-unit" "test-headless 8" "test-ui"; do
+            name="${t%% *}"
+            # shellcheck disable=SC2086
+            if docker run --rm -v "$SCRIPT_DIR":/src:ro "$img" ./dev.sh $t > "$OUT/gnome-$v-$name.log" 2>&1; then
+                line="$line|$name pass"
+            else
+                line="$line|$name FAIL"
+                failed=1
+            fi
+        done
+        SUMMARY+=("$line")
+        log_info "GNOME Shell $v: ${line#*|}"
+    done
+
+    echo
+    printf '  %-8s %-10s %s\n' "target" "shell" "results"
+    for line in "${SUMMARY[@]}"; do
+        IFS='|' read -r v actual t <<< "$line"
+        printf '  %-8s %-10s %s\n' "$v" "$actual" "${line#*|*|}"
+    done | sed 's/|/, /g'
+    echo
+    if [ "$failed" -eq 0 ]; then
+        log_success "All listed versions passed"
+        rm -rf "$OUT"
+    else
+        log_error "Some versions failed (logs: $OUT)"
+        exit 1
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # Command: Lint (ESLint, a development dependency: run 'npm ci' once)
 # ------------------------------------------------------------------------------
 cmd_lint() {
@@ -502,6 +572,7 @@ cmd_help() {
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Enable in an isolated headless shell for [sec] (default 5) and scan its log"
     echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
+    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless and test-ui on other GNOME Shell versions in containers (default 45-49; needs docker)"
     echo -e "  ${GREEN}lint${RESET}               Run ESLint (needs 'npm ci' once)"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
     echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 600) for leaks"
@@ -540,6 +611,10 @@ case "${1:-reload}" in
         ;;
     test-unit|unit)
         cmd_test_unit
+        ;;
+    test-compat|compat)
+        shift
+        cmd_test_compat "$@"
         ;;
     lint)
         cmd_lint

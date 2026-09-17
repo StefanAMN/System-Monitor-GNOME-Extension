@@ -365,7 +365,8 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const dir = GLib.dir_make_tmp('rp-read-XXXXXX');
         ok(noteReadError(await failure(`${dir}/absent`)) === false, 'read errors: a missing file is not reported');
         GLib.file_set_contents(`${dir}/secret`, 'x');
-        GLib.chmod(`${dir}/secret`, 0);
+        // Not GLib.chmod: gjs before 1.80 does not expose it.
+        Gio.File.new_for_path(`${dir}/secret`).set_attribute_uint32('unix::mode', 0, Gio.FileQueryInfoFlags.NONE, null);
         const denied = await failure(`${dir}/secret`);
         if (denied) {
             eq([noteReadError(denied), noteReadError(denied)], [true, false], 'read errors: permission denied is reported, once');
