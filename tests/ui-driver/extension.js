@@ -774,8 +774,12 @@ async function smoothGlide(rp) {
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
     await sleep(800);
+    // No real reading may land while known ones are shown: the timer, and
+    // any one-off poll (the menu opening schedules one), are held.
     GLib.source_remove(rp._timeoutId);
     rp._timeoutId = null;
+    const poll = rp._poll;
+    rp._poll = () => {};
     try {
         const base = rp._lastData;
         const reading = (mem, cpu) => ({ ...base, mem: { ...base.mem, percent: mem }, cpu: { ...base.cpu, total: cpu } });
@@ -813,6 +817,8 @@ async function smoothGlide(rp) {
             `glide: closed top bar shows '${rp._topBarWidgets.memory.label.text}' / '${rp._topBarWidgets.cpu.label.text}', not 40% / the average 30%`);
 
     } finally {
+        delete rp._poll;
+        if (rp._poll !== poll) rp._poll = poll;
         rp._startPolling();
         rp._indicator.menu.close();
         await sleep(300);
