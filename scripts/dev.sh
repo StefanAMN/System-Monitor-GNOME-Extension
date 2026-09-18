@@ -56,7 +56,7 @@ check_syntax() {
     # Every file here is an ES module. 'node --check file.js' parses .js as
     # CommonJS first and, on import/export syntax, exits 0 without checking
     # anything; reading from stdin as a module is a real parse.
-    for f in "$EXT_DIR"/*.js "$EXT_DIR"/lib/*/*.js "$EXT_DIR"/ui/*/*.js \
+    for f in "$EXT_DIR"/*.js "$EXT_DIR"/lib/*/*.js "$EXT_DIR"/ui/*/*.js "$EXT_DIR"/ui/*/*/*.js \
              "$REPO_DIR"/tests/*/*.js; do
         [ -f "$f" ] || continue
         if ! node --input-type=module --check < "$f" 2> >(sed "s|^\[stdin\]|${f#"$REPO_DIR"/}|" >&2); then

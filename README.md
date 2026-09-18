@@ -28,7 +28,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 
 ```
 ├── src/                      # The extension itself: what is installed and packed
-│   ├── extension.js          # Lifecycle, polling engine, indicator and dashboard
+│   ├── extension.js          # enable() / disable(); installs the panel's method groups
 │   ├── prefs.js              # Preferences entry point (window built in ui/prefs/window.js)
 │   ├── metadata.json  stylesheet.css
 │   ├── schemas/              # GSettings schema
@@ -55,7 +55,18 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   │       ├── format.js  utils.js  appnames.js
 │   │       └── raplfix.js     # The single privileged (pkexec) action
 │   └── ui/
-│       ├── panel/            # Shell side: the top bar and the panel
+│       ├── panel/            # Shell side: the top bar and the panel (methods of the extension)
+│       │   ├── polling.js     # The poll loop: collectors, history, glide, network totals, tracking
+│       │   ├── topbar.js      # Pinned metrics, fitting them, their values
+│       │   ├── alerts.js      # ⚠, red values, notifications
+│       │   ├── overview.js    # Overview cards and drag-to-reorder
+│       │   ├── details.js     # Detail-page frame, range switch, tab switching
+│       │   ├── pages/         # One file per detail page (cpu, memory, battery, power, disk, network, thermal, gpu)
+│       │   ├── dashboard.js   # Applying a reading to the panel
+│       │   ├── processes.js   # Top-process lists, End / Force quit
+│       │   ├── sizing.js      # Panel size and corner resize handles
+│       │   ├── shared.js      # Settings getters, tooltip, icons, detail rows
+│       │   ├── constants.js  mixins.js
 │       │   └── widgets.js     # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
 │       └── prefs/            # GTK side: the preferences window (never loaded by the shell)
 │           ├── window.js      # Settings only from the Extensions app, all tabs from the panel
