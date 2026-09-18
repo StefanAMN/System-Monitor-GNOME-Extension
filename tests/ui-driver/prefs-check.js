@@ -173,6 +173,7 @@ async function main() {
     }
 
     const battery = await batteryPages(styleWindow);
+    await entryPoints();
 
     // What the window really shows, read back from its rendering: the test
     // shell carries a third-party theme as the user stylesheet (dev.sh), which
@@ -216,6 +217,56 @@ async function main() {
     shown.dispose();
     battery.dispose();
     battery.window.destroy();
+}
+
+// Where the window was opened from: the Extensions app (no prefs-page)
+// gets the settings only; the panel (prefs-page set) also gets Tracking and
+// Diagnostics, also when it asks while a settings-only window is open.
+async function entryPoints() {
+    const { fillWindow } = await import(`file://${root}/ui/prefswindow.js`);
+    const dir = GLib.dir_make_tmp('rp-prefs-entry-XXXXXX');
+    const stubs = {
+        historyPath: `${dir}/battery-history.json`,
+        diagnostics: {
+            readState: () => Promise.resolve({ battery: null, onBattery: false, backlight: null, powerProfile: null, energyReadable: true }),
+            switchProfile: () => Promise.resolve(),
+            launch: () => {},
+        },
+    };
+    const open = settings => {
+        const window = new Adw.PreferencesWindow({ title: 'Resource Pulse' });
+        const filled = fillWindow(window, { settings, path: root, ...stubs });
+        return { window, filled };
+    };
+    const tabs = window => ['settings', 'tracking', 'diagnostics'].filter(name => {
+        window.set_visible_page_name(name);
+        return window.visible_page_name === name;
+    }).join();
+
+    // The Extensions app: settings only.
+    const settings = newSettings();
+    const app = open(settings);
+    await sleep(200);
+    ok(!app.filled.panelPages() && tabs(app.window) === 'settings', `entry: from the Extensions app the window has ${tabs(app.window)}`);
+    // The panel asks while it is open: its tabs are added and the page shown.
+    settings.set_string('prefs-page', 'diagnostics');
+    await sleep(200);
+    ok(app.filled.panelPages() && app.window.visible_page_name === 'diagnostics', `entry: a panel request on an open window shows ${app.window.visible_page_name}`);
+    ok(settings.get_string('prefs-page') === '', 'entry: the request is cleared once taken');
+    ok(tabs(app.window) === 'settings,tracking,diagnostics', `entry: then the window has ${tabs(app.window)}`);
+    app.filled.dispose();
+    app.window.destroy();
+
+    // The panel: all three tabs, on the page it asked for.
+    const fromPanel = newSettings();
+    fromPanel.set_string('prefs-page', 'tracking');
+    const panel = open(fromPanel);
+    await sleep(200);
+    ok(panel.filled.panelPages() && panel.window.visible_page_name === 'tracking', `entry: from the panel the window opens on ${panel.window.visible_page_name}`);
+    ok(fromPanel.get_string('prefs-page') === '' && tabs(panel.window) === 'settings,tracking,diagnostics', `entry: from the panel the window has ${tabs(panel.window)}`);
+    panel.filled.dispose();
+    panel.window.destroy();
+    GLib.rmdir(dir);
 }
 
 function findAll(widget, test, out = []) {

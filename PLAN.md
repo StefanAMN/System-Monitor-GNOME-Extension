@@ -631,3 +631,13 @@ Intermittent test (not caused by this work): opening the window from the battery
 Found on the way:
 - The panel-size test read the `width` property. While a relayout is pending, that answers the requested width (380) rather than the laid-out one (372, a constant). Values changing 15 times a second made this frequent. The test now reads the allocation.
 - The GPU page test checks exact injected readings, so it now runs with smoothing off.
+
+## Settings only from the Extensions app (branch `prefs-entry`, 2026-10-16)
+
+Owner's request: the Extensions app's settings should not show Tracking and Diagnostics; the window opened from the panel keeps them.
+
+How: the panel sets `prefs-page` just before it opens the window, and the Extensions app never does. `ui/prefswindow.js` (moved out of `prefs.js` so it can be tested) builds the Settings page always. It adds the Tracking and Diagnostics tabs and the back-to-panel button only on a panel request. A request that arrives while a settings-only window is open (GNOME then only raises it) adds the tabs on the spot.
+
+Proof:
+- prefs-check: from the Extensions app the window has `settings` only. A panel request on that open window adds the tabs and shows the page asked for, and the request is cleared. From the panel, all three tabs open on the page asked for.
+- test-ui: the real Extensions-app path (`openExtensionPrefs` with no page) opens the window, and the screenshot shows no tabs and no back button. ⋮ still opens all three tabs.

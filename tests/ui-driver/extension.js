@@ -547,6 +547,19 @@ async function prefsWindow(rp) {
     for (let i = 0; i < 20 && titled(); i++) await sleep(150);
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
+
+    // As the Extensions app opens it: no page asked for, so the settings
+    // only (the tabs themselves are checked in prefs-check.js; this is the
+    // real path through the shell, shown for the screenshot).
+    check(rp._settings.get_string('prefs-page') === '', 'prefs: a page request was left over');
+    for (let i = 0; i < 20 && titled(); i++) await sleep(150);
+    Main.extensionManager.openExtensionPrefs(TARGET, '', {});
+    for (let i = 0; i < 40 && !titled(); i++) await sleep(250);
+    check(titled(), 'prefs: the Extensions app path did not open the window');
+    await sleep(1200);
+    await shot('prefs-window-extensions-app');
+    titled().delete(global.get_current_time());
+    for (let i = 0; i < 20 && titled(); i++) await sleep(150);
 }
 
 // The GPU page with three kinds of reading, fed through the real poll: a GPU
