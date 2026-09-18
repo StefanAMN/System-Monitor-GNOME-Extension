@@ -1,0 +1,4049 @@
+import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
+import St from 'gi://St';
+import Shell from 'gi://Shell';
+import Pango from 'gi://Pango';
+
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
+
+import { CpuSampler } from './lib/collectors/cpu.js';
+import { MemorySampler } from './lib/collectors/memory.js';
+import { BatterySampler } from './lib/collectors/battery.js';
+import { PowerSampler } from './lib/collectors/power.js';
+import { DiskSampler } from './lib/collectors/disk.js';
+import { NetworkSampler } from './lib/collectors/network.js';
+import { ThermalSampler } from './lib/collectors/thermal.js';
+import { GpuSampler } from './lib/collectors/gpu.js';
+import { ProcessSampler, canEnd, liveMembers, signalProcesses } from './lib/collectors/process.js';
+import { BatteryTracker, ledgerPath } from './lib/engine/batterytracker.js';
+import { METRICS } from './lib/common/settingsmodel.js';
+import { BatteryLedger, saveLedger } from './lib/engine/batteryledger.js';
+import { appInfo as ledgerAppInfo } from './lib/common/appnames.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale } from './lib/common/present.js';
+import { RingBuffer } from './lib/engine/ringbuffer.js';
+import { AlertMonitor, alertReadings, alertLine } from './lib/engine/alerts.js';
+import { PressureSampler } from './lib/collectors/pressure.js';
+import { BucketSeries, RANGES } from './lib/engine/longhistory.js';
+import { smoothReading, interpolateReading, glideBuffer } from './lib/engine/smoothing.js';
+import { loadNetUsage, saveNetUsage, netUsagePath, readBootId } from './lib/engine/netusage.js';
+import { RunningStats } from './lib/engine/stats.js';
+import { ResizeHandle, Sparkline, ProgressBar } from './ui/panel/widgets.js';
+import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/common/format.js';
+
+// ─── Polling / history constants ─────────────────────────────────────────────
+
+const HISTORY_CAPACITY = 60;
+// On-demand refreshes closer than this to the previous sample reuse it:
+// counter deltas over a few milliseconds are mostly noise.
+const MIN_RESAMPLE_US = 500000;
+// A collector that has not answered by then is skipped for this poll (its
+// previous value stands in) so one stuck read cannot freeze every metric.
+const POLL_DEADLINE_MS = 3000;
+// Free panel space required beyond a hidden top-bar label's own width before
+// it is shown again, so a value changing width cannot make it flap.
+const TOP_BAR_FIT_MARGIN_PX = 16;
+// Height of the trend graph / detail line of an overview card.
+const CARD_SLOT_HEIGHT = 22;
+const METRIC_NAMES = {
+    cpu: 'CPU', memory: 'Memory', battery: 'Battery', power: 'Power',
+    disk: 'Disk', network: 'Network', thermal: 'Temperature', gpu: 'GPU'
+};
+// Alerts watch metrics that are not pinned too; the slower ones less often.
+const ALERT_DISK_EVERY_US = 60e6;
+const ALERT_GPU_EVERY_US = 30e6;
+// Network, battery and power are read this often while not shown, so the
+// 1 h / 24 h charts and the network day totals have no holes.
+const BACKGROUND_EVERY_US = 60e6;
+// Network day totals are written at most this often (and on disable).
+const NET_USAGE_SAVE_US = 5 * 60e6;
+// Gliding between readings. Any visible change redraws the open panel, and
+// in the software-rendered test shell each redraw costs about 0.5 % of a
+// core per frame per second whatever changed (measured: one label or one
+// bar at 15 fps, +7-8 %). 4 frames a second (8 steps per 2 s glide) stays
+// within the menu-open budget. With the menu closed there are no frames at
+// all: gliding the top bar cost about 0.4 % around the clock, which broke
+// the 1 % menu-closed budget; it shows the averaged values once per reading.
+const GLIDE_FRAME_MS = 250;
+// Rows in each top-process list (the sampler is asked for this many).
+const PROCESS_ROWS = 5;
+// Share of time (PSI "some", 10 s average) in which programs waited for
+// memory that raises an alert: well past the occasional reclaim stall.
+const PRESSURE_LIMIT = 20;
+// Panel page and wording per alert.
+const ALERTS = {
+    cpu: { tab: 'cpu', name: 'CPU', title: 'CPU usage is high' },
+    memory: { tab: 'memory', name: 'Memory', title: 'Memory is almost full' },
+    thermal: { tab: 'thermal', name: 'Temperature', title: 'The processor is hot' },
+    gpu: { tab: 'gpu', name: 'GPU', title: 'GPU usage is high' },
+    disk: { tab: 'disk', name: 'Disk /', title: 'Disk space is running out' },
+    pressure: { tab: 'memory', name: 'Waiting for memory', title: 'The system is short of memory' },
+};
+const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
+
+const WATT_SCALE = { autoScale: true, maxVal: 10, formatValue: v => `${v < 10 ? v.toFixed(1) : Math.round(v)}W` };
+const MBS_SCALE = { autoScale: true, maxVal: 1, formatValue: v => (v < 10 ? v.toFixed(1) : `${Math.round(v)}`) };
+const KBS_SCALE = { autoScale: true, maxVal: 10, formatValue: v => (v >= 1000 ? `${(v / 1000).toFixed(1)}M` : `${Math.round(v)}K`) };
+// Per-history axis: unit of the stored samples and the floor of the auto scale.
+const SPARK_SCALES = {
+    batRate: WATT_SCALE,
+    pwr: WATT_SCALE,
+    dskRead: MBS_SCALE,
+    dskWrite: MBS_SCALE,
+    netRx: KBS_SCALE,
+    netTx: KBS_SCALE
+};
+
+// ─── Extension Class ──────────────────────────────────────────────────────────
+
+export default class ResourcePulseExtension extends Extension {
+    enable() {
+        // Everything enable() and later code hang on `this` is dropped again
+        // in disable(), so no widget reference can outlive its actor.
+        this._baseKeys = new Set(Object.keys(this));
+        this._settings = this.getSettings();
+
+        // Samplers
+        this._cpu = new CpuSampler();
+        this._mem = new MemorySampler();
+        this._bat = new BatterySampler();
+        this._proc = new ProcessSampler();
+        // Bars without a natural maximum scale to the recent peak.
+        this._pwrScale = new PeakScale(15);            // watts
+        this._netScale = new PeakScale(1000000);       // bytes/s
+        this._pwr = new PowerSampler();
+        this._pwrStats = new RunningStats();
+        this._dsk = new DiskSampler();
+        this._net = new NetworkSampler();
+        this._thm = new ThermalSampler();
+        this._gpu = new GpuSampler();
+        this._psi = new PressureSampler();
+        // What the panel shows: a glide from _shownFrom to _shownTo over one
+        // interval, starting at _shownAt. Raw readings stay in _lastData.
+        this._shownFrom = null;
+        this._shownTo = null;
+        this._shownAt = 0;
+        this._smoothPrev = null;
+        this._glideId = 0;
+        // Network data per day: counted from the file's last counters once loaded.
+        this._netUsage = null;
+        this._netUsageDirty = false;
+        this._netUsageSavedAt = GLib.get_monotonic_time();
+        this._bootId = readBootId();
+        {
+            // A token, not _gen: _gen is bumped further down in enable().
+            const token = this._netUsageToken = {};
+            loadNetUsage(netUsagePath()).then(({ usage, problem }) => {
+                if (problem) console.warn(`ResourcePulse: ${problem}`);
+                if (this._netUsageToken === token) this._netUsage = usage;
+            });
+        }
+        this._selfPid = Gio.Credentials.new().get_unix_pid();
+        this._uid = Gio.Credentials.new().get_unix_user();
+        this._waits = new Map();
+        this._alerts = new AlertMonitor();
+        this._alertSampled = { dsk: 0, gpu: 0, net: 0, bat: 0, pwr: 0 };
+        this._alertCauses = {};
+        this._alertProc = null;
+        this._causeTimerId = 0;
+        this._causeResolve = null;
+        this._notifySource = null;
+
+        // Poll state. The generation token invalidates polls that are still
+        // awaiting I/O when the extension is disabled or re-enabled.
+        this._gen = (this._gen ?? 0) + 1;
+        this._pollInFlight = false;
+        this._recordPending = false;
+        this._lastPollTime = 0;
+        this._lastData = null;
+        this._deferredPollId = null;
+        this._pollDeadlineId = null;
+        this._outstanding = {};
+
+        // Time-series history: fixed-capacity buffers owned here, painted by sparklines.
+        this._hist = {};
+        for (const key of HISTORY_KEYS) this._hist[key] = new RingBuffer(HISTORY_CAPACITY);
+        this._histStamp = {};
+        // 1 h and 24 h of buckets per key; fixed size, kept across interval changes.
+        this._long = {};
+        for (const [range, spec] of Object.entries(RANGES)) {
+            if (!spec) continue;
+            this._long[range] = {};
+            for (const key of HISTORY_KEYS) this._long[range][key] = new BucketSeries(spec.bucketUs, spec.capacity);
+        }
+        this._range = 'live';
+        this._sparklines = [];
+
+        // Tooltip state
+        this._tooltip = null;
+        this._tooltipTexts = {};
+        this._bundledIcons = {};
+
+        // Panel indicator
+        this._indicator = new PanelMenu.Button(0.0, 'Resource Pulse', false);
+        this._indicatorBox = new St.BoxLayout({ style_class: 'resource-pulse-indicator-box' });
+        this._indicator.add_child(this._indicatorBox);
+        this._topBarWidgets = {};
+        this._stageReleaseId = null;
+
+        // Dropdown container
+        // Neither this item nor the containers below may be focusable: St
+        // never navigates inside a widget that takes focus itself, so Tab and
+        // the arrow keys would stop here instead of reaching cards and controls.
+        this._menuSection = new PopupMenu.PopupBaseMenuItem({ reactive: false, activate: false, can_focus: false });
+        
+        // An St.Widget, not a bare Clutter.Actor: keyboard focus navigation
+        // (Tab, arrow keys) only descends through St widgets.
+        this._popupStack = new St.Widget({
+            layout_manager: new Clutter.BinLayout(),
+            x_expand: true,
+            y_expand: true
+        });
+
+        this._scrollView = new St.ScrollView({
+            style_class: 'resource-pulse-scroll-view',
+            hscrollbar_policy: St.PolicyType.NEVER,
+            vscrollbar_policy: St.PolicyType.AUTOMATIC,
+            x_expand: true,
+            y_expand: true
+        });
+
+        this._menuContainer = new St.BoxLayout({
+            vertical: true,
+            style_class: 'resource-pulse-menu-section',
+            reactive: true,
+            x_expand: true,
+            y_expand: true
+        });
+
+        // Keyboard navigation inside dropdown menu
+        this._menuContainer.connect('key-press-event', (actor, event) => {
+            const symbol = event.get_key_symbol();
+            if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
+                if (this._activeTab !== 'overview') {
+                    this._activeTab = 'overview';
+                    this._updateTabVisibility();
+                    return Clutter.EVENT_STOP;
+                }
+            }
+            if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
+                const tabs = ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu'];
+                if (this._activeTab !== 'overview') {
+                    let idx = tabs.indexOf(this._activeTab);
+                    if (idx !== -1) {
+                        idx = symbol === Clutter.KEY_Right
+                            ? (idx + 1) % tabs.length
+                            : (idx - 1 + tabs.length) % tabs.length;
+                        this._activeTab = tabs[idx];
+                        this._updateTabVisibility();
+                        return Clutter.EVENT_STOP;
+                    }
+                }
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        // The scrolled child itself carries no padding: before GNOME Shell 49
+        // a padded viewport clips picking by its padding at the far edges,
+        // leaving a strip on the right and at the bottom that takes no clicks.
+        // It is also what the menu's width and height are set on; the padded
+        // container fills it.
+        this._menuViewport = new St.BoxLayout({ vertical: true, x_expand: true, y_expand: true });
+        this._menuViewport.add_child(this._menuContainer);
+        this._scrollView.add_child(this._menuViewport);
+        this._popupStack.add_child(this._scrollView);
+
+        // Build Corner Resize Handles
+        this._buildCornerResizeHandles();
+
+        this._menuSection.add_child(this._popupStack);
+        this._indicator.menu.box.add_style_class_name('resource-pulse-popup');
+        // Follow the shell's own light/dark style, live.
+        this._stSettings = St.Settings.get();
+        this._schemeIds = ['notify::color-scheme', 'notify::shell-color-scheme']
+            .map(sig => this._stSettings.connect(sig, () => this._applyColorScheme()));
+        this._applyColorScheme();
+        this._indicator.menu.addMenuItem(this._menuSection);
+
+        // Build UI
+        this._activeTab = 'overview';
+        this._coreWidgets = null;
+        this._procWidgets = [];
+        this._buildOverview();
+        this._buildDetails();
+        this._updateTabVisibility();
+        this._updateMenuDimensions();
+
+        // Track menu open
+        this._menuOpen = false;
+        this._openStateId = this._indicator.menu.connect('open-state-changed', (menu, open) => {
+            this._menuOpen = open;
+            if (open) {
+                this._updateMenuDimensions();
+                this._hideTooltip();
+                this._poll();
+            } else {
+                if (this._stageReleaseId) {
+                    global.stage.disconnect(this._stageReleaseId);
+                    this._stageReleaseId = null;
+                }
+                if (this._dragGrab) {
+                    this._dragGrab.dismiss();
+                    this._dragGrab = null;
+                }
+                if (this._cardDragGrab) {
+                    this._cardDragGrab.dismiss();
+                    this._cardDragGrab = null;
+                }
+                if (this._dragHoldTimerId) {
+                    GLib.source_remove(this._dragHoldTimerId);
+                    this._dragHoldTimerId = null;
+                }
+                if (this._activeCardDrag && this._draggedCardActor) {
+                    this._draggedCardActor.remove_style_class_name('resource-pulse-metric-card-dragging');
+                    this._draggedCardActor.remove_style_class_name('resource-pulse-metric-card-snapping');
+                    this._draggedCardActor.remove_all_transitions();
+                    this._draggedCardActor.set_translation(0, 0, 0);
+                    this._draggedCardActor.set_scale(1.0, 1.0);
+                }
+                if (this._summaryCards) {
+                    for (const k of Object.keys(this._summaryCards)) {
+                        const b = this._summaryCards[k]?.box;
+                        if (b) {
+                            b.remove_style_class_name('resource-pulse-metric-card-dragging');
+                            b.remove_style_class_name('resource-pulse-metric-card-snapping');
+                            b.remove_all_transitions();
+                            b.set_translation(0, 0, 0);
+                            b.set_scale(1.0, 1.0);
+                        }
+                    }
+                }
+                this._pendingPreviewOrder = null;
+                this._previewTargetIndex = null;
+                this._activeCardDrag = null;
+                this._draggedCardActor = null;
+            }
+        });
+
+        this._monitorsChangedId = Main.layoutManager.connect('monitors-changed', () => this._updateMenuDimensions());
+
+        Main.panel.addToStatusArea(this.uuid, this._indicator);
+
+        // Settings listeners
+        this._pinnedId = this._settings.connect('changed::pinned-metrics', () => this._rebuildTopBar());
+        this._cardOrderId = this._settings.connect('changed::overview-card-order', () => this._onCardOrderChanged());
+        this._compactId = this._settings.connect('changed::compact-label', () => this._rebuildTopBar());
+        this._batFmtId = this._settings.connect('changed::battery-top-format', () => { this._rebuildTopBar(); this._poll(); });
+        this._netFmtId = this._settings.connect('changed::network-top-format', () => { this._rebuildTopBar(); this._poll(); });
+        this._tooltipsId = this._settings.connect('changed::show-tooltips', () => this._hideTooltip());
+        this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
+        // The panel size is reset from the preferences window: follow it.
+        this._sizeId = this._settings.connect('changed::menu-custom-width', () => this._queueDimensionsUpdate());
+        this._sizeHId = this._settings.connect('changed::menu-custom-height', () => this._queueDimensionsUpdate());
+        // Battery tracking (off until the user starts it in the preferences window).
+        this._trackingId = this._settings.connect('changed::battery-tracking', () => this._syncTracking());
+        this._flushHistoryId = this._settings.connect('changed::action-flush-history', () => {
+            if (!this._settings.get_boolean('action-flush-history')) return;
+            this._settings.set_boolean('action-flush-history', false);
+            this._tracker?.save();
+        });
+        this._clearHistoryId = this._settings.connect('changed::action-clear-history', () => {
+            if (!this._settings.get_boolean('action-clear-history')) return;
+            this._settings.set_boolean('action-clear-history', false);
+            if (this._tracker) {
+                this._tracker.clear();
+            } else {
+                saveLedger(ledgerPath(), new BatteryLedger())
+                    .catch(e => console.warn(`ResourcePulse: cannot clear the battery history: ${e.message}`));
+            }
+        });
+        this._syncTracking();
+        this._openMenuId = this._settings.connect('changed::action-open-menu', () => {
+            if (this._settings.get_boolean('action-open-menu')) {
+                this._settings.set_boolean('action-open-menu', false);
+                this._activeTab = 'overview';
+                this._updateTabVisibility();
+                this._indicator.menu.open();
+            }
+        });
+
+        // The panel gives its right side only the room the centre leaves.
+        // Re-fit whenever any of the three changes size.
+        this._topBarCollapsed = 0;
+        this._fitIdleId = 0;
+        this._fitSignals = [Main.panel, Main.panel._centerBox, Main.panel._rightBox]
+            .filter(actor => actor)
+            .map(actor => [actor, actor.connect('notify::allocation', () => this._queueFitTopBar())]);
+        this._rebuildTopBar();
+        // Initial poll
+        this._startPolling();
+    }
+
+    disable() {
+        if (this._pinnedId) this._settings.disconnect(this._pinnedId);
+        if (this._cardOrderId) this._settings.disconnect(this._cardOrderId);
+        if (this._compactId) this._settings.disconnect(this._compactId);
+        if (this._batFmtId) this._settings.disconnect(this._batFmtId);
+        if (this._netFmtId) this._settings.disconnect(this._netFmtId);
+        if (this._tooltipsId) this._settings.disconnect(this._tooltipsId);
+        if (this._pollId) this._settings.disconnect(this._pollId);
+        if (this._sizeId) this._settings.disconnect(this._sizeId);
+        if (this._sizeHId) this._settings.disconnect(this._sizeHId);
+        if (this._sizeIdleId) GLib.source_remove(this._sizeIdleId);
+        if (this._openMenuId) this._settings.disconnect(this._openMenuId);
+        for (const id of [this._trackingId, this._flushHistoryId, this._clearHistoryId])
+            if (id) this._settings.disconnect(id);
+        // Saved with the time of the save: battery used until the next
+        // enable (screen lock) is reported as a gap, not attributed.
+        this._tracker?.stop();
+        this._tracker = null;
+
+        this._gen++;
+        this._pollInFlight = false;
+        this._lastData = null;
+        if (this._timeoutId) {
+            GLib.source_remove(this._timeoutId);
+            this._timeoutId = null;
+        }
+        if (this._deferredPollId) {
+            GLib.source_remove(this._deferredPollId);
+            this._deferredPollId = null;
+        }
+        if (this._pollDeadlineId) {
+            GLib.source_remove(this._pollDeadlineId);
+            this._pollDeadlineId = null;
+        }
+        if (this._openStateId) this._indicator.menu.disconnect(this._openStateId);
+        if (this._monitorsChangedId) {
+            Main.layoutManager.disconnect(this._monitorsChangedId);
+            this._monitorsChangedId = null;
+        }
+
+        if (this._tooltipIdleId) {
+            GLib.source_remove(this._tooltipIdleId);
+            this._tooltipIdleId = null;
+        }
+
+        if (this._tooltip) {
+            this._tooltip.destroy();
+            this._tooltip = null;
+        }
+
+        if (this._stageReleaseId) {
+            global.stage.disconnect(this._stageReleaseId);
+            this._stageReleaseId = null;
+        }
+
+        if (this._dragGrab) {
+            this._dragGrab.dismiss();
+            this._dragGrab = null;
+        }
+        if (this._cardDragGrab) {
+            this._cardDragGrab.dismiss();
+            this._cardDragGrab = null;
+        }
+        if (this._dragHoldTimerId) {
+            GLib.source_remove(this._dragHoldTimerId);
+            this._dragHoldTimerId = null;
+        }
+        this._resizeHandles = {};
+
+        for (const [actor, id] of this._fitSignals ?? []) actor.disconnect(id);
+        this._fitSignals = [];
+        if (this._fitIdleId) {
+            GLib.source_remove(this._fitIdleId);
+            this._fitIdleId = 0;
+        }
+
+        // Destroying an open menu leaves the shell allocating a disposed BoxPointer.
+        this._indicator.menu.close(false);
+        this._indicator.destroy();
+        this._indicator = null;
+        this._indicatorBox = null;
+        this._topBarWidgets = {};
+        this._tooltipTexts = {};
+        this._settings = null;
+        this._overviewPage = null;
+        this._overviewGrid = null;
+        this._overviewGridLayout = null;
+        this._cardOrder = null;
+        this._activeCardDrag = null;
+        this._draggedCardActor = null;
+        this._pendingPreviewOrder = null;
+        this._previewTargetIndex = null;
+        this._detailArea = null;
+        this._detailSections = null;
+        this._detailBuilders = null;
+        this._spanLabel = null;
+        this._summaryCards = null;
+        this._popupStack = null;
+        this._menuContainer = null;
+        this._menuViewport = null;
+        this._scrollView = null;
+        this._shownTab = null;
+        this._menuSection = null;
+        this._coreWidgets = null;
+        this._procWidgets = [];
+        this._memProcWidgets = null;
+        this._hist = null;
+        this._histStamp = null;
+        this._sparklines = [];
+        this._dskMountRows = null;
+        this._netIfaceRows = null;
+        this._thmSensorRows = null;
+        this._thmFanRows = null;
+        this._pwrStats = null;
+        this._lastCpu = this._lastMem = this._lastBat = this._lastDsk = null;
+        this._lastNet = this._lastThm = this._lastGpu = this._lastPwr = null;
+        this._cpu = null;
+        this._mem = null;
+        this._bat?.destroy();
+        this._bat = null;
+        if (this._stSettings) {
+            for (const id of this._schemeIds) this._stSettings.disconnect(id);
+            this._stSettings = null;
+            this._schemeIds = null;
+        }
+        this._proc?.destroy();
+        this._proc = null;
+        this._pwrScale = null;
+        this._netScale = null;
+        this._chipFor = null;
+        this._lightTheme = undefined;
+        this._pwr = null;
+        this._dsk = null;
+        this._net = null;
+        this._thm = null;
+        this._gpu?.destroy();
+        this._gpu = null;
+        if (this._causeTimerId) GLib.source_remove(this._causeTimerId);
+        this._causeTimerId = 0;
+        this._causeResolve?.();
+        this._causeResolve = null;
+        this._alertProc?.destroy();
+        this._alertProc = null;
+        this._notifySource?.destroy();
+        this._notifySource = null;
+        this._alerts = null;
+        if (this._glideId) GLib.source_remove(this._glideId);
+        this._glideId = 0;
+        this._shownFrom = this._shownTo = this._smoothPrev = null;
+        // Counters since the last save; the next enable counts from here.
+        if (this._netUsage) this._saveNetUsage();
+        this._netUsage = null;
+        this._netUsageToken = null;
+        for (const [id, resolve] of this._waits ?? []) {
+            GLib.source_remove(id);
+            resolve(false);
+        }
+        this._waits = null;
+        this._psi = null;
+        this._lastPsi = null;
+        this._dangerBox = null;
+
+        // Pages are built lazily, so a field left over from the previous
+        // session would not be overwritten by the next enable(). Drop them
+        // all. _gen survives: it is what invalidates in-flight callbacks.
+        const base = this._baseKeys;
+        if (base) {
+            for (const key of Object.keys(this)) {
+                if (key !== '_gen' && !base.has(key)) delete this[key];
+            }
+        }
+    }
+
+    _hasKey(key) {
+        return !!(this._settings && this._settings.settings_schema && this._settings.settings_schema.has_key(key));
+    }
+
+    /** Pinned metrics as stored, minus unknown keys and duplicates. */
+    /** Start or stop battery tracking to match the setting. */
+    _syncTracking() {
+        const wanted = this._settings.get_boolean('battery-tracking');
+        if (wanted && !this._tracker) {
+            const windows = Shell.WindowTracker.get_default();
+            this._tracker = new BatteryTracker({
+                battery: this._bat,
+                thermal: this._thm,
+                hotAbove: () => this._settings.get_int('threshold-temp'),
+                focus: {
+                    current: () => windows.focus_app?.get_id()?.replace(/\.desktop$/, '') ?? null,
+                    connect: callback => windows.connect('notify::focus-app', callback),
+                    disconnect: id => windows.disconnect(id),
+                },
+            });
+            this._tracker.start().catch(e => console.error(`ResourcePulse: battery tracking did not start: ${e.message}`));
+        } else if (!wanted && this._tracker) {
+            // Switched off: the time until it is switched on again is not a gap.
+            this._tracker.stop({ forget: true });
+            this._tracker = null;
+        }
+        this._refreshTopApp();
+    }
+
+    _pinnedMetrics() {
+        return sanitizeMetricList(this._settings.get_strv('pinned-metrics'));
+    }
+
+    _getStrv(key, fallback = []) {
+        return this._hasKey(key) ? this._settings.get_strv(key) : fallback;
+    }
+
+    _getString(key, fallback = '') {
+        return this._hasKey(key) ? this._settings.get_string(key) : fallback;
+    }
+
+    _getInt(key, fallback = 0) {
+        return this._hasKey(key) ? this._settings.get_int(key) : fallback;
+    }
+
+    _getBoolean(key, fallback = false) {
+        return this._hasKey(key) ? this._settings.get_boolean(key) : fallback;
+    }
+
+    /**
+     * Light styling is one class on the menu box (and on the tooltip, which
+     * lives outside the menu); every colour is resolved in stylesheet.css.
+     */
+    _applyColorScheme() {
+        const light = Main.getStyleVariant?.() === 'light';
+        if (light === this._lightTheme) return;
+        this._lightTheme = light;
+        const box = this._indicator?.menu?.box;
+        if (box) {
+            if (light) box.add_style_class_name('rp-light');
+            else box.remove_style_class_name('rp-light');
+        }
+        if (this._tooltip) {
+            if (light) this._tooltip.add_style_class_name('rp-light');
+            else this._tooltip.remove_style_class_name('rp-light');
+        }
+    }
+
+    _showTooltip(actor, text) {
+        if (!this._getBoolean('show-tooltips', true) || (this._indicator && this._indicator.menu.isOpen) || !text) {
+            this._hideTooltip();
+            return;
+        }
+        if (!this._tooltip) {
+            this._tooltip = new St.Label({
+                style_class: this._lightTheme ? 'resource-pulse-tooltip rp-light' : 'resource-pulse-tooltip',
+                visible: false
+            });
+            Main.layoutManager.uiGroup.add_child(this._tooltip);
+        }
+        this._tooltip.text = text;
+        this._tooltip.visible = true;
+        this._tooltip.opacity = 0;
+
+        if (this._tooltipIdleId) {
+            GLib.source_remove(this._tooltipIdleId);
+            this._tooltipIdleId = null;
+        }
+
+        this._tooltipIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._tooltipIdleId = null;
+            if (!this._tooltip || !actor || !actor.get_stage()) return GLib.SOURCE_REMOVE;
+            const [stageX, stageY] = actor.get_transformed_position();
+            const [w, h] = actor.get_transformed_size();
+            const tooltipW = this._tooltip.get_width() || 120;
+
+            let targetX = Math.round(stageX + (w / 2) - (tooltipW / 2));
+            const screenW = global.stage?.width || global.screen_width || 1920;
+            targetX = Math.max(10, Math.min(screenW - tooltipW - 10, targetX));
+            const targetY = Math.round(stageY + h + 6);
+
+            this._tooltip.set_position(targetX, targetY);
+            this._tooltip.ease({
+                opacity: 255,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _hideTooltip() {
+        if (this._tooltipIdleId) {
+            GLib.source_remove(this._tooltipIdleId);
+            this._tooltipIdleId = null;
+        }
+        if (this._tooltip && this._tooltip.visible) {
+            this._tooltip.ease({
+                opacity: 0,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    if (this._tooltip) this._tooltip.visible = false;
+                }
+            });
+        }
+    }
+
+    _updateMenuDimensions() {
+        const monitor = Main.layoutManager.primaryMonitor || Main.layoutManager.currentMonitor || { width: 1920, height: 1080 };
+        const screenW = monitor.width || (global.screen_width || 1920);
+        const screenH = monitor.height || (global.screen_height || 1080);
+
+        const savedW = this._settings?.get_int('menu-custom-width') || 0;
+        const savedH = this._settings?.get_int('menu-custom-height') || 0;
+
+        const defaultWidth = Math.min(Math.max(380, Math.round(screenW * 0.28)), 600);
+        const defaultMaxHeight = Math.max(380, Math.round(screenH * 0.80));
+        this._defaultMaxHeight = defaultMaxHeight;
+
+        if (savedW > 0 && savedH > 0) {
+            const minW = 360;
+            const maxW = Math.min(Math.round(screenW * 0.90), 1200);
+            const minH = 320;
+            const maxH = Math.min(Math.round(screenH * 0.90), screenH - 60);
+            const w = Math.max(minW, Math.min(maxW, savedW));
+            const h = Math.max(minH, Math.min(maxH, savedH));
+            this._applyDimensions(w, h);
+        } else {
+            this._currentWidth = defaultWidth;
+            this._currentHeight = 0;
+            if (this._menuViewport) {
+                this._menuViewport.width = defaultWidth;
+                this._menuViewport.height = -1;
+                this._menuViewport.style = `width: ${defaultWidth}px; min-width: ${defaultWidth}px; max-width: ${defaultWidth}px;`;
+            }
+            if (this._scrollView) {
+                this._scrollView.width = defaultWidth;
+                this._scrollView.height = -1;
+                this._scrollView.style = `width: ${defaultWidth}px; max-height: ${defaultMaxHeight}px;`;
+            }
+            if (this._popupStack) {
+                this._popupStack.width = defaultWidth;
+                this._popupStack.height = -1;
+                this._popupStack.style = `width: ${defaultWidth}px;`;
+            }
+            if (this._menuSection) {
+                this._menuSection.width = defaultWidth;
+                this._menuSection.height = -1;
+                this._menuSection.style = `width: ${defaultWidth}px;`;
+            }
+        }
+    }
+
+    _applyResizeDelta(corner, deltaX, deltaY, startW, startH) {
+        const monitor = Main.layoutManager.primaryMonitor || Main.layoutManager.currentMonitor || { width: 1920, height: 1080 };
+        const screenW = monitor.width || (global.screen_width || 1920);
+        const screenH = monitor.height || (global.screen_height || 1080);
+        const minW = 360;
+        const maxW = Math.min(Math.round(screenW * 0.90), 1200);
+        const minH = 320;
+        const maxH = Math.min(Math.round(screenH * 0.90), screenH - 60);
+
+        let newW = startW;
+        let newH = startH;
+
+        if (corner === 'se') {
+            newW = startW + deltaX;
+            newH = startH + deltaY;
+        } else if (corner === 'sw') {
+            newW = startW - deltaX;
+            newH = startH + deltaY;
+        }
+
+        newW = Math.max(minW, Math.min(maxW, Math.round(newW)));
+        newH = Math.max(minH, Math.min(maxH, Math.round(newH)));
+
+        this._applyDimensions(newW, newH);
+    }
+
+    _applyDimensions(w, h) {
+        this._currentWidth = w;
+        this._currentHeight = h;
+        if (this._menuViewport) {
+            this._menuViewport.width = w;
+            this._menuViewport.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px; min-height: ${h}px;`;
+        }
+        if (this._scrollView) {
+            this._scrollView.width = w;
+            this._scrollView.height = h;
+            this._scrollView.style = `width: ${w}px; height: ${h}px; min-height: ${h}px; max-height: ${h}px;`;
+        }
+        if (this._popupStack) {
+            this._popupStack.width = w;
+            this._popupStack.height = h;
+            this._popupStack.style = `width: ${w}px; height: ${h}px; min-width: ${w}px; min-height: ${h}px;`;
+        }
+        if (this._menuSection) {
+            this._menuSection.width = w;
+            this._menuSection.height = h;
+            this._menuSection.style = `width: ${w}px; height: ${h}px; min-width: ${w}px; min-height: ${h}px;`;
+        }
+    }
+
+    /** Settings changed elsewhere (Reset in the preferences window): apply once, after both keys. */
+    _queueDimensionsUpdate() {
+        if (this._sizeIdleId || this._activeResizeCorner) return;
+        this._sizeIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._sizeIdleId = 0;
+            this._updateMenuDimensions();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _saveCustomDimensions() {
+        if (this._settings && this._currentWidth > 0 && this._currentHeight > 0) {
+            this._settings.set_int('menu-custom-width', this._currentWidth);
+            this._settings.set_int('menu-custom-height', this._currentHeight);
+        }
+    }
+
+    _resetMenuDimensions() {
+        if (this._settings) {
+            this._settings.set_int('menu-custom-width', 0);
+            this._settings.set_int('menu-custom-height', 0);
+        }
+        this._updateMenuDimensions();
+    }
+
+    _buildCornerResizeHandles() {
+        this._resizeHandles = {};
+        const corners = [
+            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END, size: 32 },
+            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END, size: 32 }
+        ];
+
+        corners.forEach(c => {
+            const handle = new ResizeHandle(c.id, c.size);
+            handle.x_align = c.xAlign;
+            handle.y_align = c.yAlign;
+            handle.x_expand = true;
+            handle.y_expand = true;
+
+            let isDragging = false;
+            let startX = 0, startY = 0;
+            let startWidth = 0, startHeight = 0;
+            let lastClickTime = 0;
+
+            const startDrag = (event) => {
+                const now = event.get_time();
+                if (now - lastClickTime < 350) {
+                    handle.remove_all_transitions();
+                    handle.ease({
+                        scale_x: 0.85,
+                        scale_y: 0.85,
+                        duration: 90,
+                        mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                        onComplete: () => {
+                            handle.ease({
+                                scale_x: 1.0,
+                                scale_y: 1.0,
+                                duration: 250,
+                                mode: Clutter.AnimationMode.EASE_OUT_BACK
+                            });
+                        }
+                    });
+                    this._resetMenuDimensions();
+                    lastClickTime = 0;
+                    return Clutter.EVENT_STOP;
+                }
+                lastClickTime = now;
+
+                const [x, y] = event.get_coords();
+                startX = x;
+                startY = y;
+
+                // Safely read real rendered allocation size
+                let curW = (this._currentWidth && this._currentWidth > 100) ? this._currentWidth : 0;
+                let curH = (this._currentHeight && this._currentHeight > 100) ? this._currentHeight : 0;
+
+                if (!curW || !curH) {
+                    if (this._menuSection && this._menuSection.has_allocation()) {
+                        const box = this._menuSection.get_allocation_box();
+                        if (box) {
+                            if (!curW && box.get_width() > 100) curW = box.get_width();
+                            if (!curH && box.get_height() > 100) curH = box.get_height();
+                        }
+                    }
+                    if (!curW || !curH) {
+                        if (this._scrollView && this._scrollView.has_allocation()) {
+                            const box = this._scrollView.get_allocation_box();
+                            if (box) {
+                                if (!curW && box.get_width() > 100) curW = box.get_width();
+                                if (!curH && box.get_height() > 100) curH = box.get_height();
+                            }
+                        }
+                    }
+                    if (!curW || !curH) {
+                        if (this._menuContainer && this._menuContainer.has_allocation()) {
+                            const box = this._menuContainer.get_allocation_box();
+                            if (box) {
+                                if (!curW && box.get_width() > 100) curW = box.get_width();
+                                if (!curH && box.get_height() > 100) curH = box.get_height();
+                            }
+                        }
+                    }
+                }
+                if (!curW) curW = 420;
+                if (!curH) curH = 500;
+
+                startWidth = Math.round(curW);
+                startHeight = Math.round(curH);
+
+                isDragging = true;
+                this._activeResizeCorner = c.id;
+                this._dragGrab = global.stage.grab(handle);
+                handle.setActive(true);
+                return Clutter.EVENT_STOP;
+            };
+
+            handle.connect('button-press-event', (actor, event) => {
+                if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+                return startDrag(event);
+            });
+
+            handle.connect('touch-event', (actor, event) => {
+                if (event.type() === Clutter.EventType.TOUCH_BEGIN) {
+                    return startDrag(event);
+                }
+                return Clutter.EVENT_PROPAGATE;
+            });
+
+            const finishDrag = () => {
+                if (!isDragging) return Clutter.EVENT_PROPAGATE;
+                if (this._dragGrab) {
+                    this._dragGrab.dismiss();
+                    this._dragGrab = null;
+                }
+                isDragging = false;
+                this._activeResizeCorner = null;
+                handle.setActive(false);
+                this._saveCustomDimensions();
+                return Clutter.EVENT_STOP;
+            };
+
+            handle.connect('button-release-event', finishDrag);
+
+            handle.connect('event', (actor, event) => {
+                if (!isDragging) return Clutter.EVENT_PROPAGATE;
+                const type = event.type();
+                if (type === Clutter.EventType.MOTION || type === Clutter.EventType.TOUCH_UPDATE) {
+                    const [currX, currY] = event.get_coords();
+                    const deltaX = currX - startX;
+                    const deltaY = currY - startY;
+                    this._applyResizeDelta(c.id, deltaX, deltaY, startWidth, startHeight);
+                    return Clutter.EVENT_STOP;
+                } else if (type === Clutter.EventType.BUTTON_RELEASE || type === Clutter.EventType.TOUCH_END || type === Clutter.EventType.TOUCH_CANCEL) {
+                    return finishDrag();
+                }
+                return Clutter.EVENT_PROPAGATE;
+            });
+
+            this._resizeHandles[c.id] = handle;
+            this._popupStack.add_child(handle);
+        });
+    }
+
+    _launchSystemMonitor(targetView = null) {
+        try {
+            const context = global.create_app_launch_context(0, -1);
+
+            // 1. If a specific tab/view is requested, try launching with appropriate commandline flags
+            if (targetView) {
+                if (GLib.find_program_in_path('resources')) {
+                    const appInfo = Gio.AppInfo.create_from_commandline(`resources -t ${targetView}`, null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+                if (GLib.find_program_in_path('gnome-system-monitor')) {
+                    const flag = targetView === 'processes' ? '-p' : '-s';
+                    const appInfo = Gio.AppInfo.create_from_commandline(`gnome-system-monitor ${flag}`, null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+                if (GLib.find_program_in_path('mission-center')) {
+                    const appInfo = Gio.AppInfo.create_from_commandline('mission-center', null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+            }
+
+            // 2. Try activating via Shell.AppSystem using known system monitor desktop IDs
+            const candidateAppIds = [
+                'net.nokyan.Resources.desktop',
+                'org.gnome.SystemMonitor.desktop',
+                'io.missioncenter.MissionCenter.desktop',
+                'gnome-system-monitor.desktop',
+                'resources.desktop',
+                'mission-center.desktop',
+                'org.kde.plasma-systemmonitor.desktop',
+                'mate-system-monitor.desktop',
+                'xfce4-taskmanager.desktop'
+            ];
+
+            const appSys = Shell.AppSystem.get_default();
+            for (const appId of candidateAppIds) {
+                const app = appSys.lookup_app(appId);
+                if (app) {
+                    app.activate();
+                    return;
+                }
+            }
+
+            // 3. Search all installed applications for system resource/monitor desktop apps
+            const allApps = appSys.get_installed ? appSys.get_installed() : [];
+            for (const app of allApps) {
+                const id = app.get_id() || '';
+                if (/resource|system-monitor|mission-center|taskmanager/i.test(id)) {
+                    app.activate();
+                    return;
+                }
+            }
+
+            // 4. Try launching available GUI binaries from PATH
+            const candidateBinaries = [
+                'resources',
+                'gnome-system-monitor',
+                'mission-center',
+                'plasma-systemmonitor',
+                'mate-system-monitor',
+                'xfce4-taskmanager'
+            ];
+
+            for (const bin of candidateBinaries) {
+                if (GLib.find_program_in_path(bin)) {
+                    const appInfo = Gio.AppInfo.create_from_commandline(bin, null, Gio.AppInfoCreateFlags.NONE);
+                    if (appInfo) {
+                        appInfo.launch([], context);
+                        return;
+                    }
+                }
+            }
+
+            // 5. Fallback to terminal-based system monitors
+            const termMonitors = ['htop', 'btop', 'top'];
+            for (const tbin of termMonitors) {
+                if (GLib.find_program_in_path(tbin)) {
+                    const terminals = ['ptyxis', 'gnome-terminal', 'kgx', 'x-terminal-emulator', 'kitty', 'alacritty'];
+                    for (const term of terminals) {
+                        if (GLib.find_program_in_path(term)) {
+                            const termCmd = `${term} -- ${tbin}`;
+                            const appInfo = Gio.AppInfo.create_from_commandline(termCmd, null, Gio.AppInfoCreateFlags.NONE);
+                            if (appInfo) {
+                                appInfo.launch([], context);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            console.warn('Resource Pulse: No supported system monitor application found on system.');
+        } catch (e) {
+            console.error(`Failed to launch System Monitor: ${e.message}`);
+        }
+    }
+
+    _startPolling() {
+        if (this._timeoutId) GLib.source_remove(this._timeoutId);
+        const interval = Math.max(1, this._settings.get_int('poll-interval') || 2);
+        this._intervalUs = interval * 1000000;
+
+        // Samples taken at another cadence would distort the time axis.
+        for (const key of HISTORY_KEYS) this._hist[key].clear();
+        const span = interval * HISTORY_CAPACITY;
+        const spanLabel = span > 60 && span % 60 === 0 ? `${span / 60}m` : `${span}s`;
+        this._spanLabel = spanLabel;
+        this._sampleSeconds = interval;
+        this._pwrStats.maxGapS = 2.5 * interval;
+        for (const spark of this._sparklines) {
+            spark.setSpanLabel(spanLabel);
+            spark.setSampleSeconds(interval);
+        }
+        this._applyRange();
+
+        this._poll();
+        this._timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
+            this._poll(true);
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _deferPoll(waitUs) {
+        if (this._deferredPollId) return;
+        this._deferredPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.ceil(waitUs / 1000), () => {
+            this._deferredPollId = null;
+            this._poll();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    /**
+     * @param {boolean} [topBarOnly] menu closed: the panel is not drawn
+     * @param {boolean} [frame] a glide frame, not a new reading: the charts
+     *   (Cairo, costly to repaint) change only with a new sample
+     */
+    _render(data, topBarOnly = false, frame = false) {
+        this._updateTopBarUI(data, frame);
+        if (!topBarOnly) this._updateDashboardUI(data, frame);
+    }
+
+    _smoothOn() {
+        return this._settings?.get_boolean('smooth-transitions') ?? false;
+    }
+
+    /** The reading as shown right now: part of the way through the glide. */
+    _shownNow(now = GLib.get_monotonic_time(), out = null) {
+        if (!this._shownTo) return null;
+        const t = this._intervalUs > 0 ? (now - this._shownAt) / this._intervalUs : 1;
+        return interpolateReading(this._shownFrom, this._shownTo, t, out);
+    }
+
+    /**
+     * A new reading: glide from what is shown now to it (CPU, GPU, network
+     * and disk lightly smoothed first) over one polling interval, so the
+     * values arrive as the next reading does.
+     */
+    _present(data) {
+        const now = GLib.get_monotonic_time();
+        if (!this._smoothOn()) {
+            this._shownFrom = null;
+            this._shownTo = data;
+            this._smoothPrev = null;
+            this._render(data);
+            return;
+        }
+        const target = smoothReading(this._smoothPrev, data);
+        this._smoothPrev = target;
+        if (!this._menuOpen) {
+            // Closed: averaged values, once per reading, no frames.
+            this._shownFrom = null;
+            this._shownTo = target;
+            this._shownAt = now;
+            this._render(target, true);
+            return;
+        }
+        this._shownFrom = this._shownNow(now);
+        this._shownTo = target;
+        this._shownAt = now;
+        this._render(this._shownNow(now));
+        this._runGlide();
+    }
+
+    /** Frames, while the menu is open, until the glide has arrived. */
+    _runGlide() {
+        if (this._glideId) return;
+        this._glideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, GLIDE_FRAME_MS, () => {
+            const now = GLib.get_monotonic_time();
+            const done = !this._smoothOn() || !this._menuOpen || now - this._shownAt >= this._intervalUs;
+            // Frames write into one reused buffer; a new reading copies it
+            // as the next glide's start (_present), so no frame allocates a
+            // whole new reading.
+            this._glideBuf ??= glideBuffer();
+            const shown = done ? this._shownTo : this._shownNow(now, this._glideBuf);
+            if (shown) this._render(shown, !this._menuOpen, true);
+            if (done) {
+                this._glideId = 0;
+                return GLib.SOURCE_REMOVE;
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+
+    _pushHistory(key, value, now) {
+        // A metric that was not sampled for a while (unpinned with the menu
+        // closed) restarts its graph instead of joining stale and fresh points.
+        const last = this._histStamp[key] || 0;
+        if (last && now - last > 2.5 * this._intervalUs) this._hist[key].clear();
+        this._histStamp[key] = now;
+        this._hist[key].push(value);
+    }
+
+    _recordHistory(data, need, now) {
+        const MB = 1000000;
+        if (need.cpu) this._pushHistory('cpu', data.cpu.total, now);
+        if (need.mem) this._pushHistory('mem', data.mem.percent, now);
+        if (need.bat && data.bat.present) {
+            this._pushHistory('bat', data.bat.percent, now);
+            this._pushHistory('batRate', data.bat.energyRate || 0, now);
+        }
+        if (need.pwr && (data.pwr.raplSupported || data.pwr.systemPower !== null))
+            this._pushHistory('pwr', data.pwr.systemPower ?? data.pwr.packagePower ?? 0, now);
+        if (need.dsk) {
+            this._pushHistory('dskRead', data.dsk.readRate / MB, now);
+            this._pushHistory('dskWrite', data.dsk.writeRate / MB, now);
+        }
+        if (need.net) {
+            this._pushHistory('netRx', data.net.total.rxRate / 1000, now);
+            this._pushHistory('netTx', data.net.total.txRate / 1000, now);
+        }
+        if (need.thm) this._pushHistory('thm', data.thm.packageTemp, now);
+        if (need.gpu && data.gpu.present) this._pushHistory('gpu', data.gpu.percent, now);
+    }
+
+    /**
+     * Feed the 1 h / 24 h buckets with what this poll read; series of
+     * metrics not read now only move on in time (their empty buckets become
+     * gaps).
+     */
+    _recordLong(data, need, now) {
+        const MB = 1000000;
+        const values = {};
+        if (need.cpu) values.cpu = data.cpu.total;
+        if (need.mem) values.mem = data.mem.percent;
+        if (need.bat && data.bat.present) {
+            values.bat = data.bat.percent;
+            values.batRate = data.bat.energyRate || 0;
+        }
+        if (need.pwr && (data.pwr.raplSupported || data.pwr.systemPower !== null))
+            values.pwr = data.pwr.systemPower ?? data.pwr.packagePower ?? NaN;
+        if (need.dsk) {
+            values.dskRead = data.dsk.readRate / MB;
+            values.dskWrite = data.dsk.writeRate / MB;
+        }
+        if (need.net) {
+            values.netRx = data.net.total.rxRate / 1000;
+            values.netTx = data.net.total.txRate / 1000;
+        }
+        if (need.thm && !thermalUnavailable(data.thm)) values.thm = data.thm.packageTemp;
+        if (need.gpu && data.gpu.present) values.gpu = data.gpu.percent;
+        for (const series of Object.values(this._long)) {
+            for (const key of HISTORY_KEYS) {
+                if (key in values) series[key].add(values[key], now);
+                else series[key].advance(now);
+            }
+        }
+    }
+
+    /** Add this reading's traffic to today's total; save now and then. */
+    _countNetUsage(net, now) {
+        if (!this._netUsage) return;
+        const physical = Object.entries(net.interfaces)
+            .filter(([, i]) => !i.isVirtual)
+            .map(([iface, i]) => ({ iface, rxBytes: i.rxBytes, txBytes: i.txBytes }));
+        const day = GLib.DateTime.new_now_local().format('%Y-%m-%d');
+        if (this._netUsage.ingest(physical, this._bootId, day)) this._netUsageDirty = true;
+        if (this._netUsageDirty && now - this._netUsageSavedAt >= NET_USAGE_SAVE_US) this._saveNetUsage(now);
+    }
+
+    _saveNetUsage(now = GLib.get_monotonic_time()) {
+        if (!this._netUsage) return;
+        this._netUsageSavedAt = now;
+        this._netUsageDirty = false;
+        saveNetUsage(netUsagePath(), this._netUsage).catch(e =>
+            console.warn(`ResourcePulse: cannot save network usage: ${e.message}`));
+    }
+
+    /** Point the detail charts at the chosen range. */
+    _applyRange() {
+        const spec = RANGES[this._range];
+        for (const spark of this._sparklines) {
+            if (!spark.options.showGrid) continue;
+            spark.history = spec ? this._long[this._range][spark.histKey] : this._hist[spark.histKey];
+            spark.setSampleSeconds(spec ? spec.bucketUs / 1e6 : this._sampleSeconds);
+            spark.setSpanLabel(spec ? spec.label : this._spanLabel);
+            spark.refresh();
+        }
+        for (const [range, button] of Object.entries(this._rangeButtons ?? {})) {
+            if (range === this._range) button.add_style_class_name('rp-range-on');
+            else button.remove_style_class_name('rp-range-on');
+            button.checked = range === this._range;
+        }
+        if (this._rangeButtons?.live) this._rangeButtons.live.label = this._spanLabel || 'live';
+    }
+
+    /**
+     * Run one collector under the poll's deadline. If it has not answered in
+     * time the fallback (its previous value) is used, and it is not started
+     * again until the outstanding call settles, so a hung read costs one
+     * pending promise instead of one more per poll.
+     * @param {string} key collector name
+     * @param {Promise<void>} deadline resolves when the poll's time is up
+     * @param {function(): Promise} start begins the sample
+     * @param {*} fallback value to use when the collector is late or stuck
+     */
+    _guarded(key, deadline, start, fallback) {
+        const outstanding = this._outstanding;
+        if (outstanding[key]) return fallback;
+        const sample = start();
+        let settled = false;
+        const settle = () => {
+            settled = true;
+            if (outstanding[key] === sample) delete outstanding[key];
+        };
+        outstanding[key] = sample;
+        sample.then(settle, settle);
+        return Promise.race([sample, deadline.then(() => {
+            if (!settled)
+                console.warn(`ResourcePulse: ${key} collector did not answer within ${POLL_DEADLINE_MS} ms; showing its last value`);
+            return fallback;
+        })]);
+    }
+
+    /**
+     * Sample and render. Only one poll runs at a time.
+     * tick=true is the periodic timer sample, the only kind recorded in
+     * history so the time axis stays uniform. tick=false is an on-demand
+     * refresh (menu opened, setting changed, refresh button).
+     */
+    async _poll(tick = false) {
+        if (!this._settings || !this._indicator) return;
+        const now = GLib.get_monotonic_time();
+        if (tick) {
+            if (this._pollInFlight) {
+                // The running on-demand sample stands in for this tick.
+                this._recordPending = true;
+                return;
+            }
+        } else {
+            const wait = this._pollInFlight
+                ? MIN_RESAMPLE_US
+                : MIN_RESAMPLE_US - (now - this._lastPollTime);
+            if (wait > 0) {
+                if (this._lastData) this._render(this._shownNow() ?? this._lastData);
+                this._deferPoll(wait);
+                return;
+            }
+        }
+
+        const gen = this._gen;
+        this._pollInFlight = true;
+        this._lastPollTime = now;
+        try {
+            const pinned = this._pinnedMetrics();
+            const isOpen = this._menuOpen;
+            const tab = this._activeTab;
+
+            const isDetailedCpu = isOpen && tab === 'cpu';
+            const isDetailedMem = isOpen && tab === 'memory';
+            const isDetailedDsk = isOpen && tab === 'disk';
+            const isDetailedThm = isOpen && tab === 'thermal';
+
+            // While the menu is open every sampler runs so all graphs keep a
+            // continuous history; only the expensive detail reads follow the tab.
+            const shown = {
+                cpu: isOpen || pinned.includes('cpu'),
+                mem: isOpen || pinned.includes('memory'),
+                bat: isOpen || pinned.includes('battery') || pinned.includes('power'),
+                dsk: isOpen || pinned.includes('disk'),
+                net: isOpen || pinned.includes('network'),
+                thm: isOpen || pinned.includes('thermal'),
+                gpu: isOpen || pinned.includes('gpu'),
+                pwr: isOpen || pinned.includes('power')
+            };
+            // Alerts also watch what is not shown: the cheap metrics on every
+            // poll, disk space and the GPU less often. Graphs record only
+            // what is shown, so their time axis stays continuous.
+            const due = (key, every) => now - this._alertSampled[key] >= every;
+            const need = {
+                ...shown,
+                cpu: true,
+                mem: true,
+                thm: true,
+                dsk: shown.dsk || due('dsk', ALERT_DISK_EVERY_US),
+                gpu: shown.gpu || due('gpu', ALERT_GPU_EVERY_US),
+                net: shown.net || due('net', BACKGROUND_EVERY_US),
+                bat: shown.bat || due('bat', BACKGROUND_EVERY_US),
+            };
+            need.pwr = shown.pwr || due('pwr', BACKGROUND_EVERY_US);
+            for (const key of ['dsk', 'gpu', 'net', 'bat', 'pwr']) if (need[key]) this._alertSampled[key] = now;
+
+            const deadline = new Promise(resolve => {
+                this._pollDeadlineId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POLL_DEADLINE_MS, () => {
+                    this._pollDeadlineId = null;
+                    resolve();
+                    return GLib.SOURCE_REMOVE;
+                });
+            });
+            const last = {
+                cpu: this._lastCpu || { total: 0, cores: [], loadavg: [0, 0, 0], uptime: 0 },
+                mem: this._lastMem || { percent: 0, total: 0, used: 0 },
+                bat: this._lastBat || { present: false },
+                dsk: this._lastDsk || { mounts: [], readRate: 0, writeRate: 0 },
+                net: this._lastNet || { total: { rxRate: 0, txRate: 0 }, interfaces: {} },
+                thm: this._lastThm || { packageTemp: 0, sensors: [], fans: [] },
+                gpu: this._lastGpu || { present: false, percent: 0 },
+                pwr: this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null }
+            };
+
+            const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
+                need.cpu ? this._guarded('cpu', deadline, () => this._cpu.sample(isDetailedCpu, isOpen), last.cpu) : last.cpu,
+                need.mem ? this._guarded('memory', deadline, () => this._mem.sample(isDetailedMem), last.mem) : last.mem,
+                need.bat ? this._guarded('battery', deadline, () => this._bat.sample(), last.bat) : last.bat,
+                need.dsk ? this._guarded('disk', deadline, () => this._dsk.sample(isDetailedDsk), last.dsk) : last.dsk,
+                need.net ? this._guarded('network', deadline, () => this._net.sample(), last.net) : last.net,
+                need.thm ? this._guarded('thermal', deadline, () => this._thm.sample(isDetailedThm), last.thm) : last.thm,
+                need.gpu ? this._guarded('gpu', deadline, () => this._gpu.sample(), last.gpu) : last.gpu
+            ]);
+            if (gen !== this._gen) return;
+
+            if (need.cpu) this._lastCpu = cpu;
+            if (need.mem) this._lastMem = mem;
+            if (need.bat) this._lastBat = bat;
+            if (need.dsk) this._lastDsk = dsk;
+            if (need.net) this._lastNet = net;
+            if (need.thm) this._lastThm = thm;
+            if (need.gpu) this._lastGpu = gpu;
+
+            // Three small reads; feeds the load rows and the memory alert.
+            const psi = await this._guarded('pressure', deadline, () => this._psi.sample(), this._lastPsi ?? null);
+            if (gen !== this._gen) return;
+            this._lastPsi = psi;
+
+            const pwr = need.pwr
+                ? await this._guarded('power', deadline, () => this._pwr.sample(bat), last.pwr)
+                : last.pwr;
+            if (gen !== this._gen) return;
+            if (need.pwr) {
+                this._lastPwr = pwr;
+                // One entry per sample, here in the engine: the render path
+                // also runs for re-draws of an old sample.
+                const draw = powerReadout(pwr).value;
+                if (draw > 0) this._pwrStats.add(draw, now);
+            }
+
+            let processes = [];
+            let procSort = null;
+            let procWarmingUp = false;
+            let ioDenied = 0;
+            if (isDetailedCpu || isDetailedMem || isDetailedDsk) {
+                // A baseline older than a couple of intervals (the menu sat
+                // on another tab) would turn the rates into long averages.
+                const procResult = await this._guarded('processes', deadline,
+                    () => this._proc.sample(mem.total, isDetailedMem, PROCESS_ROWS, 2.5 * this._sampleSeconds, { io: isDetailedDsk }), null);
+                if (gen !== this._gen) return;
+                // null: the sampler was destroyed or is still reading.
+                // CPU and disk rates need two readings; memory is valid from the first.
+                procWarmingUp = !!procResult?.warmingUp && !isDetailedMem;
+                if (procResult && !procWarmingUp) {
+                    processes = procResult.top;
+                    procSort = isDetailedMem ? 'memory' : isDetailedDsk ? 'disk' : 'cpu';
+                    ioDenied = procResult.ioDenied;
+                }
+            } else if (!isOpen) {
+                // Deltas across a closed menu would be averages over minutes.
+                this._proc.reset();
+            }
+
+            if (need.net) this._countNetUsage(net, now);
+
+            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, processes, procSort, ioDenied };
+            if (tick || this._recordPending) {
+                this._recordHistory(data, shown, now);
+                this._recordLong(data, need, now);
+            }
+            this._lastData = data;
+            this._present(data);
+            this._updateAlerts(data, now);
+            // Fetch the second reading now instead of at the next tick.
+            if (procWarmingUp) this._deferPoll(MIN_RESAMPLE_US);
+        } catch (e) {
+            console.error(`ResourcePulse poll error: ${e.message}`);
+        } finally {
+            if (gen === this._gen) {
+                this._pollInFlight = false;
+                this._recordPending = false;
+                if (this._pollDeadlineId) {
+                    GLib.source_remove(this._pollDeadlineId);
+                    this._pollDeadlineId = null;
+                }
+            }
+        }
+    }
+
+    _newSparkline(key, height, options = {}) {
+        const scale = key === 'thm'
+            ? { paddingLeft: 38, formatValue: v => formatTemp(v, this._settings?.get_string('unit-temp') || 'C') }
+            : SPARK_SCALES[key];
+        const spark = new Sparkline(this._hist[key], height, Object.assign({}, options, scale));
+        spark.histKey = key;
+        // Pages are built on first visit, after polling has started.
+        if (this._spanLabel) spark.setSpanLabel(this._spanLabel);
+        if (this._sampleSeconds) spark.setSampleSeconds(this._sampleSeconds);
+        this._sparklines.push(spark);
+        if (options.showGrid && this._range !== 'live') this._applyRange();
+        return spark;
+    }
+
+    _getIconName(key) {
+        return METRICS.find(m => m.key === key)?.icon ?? 'image-missing-symbolic';
+    }
+
+    /** An icon shipped in the extension's icons/ directory. */
+    _bundledIcon(name) {
+        if (!this._bundledIcons[name])
+            this._bundledIcons[name] = Gio.icon_new_for_string(`${this.path}/icons/${name}-symbolic.svg`);
+        return this._bundledIcons[name];
+    }
+
+    /**
+     * Point an St.Icon at a metric's icon. No icon theme has a temperature
+     * icon, so that one is bundled; the CPU icon comes from the theme where
+     * it exists (Yaru, or with GNOME System Monitor installed) and falls
+     * back to a bundled one elsewhere.
+     */
+    _setMetricIcon(icon, key) {
+        if (key === 'thermal') {
+            icon.gicon = this._bundledIcon('rp-thermal');
+            icon.fallback_gicon = null;
+        } else {
+            icon.icon_name = this._getIconName(key);
+            icon.fallback_gicon = key === 'cpu' ? this._bundledIcon('rp-cpu') : null;
+        }
+        return icon;
+    }
+
+    _rebuildTopBar() {
+        this._indicatorBox.destroy_all_children();
+        this._topBarWidgets = {};
+
+        const pinned = this._pinnedMetrics();
+        const compact = this._settings.get_boolean('compact-label');
+        const templateOpts = {
+            batFmt: this._settings.get_string('battery-top-format'),
+            netFmt: this._settings.get_string('network-top-format'),
+            tempUnit: this._settings.get_string('unit-temp')
+        };
+
+        // Shown while any metric, pinned or not, is in alert; its tooltip
+        // says which.
+        this._dangerBox = new St.BoxLayout({ reactive: true, track_hover: true, visible: false, style_class: 'resource-pulse-danger' });
+        this._dangerBox.add_child(new St.Icon({
+            icon_name: 'dialog-warning-symbolic',
+            // Not system-status-icon: its panel padding makes the ⚠ wider
+            // than a value, so showing it would hide two values instead of one.
+            style_class: 'resource-pulse-danger-icon',
+            y_align: Clutter.ActorAlign.CENTER
+        }));
+        this._dangerBox.connect('enter-event', () => this._showTooltip(this._dangerBox, this._alertText()));
+        this._dangerBox.connect('leave-event', () => this._hideTooltip());
+        this._indicatorBox.add_child(this._dangerBox);
+
+        pinned.forEach((key, index) => {
+            if (index > 0) {
+                this._indicatorBox.add_child(new St.Label({
+                    text: '|',
+                    style_class: 'resource-pulse-divider',
+                    // Faint in whatever colour the panel uses (light or dark).
+                    opacity: 110,
+                    y_align: Clutter.ActorAlign.CENTER
+                }));
+            }
+
+            const box = new St.BoxLayout({ reactive: true, track_hover: true });
+            const icon = this._setMetricIcon(new St.Icon({
+                style_class: 'system-status-icon',
+                y_align: Clutter.ActorAlign.CENTER
+            }), key);
+            box.add_child(icon);
+
+            let label = null;
+            if (!compact) {
+                label = new St.Label({
+                    text: '--',
+                    style_class: 'resource-pulse-label',
+                    y_align: Clutter.ActorAlign.CENTER
+                });
+                // Reserve room for the widest value so neighbours in the
+                // panel do not shift every time a digit is gained or lost.
+                // Measured with the label's real font once it is styled.
+                const template = labelTemplate(key, templateOpts);
+                label.connect('style-changed', () => {
+                    // The handler can run before St pushes the themed font
+                    // into the ClutterText, so take the font from the theme
+                    // node; measuring with the stale one over-reserved.
+                    const layout = label.clutter_text.create_pango_layout(template);
+                    layout.set_font_description(label.get_theme_node().get_font());
+                    const [width] = layout.get_pixel_size();
+                    // Via CSS so St widens minimum and natural size together;
+                    // setting only the Clutter min-width aborts the shell.
+                    const style = `min-width: ${width}px;`;
+                    if (width > 0 && label.style !== style) {
+                        label.style = style;
+                        // The reserved width is part of what the panel is
+                        // asked for; styling happens during layout, so
+                        // re-fit after it.
+                        this._queueFitTopBar();
+                    }
+                });
+                box.add_child(label);
+            }
+
+            box.connect('enter-event', () => {
+                if (this._tooltipTexts[key]) {
+                    // A label hidden for lack of room: its value leads the tooltip.
+                    const hidden = label && !label.visible ? `${METRIC_NAMES[key]}: ${label.text}\n` : '';
+                    this._showTooltip(box, hidden + this._tooltipTexts[key]);
+                }
+            });
+            box.connect('leave-event', () => {
+                this._hideTooltip();
+            });
+
+            this._indicatorBox.add_child(box);
+            this._topBarWidgets[key] = { box, label, icon };
+        });
+        this._applyTopBarCollapse();
+        this._showDanger();
+        this._fitTopBar();
+    }
+
+    /** Pinned metrics that have a text label, in pinned order. */
+    _topBarLabels() {
+        return Object.values(this._topBarWidgets).map(w => w.label).filter(l => l);
+    }
+
+    /** Hide the labels of the last `_topBarCollapsed` pinned metrics. */
+    _applyTopBarCollapse() {
+        const labels = this._topBarLabels();
+        this._topBarCollapsed = Math.max(0, Math.min(this._topBarCollapsed, labels.length));
+        labels.forEach((label, i) => {
+            label.visible = i < labels.length - this._topBarCollapsed;
+        });
+    }
+
+    /** Fit after the current layout pass; for use from allocation signals. */
+    _queueFitTopBar() {
+        if (this._fitIdleId || !this._indicator) return;
+        this._fitIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            this._fitIdleId = 0;
+            this._fitTopBar();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    /**
+     * Keep the top bar inside the room the panel has. When the panel's right
+     * side asks for more than it can get, labels would be ellipsized and the
+     * system menu squeezed: instead the last pinned metrics still showing a
+     * label drop to their icon. When room returns, labels come back in the
+     * opposite order.
+     */
+    _fitTopBar() {
+        const right = Main.panel._rightBox;
+        const center = Main.panel._centerBox;
+        const labels = this._topBarLabels();
+        if (!this._indicator || !right || !center || labels.length === 0) return;
+        // Not has_allocation(): that is false whenever a relayout is pending,
+        // which is exactly when this runs. The last allocation is what is
+        // wanted, as long as the panel has been laid out at all.
+        const panelWidth = Main.panel.allocation.get_width();
+        if (panelWidth <= 0 || center.allocation.get_width() <= 0) return;
+
+        // The panel places its centre box at x = side width and gives each
+        // side at most that much. Both figures are read from the centre's
+        // allocation, which does not depend on what this extension shows.
+        // The side is further limited to what is left beside the centre
+        // (they differ when a dock shifts the work area).
+        const rtl = Main.panel.get_text_direction() === Clutter.TextDirection.RTL;
+        const beside = rtl ? center.allocation.x1 : panelWidth - center.allocation.x2;
+        const room = Math.floor(Math.min(center.allocation.x1, beside));
+        const wanted = () => right.get_preferred_width(-1)[1];
+
+        const before = this._topBarCollapsed;
+        while (wanted() > room && this._topBarCollapsed < labels.length) {
+            this._topBarCollapsed++;
+            this._applyTopBarCollapse();
+        }
+        if (this._topBarCollapsed !== before) return;
+
+        while (this._topBarCollapsed > 0) {
+            const next = labels[labels.length - this._topBarCollapsed];
+            if (wanted() + next.get_preferred_width(-1)[1] + TOP_BAR_FIT_MARGIN_PX > room) break;
+            this._topBarCollapsed--;
+            this._applyTopBarCollapse();
+        }
+    }
+
+    _updateTopBarUI(data, frame = false) {
+        if (!this._settings || !this._indicator) return;
+        const tempUnit = this._settings.get_string('unit-temp') || 'C';
+        const useGiB = this._settings.get_string('unit-mem') === 'GiB';
+        const cpuWarn = this._settings.get_int('threshold-cpu') || 90;
+        const memWarn = this._settings.get_int('threshold-mem') || 90;
+        const tempWarn = this._settings.get_int('threshold-temp') || 80;
+        const batFmt = this._settings.get_string('battery-top-format') || 'percent';
+        const netFmt = this._settings.get_string('network-top-format') || 'download';
+
+        // 1. Compute rich tooltips: they describe the reading, not the glide.
+        if (!frame) {
+            if (data.cpu) {
+                const loadStr = data.cpu.loadavg ? data.cpu.loadavg.map(v => v.toFixed(2)).join(', ') : '--';
+                this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || 'CPU'}\nLoad: ${loadStr}${data.cpu.frequency ? `\nFreq: ${data.cpu.frequency}` : ''}`;
+            }
+            if (data.mem) {
+                const usedStr = formatBytes(data.mem.used, useGiB);
+                const totalStr = formatBytes(data.mem.total, useGiB);
+                const availStr = formatBytes(data.mem.available, useGiB);
+                this._tooltipTexts['memory'] = `Used: ${usedStr} / ${totalStr}\nAvailable: ${availStr}\nSwap: ${Math.round(data.mem.swapPercent || 0)}%`;
+            }
+            if (data.bat && !data.bat.present)
+                this._tooltipTexts['battery'] = 'Battery not available\nNo battery was detected.';
+            if (data.bat && data.bat.present) {
+                const state = batteryStateLabel(data.bat.state);
+                let timeStr = '';
+                if (data.bat.timeRemaining > 0)
+                    timeStr = ` · ${formatDuration(data.bat.timeRemaining)} ${data.bat.state === 'charging' ? 'to full' : 'left'}`;
+                this._tooltipTexts['battery'] = `Battery: ${data.bat.percent.toFixed(1)}% (${state}${timeStr})\nHealth: ${data.bat.health.toFixed(1)}% · Rate: ${(data.bat.energyRate || 0).toFixed(1)}W`;
+            }
+            if (data.pwr) {
+                const readout = powerReadout(data.pwr);
+                if (readout.value === null) {
+                    this._tooltipTexts['power'] = `Power draw not available\n${readout.reason}`;
+                } else {
+                    const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : 'n/a on AC';
+                    this._tooltipTexts['power'] = `System Draw: ${sys}\nCPU Package: ${data.pwr.packagePower !== null ? data.pwr.packagePower.toFixed(1) + 'W' : 'n/a'}`;
+                }
+            }
+            if (data.dsk && data.dsk.mounts && data.dsk.mounts.length > 0) {
+                const root = data.dsk.mounts[0];
+                this._tooltipTexts['disk'] = `Space used on /: ${Math.round(root.percent)}% (${formatBytes(root.free, useGiB)} free)\nBusy: ${Math.round(data.dsk.diskPercent || 0)}% · Read ${formatSpeed(data.dsk.readRate || 0)} · Write ${formatSpeed(data.dsk.writeRate || 0)}`;
+            }
+            if (data.net && data.net.total) {
+                const sessRx = formatBytes(data.net.sessionRx || 0, useGiB);
+                const sessTx = formatBytes(data.net.sessionTx || 0, useGiB);
+                this._tooltipTexts['network'] = `Download: ${formatSpeed(data.net.total.rxRate)}\nUpload: ${formatSpeed(data.net.total.txRate)}\nSession: ↓ ${sessRx}  ↑ ${sessTx}`;
+            }
+            if (data.thm) {
+                const fanInfo = data.thm.fans && data.thm.fans.length > 0 ? `\nFan: ${data.thm.fans[0].rpm} RPM` : '';
+                this._tooltipTexts['thermal'] = thermalUnavailable(data.thm)
+                    ? 'Temperature not available\nNo readable hwmon or thermal-zone sensor was found.'
+                    : `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
+            }
+            if (data.gpu) this._tooltipTexts['gpu'] = gpuTooltip(data.gpu, tempUnit);
+        }
+
+        // 2. Update top bar text & icons
+        const batWidget = this._topBarWidgets['battery'];
+        if (batWidget && data.bat && data.bat.state) {
+            const iconName = batteryIconName(data.bat.present ? data.bat.percent : NaN, data.bat.state);
+            if (batWidget.icon.icon_name !== iconName) batWidget.icon.icon_name = iconName;
+        }
+        Object.keys(this._topBarWidgets).forEach(key => {
+            const widget = this._topBarWidgets[key];
+            if (!widget.label) return;
+
+            // '--' = not sampled yet, 'n/a' = this machine cannot provide it.
+            let text = '--';
+            if (key === 'cpu' && data.cpu) text = `${Math.round(data.cpu.total)}%`;
+            else if (key === 'memory' && data.mem) text = `${Math.round(data.mem.percent)}%`;
+            else if (key === 'battery' && data.bat && data.bat.present) {
+                const basePct = `${Math.round(data.bat.percent)}%`;
+                if (batFmt === 'percent-time' && data.bat.timeRemaining > 0) {
+                    const h = Math.floor(data.bat.timeRemaining / 3600);
+                    const m = Math.floor((data.bat.timeRemaining % 3600) / 60);
+                    text = `${basePct} · ${h}h ${m}m`;
+                } else {
+                    text = basePct;
+                }
+            }
+            else if (key === 'battery' && data.bat && data.bat.present === false && data.bat.state)
+                text = 'n/a';
+            else if (key === 'power' && data.pwr) {
+                const readout = powerReadout(data.pwr);
+                text = readout.value === null ? 'n/a' : `${readout.value.toFixed(1)}W`;
+            }
+            else if (key === 'disk' && data.dsk && data.dsk.mounts.length > 0)
+                text = `${Math.round(data.dsk.mounts[0].percent)}%`;
+            else if (key === 'network' && data.net) {
+                if (netFmt === 'both') {
+                    text = `↓${formatSpeedCompact(data.net.total.rxRate)} ↑${formatSpeedCompact(data.net.total.txRate)}`;
+                } else if (netFmt === 'upload') {
+                    text = `↑ ${formatSpeedCompact(data.net.total.txRate)}`;
+                } else {
+                    text = `↓ ${formatSpeedCompact(data.net.total.rxRate)}`;
+                }
+            }
+            else if (key === 'thermal' && data.thm)
+                text = thermalUnavailable(data.thm) ? 'n/a' : formatTemp(data.thm.packageTemp, tempUnit);
+            else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : 'n/a';
+
+            if (widget.label.text !== text) widget.label.text = text;
+
+            let warn = false;
+            if (key === 'cpu' && data.cpu && data.cpu.total >= cpuWarn) warn = true;
+            if (key === 'memory' && data.mem && data.mem.percent >= memWarn) warn = true;
+            if (key === 'thermal' && data.thm && data.thm.packageTemp >= tempWarn) warn = true;
+            if (key === 'gpu' && data.gpu?.present && data.gpu.percent >= this._settings.get_int('threshold-gpu')) warn = true;
+            if (key === 'disk' && data.dsk?.mounts?.[0]?.percent >= this._settings.get_int('threshold-disk')) warn = true;
+            if (warn) widget.label.add_style_class_name('resource-pulse-label-warn');
+            else widget.label.remove_style_class_name('resource-pulse-label-warn');
+        });
+        // A value that grew wider changes what the panel is asked for
+        // without changing what it is given, so no signal reports it.
+        this._fitTopBar();
+    }
+
+    // ── Alerts ────────────────────────────────────────────────────────────────
+
+    _updateAlerts(data, now) {
+        if (!this._alerts) return;
+        const s = this._settings;
+        const limits = {
+            cpu: s.get_int('threshold-cpu'),
+            memory: s.get_int('threshold-mem'),
+            thermal: s.get_int('threshold-temp'),
+            gpu: s.get_int('threshold-gpu'),
+            disk: s.get_int('threshold-disk'),
+            pressure: PRESSURE_LIMIT,
+        };
+        const { raised, cleared } = this._alerts.update(alertReadings(data, limits, thermalUnavailable), now);
+        for (const key of cleared) delete this._alertCauses[key];
+        for (const key of raised) this._onAlertRaised(key, now);
+        if (raised.length || cleared.length) this._showDanger();
+    }
+
+    /** The ⚠ in the top bar, and the pinned values of the metrics in alert. */
+    _showDanger() {
+        if (!this._dangerBox || !this._alerts) return;
+        const active = new Set(this._alerts.active().map(a => ALERTS[a.key].tab));
+        this._dangerBox.visible = active.size > 0;
+        for (const [key, widget] of Object.entries(this._topBarWidgets)) {
+            if (!widget.label) continue;
+            if (active.has(key)) widget.label.add_style_class_name('resource-pulse-label-danger');
+            else widget.label.remove_style_class_name('resource-pulse-label-danger');
+        }
+    }
+
+    _alertLine(alert, now) {
+        const tempUnit = this._settings.get_string('unit-temp') || 'C';
+        const info = ALERTS[alert.key];
+        if (alert.key === 'disk') {
+            const free = this._lastDsk?.mounts?.[0]?.free;
+            return `${info.name} ${Math.round(alert.value)} % full${free !== undefined ? ` · ${formatBytes(free, this._settings.get_string('unit-mem') === 'GiB')} free` : ''}`;
+        }
+        const format = alert.key === 'thermal' ? v => formatTemp(v, tempUnit) : v => `${Math.round(v)} %`;
+        const line = alertLine(alert, now, { name: info.name, format });
+        const cause = this._alertCauses[alert.key];
+        return cause ? `${line} — ${cause}` : line;
+    }
+
+    /** Tooltip of the ⚠: one line per metric in alert. */
+    _alertText() {
+        const now = GLib.get_monotonic_time();
+        const lines = this._alerts?.active().map(a => this._alertLine(a, now)) ?? [];
+        return lines.length ? lines.join('\n') : 'No alerts';
+    }
+
+    async _onAlertRaised(key, now) {
+        const gen = this._gen;
+        if (key === 'cpu' || key === 'memory') {
+            const cause = await this._alertCause(key);
+            if (gen !== this._gen || !this._alerts?.isActive(key)) return;
+            if (cause) this._alertCauses[key] = cause;
+        }
+        if (this._settings.get_boolean('alert-notify') && this._alerts.takeNotification(key, now)) {
+            const alert = this._alerts.active().find(a => a.key === key);
+            if (alert) this._notifyAlert(key, this._alertLine(alert, GLib.get_monotonic_time()));
+        }
+    }
+
+    /**
+     * The process behind a CPU or memory alert: one scan for memory, two a
+     * second apart for CPU (rates need a baseline). A separate sampler, so
+     * the panel's process list keeps its own baseline.
+     */
+    async _alertCause(key) {
+        this._alertProc ??= new ProcessSampler();
+        const memTotal = this._lastMem?.total || 0;
+        const byMemory = key === 'memory';
+        let result = await this._alertProc.sample(memTotal, byMemory, 1);
+        if (!byMemory && result) {
+            // disable() ends the wait early through _causeResolve.
+            await new Promise(resolve => {
+                this._causeResolve = resolve;
+                this._causeTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+                    this._causeTimerId = 0;
+                    this._causeResolve = null;
+                    resolve();
+                    return GLib.SOURCE_REMOVE;
+                });
+            });
+            if (!this._alertProc) return '';
+            result = await this._alertProc.sample(memTotal, false, 1);
+        }
+        this._alertProc?.reset();
+        const top = result?.top?.[0];
+        if (!top) return '';
+        const name = top.count > 1 ? `${top.comm} ×${top.count}` : top.comm;
+        // Process CPU is per core (100 = one core), so say it in cores.
+        return byMemory
+            ? `${name} using ${formatBytes(top.rssBytes, this._settings.get_string('unit-mem') === 'GiB')}`
+            : `${name} using ${(top.cpu / 100).toFixed(1)} cores`;
+    }
+
+    _notifyAlert(key, body) {
+        if (!this._notifySource) {
+            this._notifySource = new MessageTray.Source({ title: 'Resource Pulse', iconName: 'dialog-warning-symbolic' });
+            this._notifySource.connect('destroy', () => {
+                this._notifySource = null;
+            });
+            Main.messageTray.add(this._notifySource);
+        }
+        const notification = new MessageTray.Notification({ source: this._notifySource, title: ALERTS[key].title, body });
+        notification.connect('activated', () => {
+            if (!this._indicator) return;
+            this._activeTab = ALERTS[key].tab;
+            this._updateTabVisibility();
+            this._indicator.menu.open();
+        });
+        this._notifySource.addNotification(notification);
+    }
+
+    // ── Ending processes ──────────────────────────────────────────────────────
+
+    /** A timer that disable() ends early (resolving false), so no flow outlives the session. */
+    _wait(ms) {
+        return new Promise(resolve => {
+            if (!this._waits) {
+                resolve(false);
+                return;
+            }
+            const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+                this._waits?.delete(id);
+                resolve(true);
+                return GLib.SOURCE_REMOVE;
+            });
+            this._waits.set(id, resolve);
+        });
+    }
+
+    /** The confirmation line under a process list. */
+    _buildEndBar() {
+        // The message on its own (wrapping) line, the buttons under it.
+        const box = new St.BoxLayout({ visible: false, vertical: true, style: 'spacing: 6px; padding-top: 8px;' });
+        const label = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em;', x_expand: true });
+        label.clutter_text.line_wrap = true;
+        label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        const buttons = new St.BoxLayout({ style: 'spacing: 8px;', x_align: Clutter.ActorAlign.END });
+        const confirm = new St.Button({ style_class: 'rp-end-confirm', label: 'End', can_focus: true });
+        const cancel = new St.Button({ style_class: 'rp-chip-bg rp-end-cancel', label: 'Cancel', can_focus: true });
+        buttons.add_child(confirm);
+        buttons.add_child(cancel);
+        box.add_child(label);
+        box.add_child(buttons);
+        const bar = { box, label, confirm, cancel, target: null, step: 'idle', run: 0 };
+        confirm.connect('clicked', () => {
+            if (bar.step === 'confirm') this._endGroup(bar, 'TERM');
+            else if (bar.step === 'force') this._endGroup(bar, 'KILL');
+        });
+        cancel.connect('clicked', () => this._hideEndBar(bar));
+        this._addClickAnimations(confirm);
+        this._addClickAnimations(cancel);
+        return bar;
+    }
+
+    _hideEndBar(bar) {
+        bar.run++;
+        bar.step = 'idle';
+        bar.target = null;
+        bar.box.visible = false;
+    }
+
+    _showEndBar(bar, text, { confirm = null, cancel = null } = {}) {
+        bar.label.text = text;
+        bar.confirm.visible = !!confirm;
+        if (confirm) bar.confirm.label = confirm;
+        bar.cancel.visible = !!cancel;
+        if (cancel) bar.cancel.label = cancel;
+        bar.box.visible = true;
+    }
+
+    /** First step: ask. The group is copied, so later re-sorting cannot change the target. */
+    _askEnd(bar, group) {
+        bar.run++;
+        bar.target = { comm: group.comm, count: group.count, members: group.members.map(m => ({ ...m })) };
+        bar.step = 'confirm';
+        const what = group.count > 1 ? `all ${group.count} ${group.comm} processes` : group.comm;
+        this._showEndBar(bar, `End ${what}? Unsaved work in it may be lost.`, { confirm: 'End', cancel: 'Cancel' });
+        bar.confirm.grab_key_focus();
+    }
+
+    /** Ask the processes to quit (TERM), or force them (KILL), then report what is left. */
+    async _endGroup(bar, signal) {
+        const run = ++bar.run;
+        const gen = this._gen;
+        const { comm } = bar.target;
+        const { mine, others } = liveMembers(bar.target.members, this._uid);
+        if (mine.length === 0) {
+            bar.step = 'done';
+            this._showEndBar(bar, others > 0
+                ? `${comm} belongs to another user and cannot be ended from here.`
+                : `${comm} has already exited.`, { cancel: 'Close' });
+            return;
+        }
+        bar.step = 'waiting';
+        this._showEndBar(bar, signal === 'TERM' ? `Asking ${comm} to quit…` : `Forcing ${comm} to quit…`);
+        const sent = await signalProcesses(mine, signal);
+        // Quitting cleanly can take a moment (saving, closing files).
+        if (!(await this._wait(signal === 'TERM' ? 5000 : 1000)) || gen !== this._gen || run !== bar.run) return;
+        const left = liveMembers(bar.target.members, this._uid).mine;
+        const note = !sent.ok && sent.error ? ` (${sent.error})` : '';
+        if (left.length === 0) {
+            bar.step = 'done';
+            this._showEndBar(bar, `${comm} ended.`);
+            if (await this._wait(3000) && gen === this._gen && run === bar.run) this._hideEndBar(bar);
+        } else if (signal === 'TERM') {
+            bar.step = 'force';
+            this._showEndBar(bar, `${left.length} of ${mine.length} ${comm} did not quit${note}. Force quit loses unsaved work.`,
+                { confirm: 'Force quit', cancel: 'Cancel' });
+            bar.confirm.grab_key_focus();
+        } else {
+            bar.step = 'done';
+            this._showEndBar(bar, `${left.length} ${comm} could not be ended${note}.`, { cancel: 'Close' });
+        }
+    }
+
+    // ── Overview Page ─────────────────────────────────────────────────────────
+
+
+    _sanitizeCardOrder(list) {
+        const defaultOrder = ['cpu', 'memory', 'battery', 'disk', 'network', 'thermal', 'power', 'gpu'];
+        const result = [];
+        if (Array.isArray(list)) {
+            for (const key of list) {
+                if (defaultOrder.includes(key) && !result.includes(key)) {
+                    result.push(key);
+                }
+            }
+        }
+        for (const key of defaultOrder) {
+            if (!result.includes(key)) {
+                result.push(key);
+            }
+        }
+        return result;
+    }
+
+    _saveCardOrder() {
+        if (!this._settings || !this._cardOrder) return;
+        this._isInternalOrderUpdate = true;
+        try {
+            this._settings.set_strv('overview-card-order', this._cardOrder);
+
+            const pinned = this._pinnedMetrics();
+            if (pinned && pinned.length > 1) {
+                pinned.sort((a, b) => this._cardOrder.indexOf(a) - this._cardOrder.indexOf(b));
+                this._settings.set_strv('pinned-metrics', pinned);
+            }
+        } finally {
+            this._isInternalOrderUpdate = false;
+        }
+    }
+
+    _onCardOrderChanged() {
+        if (this._isInternalOrderUpdate) return;
+        const saved = this._getStrv('overview-card-order', null);
+        if (saved && saved.length > 0) {
+            this._cardOrder = this._sanitizeCardOrder(saved);
+            this._attachCardsToGrid(this._cardOrder);
+        }
+    }
+
+    _buildMetricCard({ key, label, color, placeholder = '--', spark = null }) {
+        const [r, g, b] = color;
+        const box = new St.BoxLayout({
+            style_class: `resource-pulse-metric-card tint-${key}`,
+            vertical: true, reactive: true, can_focus: true, x_expand: true
+        });
+
+        const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
+        head.add_child(this._setMetricIcon(new St.Icon({ style_class: `rp-c-${key}`, style: 'icon-size: 16px;' }), key));
+        head.add_child(new St.Label({ text: label, style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+        head.add_child(new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' }));
+        box.add_child(head);
+
+        const valueLabel = new St.Label({ text: placeholder, style_class: 'rp-fg', style: 'font-size: 1.7em; font-weight: bold;' });
+        box.add_child(valueLabel);
+
+        // The slot keeps its height whether it holds a graph, a line of
+        // text or (a metric with nothing to add) nothing visible at all.
+        const slot = new St.Bin({ style_class: 'rp-card-slot', x_expand: true, height: CARD_SLOT_HEIGHT });
+        let sparkline = null;
+        let subLabel = null;
+        if (spark) {
+            sparkline = this._newSparkline(spark, CARD_SLOT_HEIGHT, { color: [r, g, b, 1.0], fillOpacity: 0.15 });
+            sparkline.x_expand = true;
+            slot.set_child(sparkline);
+        } else {
+            // x_expand: a bin centres a child that does not expand.
+            subLabel = new St.Label({
+                text: '', style_class: 'rp-fg-muted rp-card-detail',
+                x_expand: true, x_align: Clutter.ActorAlign.START, y_align: Clutter.ActorAlign.CENTER
+            });
+            slot.set_child(subLabel);
+        }
+        box.add_child(slot);
+
+        const pbar = new ProgressBar(4, r, g, b);
+        box.add_child(pbar);
+
+        this._makeCardDraggable(box, key);
+        return { box, valueLabel, subLabel, pbar, spark: sparkline };
+    }
+
+    _attachCardsToGrid(order) {
+        if (!this._overviewGrid || !this._overviewGridLayout || !this._summaryCards) return;
+
+        for (const key of Object.keys(this._summaryCards)) {
+            const box = this._summaryCards[key]?.box;
+            if (box && box.get_parent() === this._overviewGrid) {
+                this._overviewGrid.remove_child(box);
+            }
+        }
+
+        order.forEach((key, idx) => {
+            const cardObj = this._summaryCards[key];
+            if (cardObj?.box) {
+                const col = idx % 2;
+                const row = Math.floor(idx / 2);
+                this._overviewGridLayout.attach(cardObj.box, col, row, 1, 1);
+            }
+        });
+    }
+
+    _handleCardDragMotion(draggedKey, cardCenterX, cardCenterY) {
+        if (!this._cardOrder || !this._summaryCards || !this._overviewGrid) return;
+        const currentOrder = this._cardOrder;
+        const currentIndex = currentOrder.indexOf(draggedKey);
+        if (currentIndex === -1) return;
+
+        const [gridX, gridY] = this._overviewGrid.get_transformed_position();
+        const [gridW, gridH] = this._overviewGrid.get_transformed_size();
+
+        const sampleCard = this._summaryCards[draggedKey]?.box;
+        const [cardW, cardH] = sampleCard ? sampleCard.get_size() : [0, 0];
+
+        const stepX = (gridW > cardW && cardW > 0) ? (gridW - cardW) : (gridW > 0 ? gridW / 2 : 190);
+        const stepY = (gridH > cardH && cardH > 0) ? (gridH - cardH) / 3 : (gridH > 0 ? gridH / 4 : 95);
+
+        let targetIndex = currentIndex;
+        let minDistance = Infinity;
+
+        for (let i = 0; i < currentOrder.length; i++) {
+            const col = i % 2;
+            const row = Math.floor(i / 2);
+            const slotCenterX = gridX + col * stepX + (cardW > 0 ? cardW / 2 : stepX / 2);
+            const slotCenterY = gridY + row * stepY + (cardH > 0 ? cardH / 2 : stepY / 2);
+            const dist = Math.hypot(cardCenterX - slotCenterX, cardCenterY - slotCenterY);
+            if (dist < minDistance) {
+                minDistance = dist;
+                targetIndex = i;
+            }
+        }
+
+        if (this._previewTargetIndex === targetIndex) return;
+        this._previewTargetIndex = targetIndex;
+
+        const previewOrder = [...currentOrder];
+        previewOrder.splice(currentIndex, 1);
+        previewOrder.splice(targetIndex, 0, draggedKey);
+        this._pendingPreviewOrder = previewOrder;
+
+        for (let i = 0; i < currentOrder.length; i++) {
+            const k = currentOrder[i];
+            if (k === draggedKey) continue;
+            const box = this._summaryCards[k]?.box;
+            if (!box) continue;
+
+            const previewIdx = previewOrder.indexOf(k);
+            const deltaCol = (previewIdx % 2) - (i % 2);
+            const deltaRow = Math.floor(previewIdx / 2) - Math.floor(i / 2);
+
+            const targetTx = deltaCol * stepX;
+            const targetTy = deltaRow * stepY;
+
+            box.ease({
+                translation_x: targetTx,
+                translation_y: targetTy,
+                duration: 300,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+            });
+        }
+    }
+
+    _makeCardDraggable(card, key) {
+        if (!card) return;
+        card.set_pivot_point(0.5, 0.5);
+        card.reactive = true;
+        card.track_hover = true;
+
+        let isCandidate = false;
+        let isDragging = false;
+        let startX = 0, startY = 0;
+        let holdTimerId = null;
+
+        let cardOrigX = 0, cardOrigY = 0;
+        let cardW = 0, cardH = 0;
+        let currentDeltaX = 0, currentDeltaY = 0;
+
+        card.connect('enter-event', () => {
+            if (!this._activeCardDrag) {
+                card.add_style_class_name('rp-hover');
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('leave-event', () => {
+            if (!this._activeCardDrag) {
+                card.remove_style_class_name('rp-hover');
+                if (!isDragging) {
+                    card.ease({
+                        scale_x: 1.0,
+                        scale_y: 1.0,
+                        duration: 120,
+                        mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+                    });
+                }
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        const cancelHoldTimer = () => {
+            if (holdTimerId) {
+                if (this._dragHoldTimerId === holdTimerId)
+                    this._dragHoldTimerId = null;
+                GLib.source_remove(holdTimerId);
+                holdTimerId = null;
+            }
+        };
+
+        const startDrag = () => {
+            if (isDragging) return;
+            cancelHoldTimer();
+            isDragging = true;
+            isCandidate = false;
+            this._activeCardDrag = key;
+            this._draggedCardActor = card;
+            this._cardDragGrab = global.stage.grab(card);
+
+            // Normalize transitions and get unscaled layout coordinates
+            card.remove_all_transitions();
+            card.remove_style_class_name('resource-pulse-metric-card-snapping');
+            card.set_scale(1.0, 1.0);
+            card.set_translation(0, 0, 0);
+            [cardOrigX, cardOrigY] = card.get_transformed_position();
+            [cardW, cardH] = card.get_transformed_size();
+            currentDeltaX = 0;
+            currentDeltaY = 0;
+
+            // Safety net: stage-level button release listener
+            if (!this._stageReleaseId) {
+                this._stageReleaseId = global.stage.connect('button-release-event', () => {
+                    if (isDragging) {
+                        finishDrag(true);
+                        return Clutter.EVENT_STOP;
+                    }
+                    return Clutter.EVENT_PROPAGATE;
+                });
+            }
+
+            card.add_style_class_name('resource-pulse-metric-card-dragging');
+            if (card.get_parent()) {
+                card.get_parent().set_child_above_sibling(card, null);
+            }
+            card.ease({
+                scale_x: 1.04,
+                scale_y: 1.04,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+            });
+        };
+
+        const finishDrag = (wasDrag) => {
+            cancelHoldTimer();
+            if (this._stageReleaseId) {
+                global.stage.disconnect(this._stageReleaseId);
+                this._stageReleaseId = null;
+            }
+
+            if (wasDrag && isDragging) {
+                if (this._cardDragGrab) {
+                    this._cardDragGrab.dismiss();
+                    this._cardDragGrab = null;
+                }
+                isDragging = false;
+                this._activeCardDrag = null;
+                this._draggedCardActor = null;
+
+                const oldOrder = this._cardOrder || [];
+                const origIndex = oldOrder.indexOf(key);
+                const newOrder = this._pendingPreviewOrder || oldOrder;
+                const targetIndex = newOrder.indexOf(key);
+
+                this._cardOrder = newOrder;
+                this._pendingPreviewOrder = null;
+                this._previewTargetIndex = null;
+
+                const [gridW, gridH] = this._overviewGrid ? this._overviewGrid.get_transformed_size() : [0, 0];
+                const stepX = (gridW > cardW && cardW > 0) ? (gridW - cardW) : (gridW > 0 ? gridW / 2 : 190);
+                const stepY = (gridH > cardH && cardH > 0) ? (gridH - cardH) / 3 : (gridH > 0 ? gridH / 4 : 95);
+
+                const origCol = origIndex >= 0 ? origIndex % 2 : 0;
+                const origRow = origIndex >= 0 ? Math.floor(origIndex / 2) : 0;
+                const targetCol = targetIndex >= 0 ? targetIndex % 2 : 0;
+                const targetRow = targetIndex >= 0 ? Math.floor(targetIndex / 2) : 0;
+
+                const slotShiftX = (targetCol - origCol) * stepX;
+                const slotShiftY = (targetRow - origRow) * stepY;
+
+                // Relative to the new slot, compute the card's current visual offset to prevent jumping
+                const initialSnapTx = currentDeltaX - slotShiftX;
+                const initialSnapTy = currentDeltaY - slotShiftY;
+
+                // For all other cards, calculate their visual offset relative to their new slot
+                const otherCardOffsets = {};
+                for (const k of Object.keys(this._summaryCards)) {
+                    if (k === key) continue;
+                    const b = this._summaryCards[k]?.box;
+                    if (!b) continue;
+
+                    const oldIdx = oldOrder.indexOf(k);
+                    const newIdx = this._cardOrder.indexOf(k);
+                    if (oldIdx !== -1 && newIdx !== -1) {
+                        const shiftCol = (newIdx % 2) - (oldIdx % 2);
+                        const shiftRow = Math.floor(newIdx / 2) - Math.floor(oldIdx / 2);
+                        const expectedTx = shiftCol * stepX;
+                        const expectedTy = shiftRow * stepY;
+                        otherCardOffsets[k] = {
+                            tx: b.translation_x - expectedTx,
+                            ty: b.translation_y - expectedTy
+                        };
+                    } else {
+                        otherCardOffsets[k] = { tx: 0, ty: 0 };
+                    }
+                    b.remove_all_transitions();
+                }
+
+                // Reattach all cards to grid in final order
+                this._attachCardsToGrid(this._cardOrder);
+
+                // Now ease all other cards seamlessly into (0, 0)
+                for (const k of Object.keys(this._summaryCards)) {
+                    if (k === key) continue;
+                    const b = this._summaryCards[k]?.box;
+                    const offset = otherCardOffsets[k];
+                    if (b && offset) {
+                        b.set_translation(offset.tx, offset.ty, 0);
+                        if (Math.abs(offset.tx) > 0.5 || Math.abs(offset.ty) > 0.5) {
+                            b.ease({
+                                translation_x: 0,
+                                translation_y: 0,
+                                duration: 360,
+                                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+                            });
+                        } else {
+                            b.set_translation(0, 0, 0);
+                        }
+                    }
+                }
+
+                // Transition dragged card styling to snapping state
+                card.remove_style_class_name('resource-pulse-metric-card-dragging');
+                card.add_style_class_name('resource-pulse-metric-card-snapping');
+
+                // Seamless snap ease into destination slot with silky cubic deceleration
+                card.remove_all_transitions();
+                card.set_translation(initialSnapTx, initialSnapTy, 0);
+                card.ease({
+                    translation_x: 0,
+                    translation_y: 0,
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    duration: 360,
+                    mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+                    onComplete: () => {
+                        card.remove_style_class_name('resource-pulse-metric-card-snapping');
+                        card.remove_style_class_name('rp-hover');
+                    }
+                });
+
+                // Finalize order in GSettings
+                this._saveCardOrder();
+                return Clutter.EVENT_STOP;
+            }
+
+            isDragging = false;
+            isCandidate = false;
+            return Clutter.EVENT_PROPAGATE;
+        };
+
+        // Keyboard: a focused card shows the hover highlight and opens its
+        // details page on Return or Space, as a click does.
+        card.connect('key-focus-in', () => card.add_style_class_name('rp-hover'));
+        card.connect('key-focus-out', () => {
+            if (!card.hover) card.remove_style_class_name('rp-hover');
+        });
+        card.connect('key-press-event', (actor, event) => {
+            const sym = event.get_key_symbol();
+            if (sym !== Clutter.KEY_Return && sym !== Clutter.KEY_KP_Enter && sym !== Clutter.KEY_space)
+                return Clutter.EVENT_PROPAGATE;
+            this._activeTab = key;
+            this._updateTabVisibility();
+            return Clutter.EVENT_STOP;
+        });
+
+        card.connect('button-press-event', (actor, event) => {
+            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+            const [x, y] = event.get_coords();
+            startX = x;
+            startY = y;
+            isCandidate = true;
+            isDragging = false;
+
+            card.ease({
+                scale_x: 0.98,
+                scale_y: 0.98,
+                duration: 80,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+
+            cancelHoldTimer();
+            holdTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+                holdTimerId = null;
+                this._dragHoldTimerId = null;
+                if (isCandidate && !isDragging) {
+                    startDrag();
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+            this._dragHoldTimerId = holdTimerId;
+
+            return Clutter.EVENT_STOP;
+        });
+
+        card.connect('button-release-event', (actor, event) => {
+            if (event.get_button() !== 1) return Clutter.EVENT_PROPAGATE;
+            cancelHoldTimer();
+
+            if (isDragging) {
+                return finishDrag(true);
+            }
+
+            if (isCandidate) {
+                isCandidate = false;
+                card.ease({
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    duration: 100,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+                // Quick click -> open details page
+                this._activeTab = key;
+                this._updateTabVisibility();
+                return Clutter.EVENT_STOP;
+            }
+
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('event', (actor, event) => {
+            const type = event.type();
+            if (type === Clutter.EventType.MOTION || type === Clutter.EventType.TOUCH_UPDATE) {
+                if (type === Clutter.EventType.MOTION) {
+                    const state = event.get_state();
+                    // If button 1 is no longer held, finish drag immediately
+                    if ((state & Clutter.ModifierType.BUTTON1_MASK) === 0) {
+                        if (isDragging) {
+                            return finishDrag(true);
+                        }
+                        cancelHoldTimer();
+                        isCandidate = false;
+                        return Clutter.EVENT_PROPAGATE;
+                    }
+                }
+
+                const [currX, currY] = event.get_coords();
+                const dist = Math.hypot(currX - startX, currY - startY);
+
+                if (isCandidate && !isDragging && dist > 8) {
+                    startDrag();
+                }
+
+                if (isDragging) {
+                    const rawDeltaX = currX - startX;
+                    const rawDeltaY = currY - startY;
+
+                    let clampedDeltaX = rawDeltaX;
+                    let clampedDeltaY = rawDeltaY;
+
+                    if (this._overviewGrid) {
+                        const [gx, gy] = this._overviewGrid.get_transformed_position();
+                        const [gw, gh] = this._overviewGrid.get_transformed_size();
+                        if (gw > 0 && gh > 0 && cardW > 0 && cardH > 0) {
+                            const minDeltaX = gx - cardOrigX;
+                            const maxDeltaX = Math.max(minDeltaX, (gx + gw - cardW) - cardOrigX);
+                            const minDeltaY = gy - cardOrigY;
+                            const maxDeltaY = Math.max(minDeltaY, (gy + gh - cardH) - cardOrigY);
+
+                            clampedDeltaX = Math.max(minDeltaX, Math.min(rawDeltaX, maxDeltaX));
+                            clampedDeltaY = Math.max(minDeltaY, Math.min(rawDeltaY, maxDeltaY));
+                        }
+                    }
+
+                    currentDeltaX = clampedDeltaX;
+                    currentDeltaY = clampedDeltaY;
+                    card.set_translation(clampedDeltaX, clampedDeltaY, 0);
+
+                    // Compute center of clamped card for slot targeting
+                    const cardCenterX = cardOrigX + clampedDeltaX + (cardW > 0 ? cardW / 2 : 0);
+                    const cardCenterY = cardOrigY + clampedDeltaY + (cardH > 0 ? cardH / 2 : 0);
+
+                    // Find hover target slot among cards
+                    this._handleCardDragMotion(key, cardCenterX, cardCenterY);
+                    return Clutter.EVENT_STOP;
+                }
+            } else if (type === Clutter.EventType.TOUCH_END ||
+                       type === Clutter.EventType.TOUCH_CANCEL) {
+                // BUTTON_RELEASE is deliberately not handled here: Clutter
+                // emits 'event' before 'button-release-event', so clearing
+                // isCandidate at this point made every quick click a no-op.
+                if (isDragging) {
+                    return finishDrag(true);
+                }
+                cancelHoldTimer();
+                isCandidate = false;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    _addCardInteractions(card) {
+        if (!card) return;
+        card.set_pivot_point(0.5, 0.5);
+
+        card.connect('enter-event', () => {
+            card.add_style_class_name('rp-hover');
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('leave-event', () => {
+            card.remove_style_class_name('rp-hover');
+            card.ease({
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('button-press-event', () => {
+            card.ease({
+                scale_x: 0.98,
+                scale_y: 0.98,
+                duration: 80,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        card.connect('button-release-event', () => {
+            card.ease({
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    /** @param {function(Clutter.Event): boolean} [skip] presses it accepts do not animate */
+    _addClickAnimations(actor, skip = null) {
+        if (!actor) return;
+        actor.set_pivot_point(0.5, 0.5);
+
+        actor.connect('leave-event', () => {
+            actor.ease({
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        actor.connect('button-press-event', (_actor, event) => {
+            if (skip?.(event)) return Clutter.EVENT_PROPAGATE;
+            actor.ease({
+                scale_x: 0.92,
+                scale_y: 0.92,
+                duration: 80,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+
+        actor.connect('button-release-event', () => {
+            actor.ease({
+                scale_x: 1.0,
+                scale_y: 1.0,
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+
+    _buildOverview() {
+        this._overviewPage = new St.BoxLayout({ vertical: true, x_expand: true, y_expand: true });
+
+        // Header container (System Overview, Refresh, Menu)
+        const headerBox = new St.BoxLayout({ style: 'margin-bottom: 12px;', y_align: Clutter.ActorAlign.CENTER });
+        const titleLbl = new St.Label({ text: 'System Overview', style_class: 'rp-fg', style: 'font-size: 1.3em; font-weight: bold;', x_expand: true });
+        headerBox.add_child(titleLbl);
+
+        const refreshBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true });
+        const refreshIcon = new St.Icon({ icon_name: 'view-refresh-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
+        refreshIcon.set_pivot_point(0.5, 0.5);
+        refreshBtn.add_child(refreshIcon);
+        refreshBtn.connect('clicked', () => {
+            this._poll();
+            refreshIcon.rotation_angle_z = 0;
+            refreshIcon.ease({
+                rotation_angle_z: 360,
+                duration: 500,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC
+            });
+        });
+
+        const menuBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true });
+        const menuIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
+        menuIcon.set_pivot_point(0.5, 0.5);
+        menuBtn.add_child(menuIcon);
+        // All settings live in the preferences window.
+        menuBtn.connect('clicked', () => this._openDetailsWindow('settings'));
+        this._overviewMenuBtn = menuBtn;
+        this._overviewMenuIcon = menuIcon;
+
+        this._addClickAnimations(refreshBtn);
+        headerBox.add_child(refreshBtn);
+        this._addClickAnimations(menuBtn);
+        headerBox.add_child(menuBtn);
+        this._overviewPage.add_child(headerBox);
+
+        // Unified 2-Column Reorderable Card Grid
+        const grid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
+        this._overviewGridLayout = grid;
+        this._overviewGrid = new St.Widget({ layout_manager: grid, style_class: 'resource-pulse-overview-grid', x_expand: true });
+        this._overviewPage.add_child(this._overviewGrid);
+
+        this._summaryCards = {};
+
+        // One template for all eight cards, so the grid is even: name,
+        // value, a slot of fixed height (trend graph or one line of detail)
+        // and a bar. `spark` names the history a card's trend graph draws.
+        const cards = [
+            { key: 'cpu', label: 'CPU', color: [0.208, 0.518, 0.894], placeholder: '--%', spark: 'cpu' },
+            { key: 'memory', label: 'Memory', color: [0.569, 0.255, 0.675], placeholder: '--%', spark: 'mem' },
+            { key: 'battery', label: 'Battery', color: [0.18, 0.76, 0.494], placeholder: '--%' },
+            { key: 'disk', label: 'Disk', color: [0.96, 0.83, 0.18] },
+            { key: 'network', label: 'Network', color: [0.88, 0.11, 0.14] },
+            { key: 'thermal', label: 'Thermal', color: [1.0, 0.47, 0.0] },
+            { key: 'power', label: 'Power', color: [0.96, 0.83, 0.18] },
+            { key: 'gpu', label: 'GPU', color: [0.2, 0.82, 0.48] }
+        ];
+        for (const card of cards) this._summaryCards[card.key] = this._buildMetricCard(card);
+        // The battery card's detail line is its charging state.
+        this._summaryCards.battery.statusLbl = this._summaryCards.battery.subLabel;
+
+        // Initialize and attach cards according to saved/default order
+        this._cardOrder = this._sanitizeCardOrder(this._getStrv('overview-card-order', null));
+        this._attachCardsToGrid(this._cardOrder);
+
+        // Hardware Info Card
+        this._hwCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px; margin-top: 10px;', vertical: true, x_expand: true });
+
+        const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
+
+        // Dynamic Chip badge
+        this._chipBox = new St.BoxLayout({ style: 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;', vertical: true });
+        this._chipLabel1 = new St.Label({ text: 'intel', style: 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;' });
+        this._chipLabel2 = new St.Label({ text: 'CORE', style: 'font-size: 0.9em; color: #ffffff; font-weight: bold;' });
+        this._chipLabel3 = new St.Label({ text: 'i5', style: 'font-size: 1.1em; color: #5bc3ff; font-weight: bold;' });
+        this._chipBox.add_child(this._chipLabel1);
+        this._chipBox.add_child(this._chipLabel2);
+        this._chipBox.add_child(this._chipLabel3);
+        hwTop.add_child(this._chipBox);
+
+        const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
+        this._hwName = new St.Label({ text: 'Intel Processor', style_class: 'rp-fg', style: 'font-size: 1.05em; font-weight: bold;' });
+        this._hwStats = new St.Label({ text: 'Cores & Threads', style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });
+        hwDesc.add_child(this._hwName);
+        hwDesc.add_child(this._hwStats);
+        hwTop.add_child(hwDesc);
+        this._hwCard.add_child(hwTop);
+
+        // Hardware Sub Stats (Uptime, Load Average, OS)
+        const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
+
+        const uptimeBox = new St.BoxLayout({ vertical: true });
+        uptimeBox.add_child(new St.Label({ text: 'Uptime', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._hwUptimeVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
+        uptimeBox.add_child(this._hwUptimeVal);
+
+        const loadBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        loadBox.add_child(new St.Label({ text: 'Load Average', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._hwLoadVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
+        loadBox.add_child(this._hwLoadVal);
+
+        const osBox = new St.BoxLayout({ vertical: true });
+        osBox.add_child(new St.Label({ text: 'OS', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._hwOsVal = new St.Label({ text: `GNOME ${Config.PACKAGE_VERSION.split('.')[0]}`, style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
+        osBox.add_child(this._hwOsVal);
+
+        hwStatsRow.add_child(uptimeBox);
+        hwStatsRow.add_child(loadBox);
+        hwStatsRow.add_child(osBox);
+        this._hwCard.add_child(hwStatsRow);
+
+        this._addCardInteractions(this._hwCard);
+        this._overviewPage.add_child(this._hwCard);
+
+        // System Monitor Quick Launch Footer
+        const sysMonBtn = new St.Button({
+            style_class: 'resource-pulse-sysmon-button',
+            reactive: true,
+            can_focus: true,
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        const sysMonBox = new St.BoxLayout({ style: 'spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+        const sysMonIcon = new St.Icon({
+            icon_name: 'org.gnome.SystemMonitor-symbolic',
+            fallback_gicon: this._bundledIcon('rp-cpu'),
+            style_class: 'rp-c-cpu', style: 'icon-size: 16px;'
+        });
+        const sysMonLbl = new St.Label({
+            text: 'Open System Monitor',
+            style_class: 'resource-pulse-sysmon-label',
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        const sysMonArrow = new St.Icon({
+            icon_name: 'go-next-symbolic',
+            style_class: 'rp-fg-faint', style: 'icon-size: 14px;',
+            y_align: Clutter.ActorAlign.CENTER
+        });
+        sysMonBox.add_child(sysMonIcon);
+        sysMonBox.add_child(sysMonLbl);
+        sysMonBox.add_child(sysMonArrow);
+        sysMonBtn.add_child(sysMonBox);
+
+        sysMonBtn.connect('clicked', () => {
+            this._launchSystemMonitor();
+            this._indicator.menu.close();
+        });
+        this._addClickAnimations(sysMonBtn);
+        this._overviewPage.add_child(sysMonBtn);
+
+        this._menuContainer.add_child(this._overviewPage);
+    }
+
+    // ── Details Page ──────────────────────────────────────────────────────────
+
+    _buildDetails() {
+        this._detailArea = new St.BoxLayout({
+            vertical: true,
+            style_class: 'resource-pulse-detail-area',
+            x_expand: true,
+            y_expand: true
+        });
+
+        // Top bar for CPU detail header (matches Right Panel header)
+        this._detailHeader = new St.BoxLayout({ style: 'margin-bottom: 14px; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
+
+        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true });
+        backBtn.add_child(new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' }));
+        backBtn.connect('clicked', () => {
+            this._activeTab = 'overview';
+            this._updateTabVisibility();
+        });
+
+        this._detailHeaderTitleBox = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        this._detailHeaderIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-cpu', style: 'icon-size: 18px;' }), 'cpu');
+        this._detailHeaderTitle = new St.Label({ text: 'CPU', style_class: 'rp-fg', style: 'font-size: 1.1em; font-weight: bold;' });
+        this._detailHeaderTitleBox.add_child(this._detailHeaderIcon);
+        this._detailHeaderTitleBox.add_child(this._detailHeaderTitle);
+
+        const optBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true });
+        const optIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
+        optIcon.set_pivot_point(0.5, 0.5);
+        optBtn.add_child(optIcon);
+        optBtn.connect('clicked', () => this._openDetailsWindow('settings'));
+        this._detailOptBtn = optBtn;
+        this._detailOptIcon = optIcon;
+
+        this._addClickAnimations(backBtn);
+        this._detailHeader.add_child(backBtn);
+        this._detailHeader.add_child(this._detailHeaderTitleBox);
+        // Range of the page's charts: the live samples, the last hour, the last day.
+        const rangeBox = new St.BoxLayout({ style_class: 'rp-chip-bg rp-range-box', y_align: Clutter.ActorAlign.CENTER });
+        this._rangeButtons = {};
+        for (const range of Object.keys(RANGES)) {
+            const button = new St.Button({
+                style_class: 'rp-range',
+                label: RANGES[range]?.label ?? (this._spanLabel || 'live'),
+                can_focus: true,
+                toggle_mode: true,
+                accessible_name: range === 'live' ? 'Recent samples' : `Last ${RANGES[range].label}`,
+            });
+            button.connect('clicked', () => {
+                this._range = range;
+                this._applyRange();
+            });
+            rangeBox.add_child(button);
+            this._rangeButtons[range] = button;
+        }
+        this._detailHeader.add_child(rangeBox);
+        this._applyRange();
+        this._addClickAnimations(optBtn);
+        this._detailHeader.add_child(optBtn);
+
+        this._detailArea.add_child(this._detailHeader);
+
+        // Sections are built on first visit: most opens only ever show the
+        // overview, so enable() should not pay for eight unseen pages.
+        this._detailSections = {};
+        this._detailBuilders = {
+            cpu:     () => this._buildCpuDetails(),
+            memory:  () => this._buildMemoryDetails(),
+            battery: () => this._buildBatteryDetails(),
+            power:   () => this._buildPowerDetails(),
+            disk:    () => this._buildDiskDetails(),
+            network: () => this._buildNetworkDetails(),
+            thermal: () => this._buildThermalDetails(),
+            gpu:     () => this._buildGpuDetails(),
+        };
+
+        this._menuContainer.add_child(this._detailArea);
+    }
+
+    _ensureDetailSection(key) {
+        if (!this._detailSections || this._detailSections[key] || !this._detailBuilders?.[key]) return;
+        const section = this._detailBuilders[key]();
+        this._detailSections[key] = section;
+        this._detailArea.add_child(section);
+        // Show what is already known instead of placeholders until the next sample.
+        if (this._lastData) this._updateDashboardUI(this._lastData);
+    }
+
+    /** Whether the keyboard focus is on something inside the panel. */
+    _focusInPanel() {
+        const focus = global.stage.get_key_focus();
+        return !!focus && this._menuContainer.contains(focus);
+    }
+
+    _updateTabVisibility() {
+        const hadFocus = this._focusInPanel();
+        // A page opens at its top, not at the offset the last one was left at.
+        if (this._shownTab !== this._activeTab) {
+            this._shownTab = this._activeTab;
+            this._scrollView?.get_vadjustment().set_value(0);
+        }
+        if (this._activeTab !== 'overview') this._ensureDetailSection(this._activeTab);
+        // Detail data (sensor list, mounts, processes) is only sampled for
+        // the visible tab: fetch it now instead of after up to one interval.
+        // _poll() itself coalesces bursts (keyboard navigation, re-renders).
+        if (this._menuOpen) this._poll();
+        if (this._activeTab === 'overview') {
+            if (!this._overviewPage.visible) {
+                this._overviewPage.opacity = 0;
+                this._overviewPage.visible = true;
+                this._overviewPage.ease({
+                    opacity: 255,
+                    duration: 400,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+            }
+            this._detailArea.visible = false;
+        } else {
+            this._overviewPage.visible = false;
+            if (!this._detailArea.visible) {
+                this._detailArea.opacity = 0;
+                this._detailArea.visible = true;
+                this._detailArea.ease({
+                    opacity: 255,
+                    duration: 400,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                });
+            }
+            
+            // Set header title & icon dynamically
+            this._setMetricIcon(this._detailHeaderIcon, this._activeTab);
+            this._detailHeaderIcon.style_class = `rp-c-${this._activeTab}`;
+            this._detailHeaderTitle.text = { cpu: 'CPU', gpu: 'GPU' }[this._activeTab] ||
+                this._activeTab.charAt(0).toUpperCase() + this._activeTab.slice(1);
+
+            for (const [key, section] of Object.entries(this._detailSections || {})) {
+                if (section) section.visible = (key === this._activeTab);
+            }
+        }
+        // Hiding the page that held the keyboard focus drops the focus;
+        // hand it to the page now shown so a keyboard user keeps their place.
+        if (hadFocus && !this._focusInPanel())
+            this._menuContainer.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
+    }
+
+    /** Let a label wrap onto further lines instead of ending in an ellipsis. */
+    _wrapLabel(label) {
+        label.clutter_text.line_wrap = true;
+        label.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    }
+
+    /** Show a detail row with `text`, or leave it out when there is no reading (null). */
+    _setDetailRow(row, text) {
+        row.row.visible = text !== null;
+        if (text !== null) row.val.text = text;
+    }
+
+    _detailRow(labelText, valueText = '--') {
+        const row = new St.BoxLayout({ style: 'padding: 4px 0; spacing: 8px;', x_expand: true });
+        const lbl = new St.Label({ text: labelText, style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', x_expand: true });
+        const val = new St.Label({ text: valueText, style_class: 'rp-fg', style: 'font-size: 0.85em; font-weight: 600;' });
+        row.add_child(lbl);
+        row.add_child(val);
+        return { row, lbl, val };
+    }
+
+    _buildCpuDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+
+        // CPU Usage Card
+        const usageCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const usageHead = new St.BoxLayout({ style: 'margin-bottom: 4px;' });
+        usageHead.add_child(new St.Label({ text: 'CPU Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+        this._cpuDetailsVal = new St.Label({ text: '--%', style_class: 'rp-c-cpu', style: 'font-size: 1.0em; font-weight: bold;' });
+        usageHead.add_child(this._cpuDetailsVal);
+        usageCard.add_child(usageHead);
+
+        // CPU Detail Grid Graph
+        this._cpuSparkline = this._newSparkline('cpu', 110, {
+            showGrid: true,
+            color: [0.208, 0.518, 0.894, 1.0],
+            fillOpacity: 0.1,
+            lineWidth: 1.5,
+            paddingLeft: 32,
+            paddingBottom: 15,
+            paddingTop: 8,
+            paddingRight: 8
+        });
+        this._cpuSparkline.x_expand = true;
+        usageCard.add_child(this._cpuSparkline);
+        box.add_child(usageCard);
+
+        // Per-Core Usage Card
+        const coreCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        coreCard.add_child(new St.Label({ text: 'Per-Core Usage · GHz', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 8px;' }));
+
+        // Two-column layout for cores
+        const colsBox = new St.BoxLayout({ style: 'spacing: 16px;' });
+        this._cpuCoreCol1 = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing: 4px;' });
+        this._cpuCoreCol2 = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing: 4px;' });
+        colsBox.add_child(this._cpuCoreCol1);
+        colsBox.add_child(this._cpuCoreCol2);
+        coreCard.add_child(colsBox);
+        box.add_child(coreCard);
+
+        // Details Stats row (3 columns)
+        const statsRow = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true });
+
+        const loadBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
+        loadBox.add_child(new St.Icon({ icon_name: 'system-run-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
+        loadBox.add_child(new St.Label({ text: 'Load Average', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._cpuDetailsLoad = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
+        loadBox.add_child(this._cpuDetailsLoad);
+
+        const freqBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
+        freqBox.add_child(new St.Icon({ icon_name: 'power-profile-performance-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
+        freqBox.add_child(new St.Label({ text: 'Frequency', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._cpuDetailsFreq = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
+        freqBox.add_child(this._cpuDetailsFreq);
+
+        const uptimeBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
+        uptimeBox.add_child(new St.Icon({ icon_name: 'preferences-system-time-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
+        uptimeBox.add_child(new St.Label({ text: 'Uptime', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._cpuDetailsUptime = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
+        uptimeBox.add_child(this._cpuDetailsUptime);
+
+        statsRow.add_child(loadBox);
+        statsRow.add_child(freqBox);
+        statsRow.add_child(uptimeBox);
+        box.add_child(statsRow);
+
+        const waitCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._cpuWait = this._detailRow('Waiting for CPU');
+        waitCard.add_child(this._cpuWait.row);
+        box.add_child(waitCard);
+
+        // Top CPU Usage Card
+        const procCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const procHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
+        procHead.add_child(new St.Label({ text: 'Top CPU Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+
+        const showAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
+        showAllBtn.child.style_class = 'rp-fg-dim';
+        showAllBtn.child.style = 'font-size: 0.75em;';
+        showAllBtn.connect('clicked', () => {
+            this._launchSystemMonitor('processes');
+            this._indicator.menu.close();
+        });
+        this._addClickAnimations(showAllBtn);
+        procHead.add_child(showAllBtn);
+        procCard.add_child(procHead);
+
+        this._procList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
+        procCard.add_child(this._procList);
+        this._procEnd = this._buildEndBar();
+        procCard.add_child(this._procEnd.box);
+        box.add_child(procCard);
+
+        return box;
+    }
+
+    _updateCpuCoresUI(cores, coreFreqs = []) {
+        if (!this._cpuCoreCol1 || !this._cpuCoreCol2) return;
+        
+        if (!this._coreWidgets || this._coreWidgets.length !== cores.length) {
+            this._cpuCoreCol1.destroy_all_children();
+            this._cpuCoreCol2.destroy_all_children();
+            this._coreWidgets = [];
+            
+            cores.forEach((load, i) => {
+                const row = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
+                const lbl = new St.Label({ text: `Core ${i}`, style_class: 'rp-fg-dim', style: 'font-size: 0.78em;', width: 44 });
+                const pbar = new ProgressBar(5, 0.18, 0.76, 0.494);
+                pbar.x_expand = true;
+                // Unit lives in the card title; with it every row was wider than the
+                // menu and the usage bar collapsed to nothing.
+                const freqLbl = new St.Label({ text: '', style_class: 'rp-fg-muted', style: 'font-size: 0.72em; text-align: right;', width: 26 });
+                freqLbl.x_align = Clutter.ActorAlign.END;
+                const val = new St.Label({ text: `${Math.round(load)}%`, style_class: 'rp-fg', style: 'font-size: 0.78em; font-weight: 600; text-align: right;', width: 30 });
+                val.x_align = Clutter.ActorAlign.END;
+
+                row.add_child(lbl);
+                row.add_child(pbar);
+                row.add_child(freqLbl);
+                row.add_child(val);
+
+                if (i % 2 === 0) {
+                    this._cpuCoreCol1.add_child(row);
+                } else {
+                    this._cpuCoreCol2.add_child(row);
+                }
+                this._coreWidgets.push({ pbar, freqLbl, val });
+            });
+        }
+        
+        cores.forEach((load, i) => {
+            if (this._coreWidgets[i]) {
+                const w = this._coreWidgets[i];
+                w.pbar.setPercent(load);
+                if (load > 75) {
+                    w.pbar.setColor(0.88, 0.11, 0.14); // Red
+                } else if (load > 40) {
+                    w.pbar.setColor(0.96, 0.83, 0.18); // Amber
+                } else {
+                    w.pbar.setColor(0.18, 0.76, 0.494); // Green
+                }
+                if (coreFreqs[i]) w.freqLbl.text = coreFreqs[i].replace(' GHz', '');
+                w.val.text = `${Math.round(load)}%`;
+            }
+        });
+    }
+
+    _buildMemoryDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Memory Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._memSparkline = this._newSparkline('mem', 100, { showGrid: true, color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._memSparkline.x_expand = true;
+        sparkCard.add_child(this._memSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._memUsed = this._detailRow('Used / Total');
+        statsCard.add_child(this._memUsed.row);
+        this._memAvail = this._detailRow('Available');
+        statsCard.add_child(this._memAvail.row);
+        this._memBuffersCache = this._detailRow('Buffers / Cache');
+        statsCard.add_child(this._memBuffersCache.row);
+        this._memSwap = this._detailRow('Swap');
+        statsCard.add_child(this._memSwap.row);
+        this._memSwapActivity = this._detailRow('Swap Activity');
+        statsCard.add_child(this._memSwapActivity.row);
+        this._memWait = this._detailRow('Waiting for memory');
+        statsCard.add_child(this._memWait.row);
+        box.add_child(statsCard);
+
+        const memProcCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const memProcHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
+        memProcHead.add_child(new St.Label({ text: 'Top Memory Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+        const memShowAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
+        memShowAllBtn.child.style_class = 'rp-fg-dim';
+        memShowAllBtn.child.style = 'font-size: 0.75em;';
+        memShowAllBtn.connect('clicked', () => {
+            this._launchSystemMonitor('processes');
+            this._indicator.menu.close();
+        });
+        this._addClickAnimations(memShowAllBtn);
+        memProcHead.add_child(memShowAllBtn);
+        memProcCard.add_child(memProcHead);
+        this._memProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
+        memProcCard.add_child(this._memProcList);
+        this._memProcEnd = this._buildEndBar();
+        memProcCard.add_child(this._memProcEnd.box);
+        box.add_child(memProcCard);
+
+        return box;
+    }
+
+    _buildBatteryDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        
+        // Percent History
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Charge Level History (%)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._batSparkline = this._newSparkline('bat', 90, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._batSparkline.x_expand = true;
+        sparkCard.add_child(this._batSparkline);
+        box.add_child(sparkCard);
+
+        // Power Rate History (W)
+        const rateCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        rateCard.add_child(new St.Label({ text: 'Charge/Discharge Rate (W)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._batRateSparkline = this._newSparkline('batRate', 90, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._batRateSparkline.x_expand = true;
+        rateCard.add_child(this._batRateSparkline);
+        box.add_child(rateCard);
+
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._batState  = this._detailRow('State');
+        statsCard.add_child(this._batState.row);
+        this._batTimeEst = this._detailRow('Time Estimate');
+        statsCard.add_child(this._batTimeEst.row);
+        this._batHealth = this._detailRow('Health');
+        statsCard.add_child(this._batHealth.row);
+        this._batCycles = this._detailRow('Cycle Count');
+        statsCard.add_child(this._batCycles.row);
+        this._batCapacity = this._detailRow('Current / Full');
+        statsCard.add_child(this._batCapacity.row);
+        this._batDesign = this._detailRow('Design Capacity');
+        statsCard.add_child(this._batDesign.row);
+        box.add_child(statsCard);
+
+        // Battery use per app lives in the details window; one line here.
+        this._batTopApp = new St.Button({ style_class: 'rp-surface rp-top-app', reactive: true, can_focus: true, x_expand: true });
+        const topBox = new St.BoxLayout({ style: 'spacing: 10px;', x_expand: true });
+        topBox.add_child(new St.Icon({ icon_name: 'battery-level-70-symbolic', style_class: 'rp-c-battery', style: 'icon-size: 16px;', y_align: Clutter.ActorAlign.CENTER }));
+        this._batTopAppLabel = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+        this._wrapLabel(this._batTopAppLabel);
+        topBox.add_child(this._batTopAppLabel);
+        topBox.add_child(new St.Icon({ icon_name: 'go-next-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px;', y_align: Clutter.ActorAlign.CENTER }));
+        this._batTopApp.set_child(topBox);
+        this._batTopApp.connect('clicked', () => this._openDetailsWindow('tracking'));
+        this._batTopAppStamp = null;
+        box.add_child(this._batTopApp);
+        this._refreshTopApp();
+        return box;
+    }
+
+    /** Open the preferences window, on a given page ('settings', 'tracking', 'diagnostics'). */
+    _openDetailsWindow(page = 'settings') {
+        this._settings.set_string('prefs-page', page);
+        this._indicator.menu.close();
+        try {
+            this.openPreferences();
+        } catch (e) {
+            console.error(`ResourcePulse: cannot open the preferences window: ${e.message}`);
+        }
+    }
+
+    /**
+     * The Battery page's line about the app that used the battery most today.
+     * Recomputed only when the tracker has taken a new sample.
+     */
+    _refreshTopApp() {
+        if (!this._batTopAppLabel) return;
+        const stamp = this._tracker ? (this._tracker.lastSample ?? 'starting') : 'off';
+        if (stamp === this._batTopAppStamp) return;
+        this._batTopAppStamp = stamp;
+        if (!this._tracker) {
+            this._batTopAppLabel.text = 'Battery use per app: tracking is off. Open the Tracking page to start it.';
+            return;
+        }
+        const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+        const sum = this._tracker.ledger?.summarize({ from: today, batteryOnly: true });
+        const top = sum?.apps.find(a => !a.id.startsWith('@') && a.cpu > 0);
+        if (!top) {
+            this._batTopAppLabel.text = 'Battery use per app: no time on battery recorded today yet.';
+            return;
+        }
+        const name = ledgerAppInfo(top.id).name;
+        const share = sum.hasEnergy
+            ? (sum.attributedWh > 0 ? top.wh / sum.attributedWh : 0)
+            : (sum.cpu > 0 ? top.cpu / sum.cpu : 0);
+        this._batTopAppLabel.text = `Top app on battery today: ${name} (${Math.round(share * 100)} % of the processor's ${sum.hasEnergy ? 'energy' : 'time'})`;
+    }
+
+    _buildPowerDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Draw History', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._pwrSparkline = this._newSparkline('pwr', 100, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._pwrSparkline.x_expand = true;
+        sparkCard.add_child(this._pwrSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._pwrSystem  = this._detailRow('System Draw');
+        statsCard.add_child(this._pwrSystem.row);
+        this._pwrPackage = this._detailRow('CPU Package');
+        statsCard.add_child(this._pwrPackage.row);
+        this._pwrGpu     = this._detailRow('GPU Draw');
+        statsCard.add_child(this._pwrGpu.row);
+        this._pwrCharging = this._detailRow('Charging Rate');
+        statsCard.add_child(this._pwrCharging.row);
+        this._pwrPeak    = this._detailRow('Session Peak');
+        statsCard.add_child(this._pwrPeak.row);
+        this._pwrAvg     = this._detailRow('Session Avg');
+        statsCard.add_child(this._pwrAvg.row);
+        box.add_child(statsCard);
+        return box;
+    }
+
+    _buildDiskDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        
+        // Read Rate Sparkline
+        const readCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        readCard.add_child(new St.Label({ text: 'Read Rate (MB/s)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._dskReadSparkline = this._newSparkline('dskRead', 80, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskReadSparkline.x_expand = true;
+        readCard.add_child(this._dskReadSparkline);
+        box.add_child(readCard);
+
+        // Write Rate Sparkline
+        const writeCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        writeCard.add_child(new St.Label({ text: 'Write Rate (MB/s)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._dskWriteSparkline = this._newSparkline('dskWrite', 80, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._dskWriteSparkline.x_expand = true;
+        writeCard.add_child(this._dskWriteSparkline);
+        box.add_child(writeCard);
+
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._dskRead  = this._detailRow('Read rate');
+        statsCard.add_child(this._dskRead.row);
+        this._dskWrite = this._detailRow('Write rate');
+        statsCard.add_child(this._dskWrite.row);
+        this._dskUsage = this._detailRow('Busy (active time)');
+        statsCard.add_child(this._dskUsage.row);
+        this._dskWait = this._detailRow('Waiting for disk');
+        statsCard.add_child(this._dskWait.row);
+        box.add_child(statsCard);
+
+        // Top Disk Usage: read + write per process, sampled only on this page.
+        const ioCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        ioCard.add_child(new St.Label({ text: 'Top Disk Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 8px;' }));
+        this._dskProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
+        ioCard.add_child(this._dskProcList);
+        this._dskProcIdle = new St.Label({ text: 'None of your processes is reading or writing right now.', style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', visible: false });
+        this._dskProcIdle.clutter_text.line_wrap = true;
+        ioCard.add_child(this._dskProcIdle);
+        this._dskProcNote = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.75em; margin-top: 6px;', visible: false });
+        this._dskProcNote.clutter_text.line_wrap = true;
+        ioCard.add_child(this._dskProcNote);
+        this._dskProcEnd = this._buildEndBar();
+        ioCard.add_child(this._dskProcEnd.box);
+        box.add_child(ioCard);
+
+        // Filesystem Mounts Card
+        const mountsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        mountsCard.add_child(new St.Label({ text: 'Filesystem Mounts', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._dskMountsBox = new St.BoxLayout({ vertical: true, style: 'spacing: 8px;' });
+        mountsCard.add_child(this._dskMountsBox);
+        box.add_child(mountsCard);
+
+        return box;
+    }
+
+    _buildNetworkDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        
+        // Download Sparkline
+        const rxCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        rxCard.add_child(new St.Label({ text: 'Download Rate', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._netRxSparkline = this._newSparkline('netRx', 80, { showGrid: true, color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netRxSparkline.x_expand = true;
+        rxCard.add_child(this._netRxSparkline);
+        box.add_child(rxCard);
+
+        // Upload Sparkline
+        const txCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        txCard.add_child(new St.Label({ text: 'Upload Rate', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._netTxSparkline = this._newSparkline('netTx', 80, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._netTxSparkline.x_expand = true;
+        txCard.add_child(this._netTxSparkline);
+        box.add_child(txCard);
+
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Stats & Session Totals', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._netRx = this._detailRow('Current Download');
+        statsCard.add_child(this._netRx.row);
+        this._netTx = this._detailRow('Current Upload');
+        statsCard.add_child(this._netTx.row);
+        this._netSessionRx = this._detailRow('Session Downloaded');
+        statsCard.add_child(this._netSessionRx.row);
+        this._netSessionTx = this._detailRow('Session Uploaded');
+        statsCard.add_child(this._netSessionTx.row);
+        // Kept across sessions (network-usage.json); physical interfaces only.
+        this._netToday = this._detailRow('Today');
+        statsCard.add_child(this._netToday.row);
+        this._netMonth = this._detailRow('This month');
+        statsCard.add_child(this._netMonth.row);
+        box.add_child(statsCard);
+
+        // Per-interface breakdown card
+        const ifaceCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        ifaceCard.add_child(new St.Label({ text: 'Interfaces', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._netIfaceList = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;' });
+        ifaceCard.add_child(this._netIfaceList);
+        box.add_child(ifaceCard);
+
+        return box;
+    }
+
+    _buildThermalDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        sparkCard.add_child(new St.Label({ text: 'Temperature History', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._thmSparkline = this._newSparkline('thm', 100, { showGrid: true, color: [1.0, 0.47, 0.0, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._thmSparkline.x_expand = true;
+        sparkCard.add_child(this._thmSparkline);
+        box.add_child(sparkCard);
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        statsCard.add_child(new St.Label({ text: 'Components', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._thmSensorsBox = new St.BoxLayout({ vertical: true });
+        statsCard.add_child(this._thmSensorsBox);
+        box.add_child(statsCard);
+
+        this._thmFansCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._thmFansCard.add_child(new St.Label({ text: 'Fans', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._thmFansBox = new St.BoxLayout({ vertical: true });
+        this._thmFansCard.add_child(this._thmFansBox);
+        box.add_child(this._thmFansCard);
+        
+        return box;
+    }
+
+    _buildGpuDetails() {
+        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+
+        this._gpuHwCard = new St.BoxLayout({
+            style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;',
+            vertical: true,
+            x_expand: true
+        });
+
+        const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
+
+        // Brand Chip Badge
+        this._gpuChipBox = new St.BoxLayout({
+            style: 'background-color: #107c41; border-radius: 6px; padding: 6px 10px;',
+            vertical: true
+        });
+        this._gpuChipLabel1 = new St.Label({ text: 'GEFORCE', style: 'font-size: 0.65em; color: #a0f0c8; font-weight: 300;' });
+        this._gpuChipLabel2 = new St.Label({ text: 'RTX', style: 'font-size: 0.9em; color: #ffffff; font-weight: bold;' });
+        this._gpuChipBox.add_child(this._gpuChipLabel1);
+        this._gpuChipBox.add_child(this._gpuChipLabel2);
+        hwTop.add_child(this._gpuChipBox);
+
+        const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
+        this._gpuModelName = new St.Label({ text: 'Graphics Processor', style_class: 'rp-fg', style: 'font-size: 1.05em; font-weight: bold;' });
+        // Model names are long ("Intel Alder Lake-UP3 GT2 [Iris Xe Graphics]"):
+        // wrap onto a second line instead of cutting the name off.
+        this._wrapLabel(this._gpuModelName);
+        this._gpuDriverDesc = new St.Label({ text: 'Driver: --', style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });
+        hwDesc.add_child(this._gpuModelName);
+        hwDesc.add_child(this._gpuDriverDesc);
+        hwTop.add_child(hwDesc);
+        this._gpuHwCard.add_child(hwTop);
+
+        // Hardware Sub Stats (Clock, Temp, Power)
+        // Shown per reading: a GPU that reports no temperature has no
+        // temperature field, instead of one that reads "--".
+        const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
+        this._gpuHwStatsRow = hwStatsRow;
+
+        const clockBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        clockBox.add_child(new St.Label({ text: 'Clock', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._gpuHwClockVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
+        clockBox.add_child(this._gpuHwClockVal);
+
+        const tempBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        tempBox.add_child(new St.Label({ text: 'Temperature', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._gpuHwTempVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
+        tempBox.add_child(this._gpuHwTempVal);
+
+        const powerBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        powerBox.add_child(new St.Label({ text: 'Power', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        this._gpuHwPowerVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
+        powerBox.add_child(this._gpuHwPowerVal);
+
+        hwStatsRow.add_child(clockBox);
+        hwStatsRow.add_child(tempBox);
+        hwStatsRow.add_child(powerBox);
+        this._gpuHwFields = { clock: clockBox, temp: tempBox, power: powerBox };
+        this._gpuHwCard.add_child(hwStatsRow);
+        this._addCardInteractions(this._gpuHwCard);
+        box.add_child(this._gpuHwCard);
+
+        // 2. GPU Usage Sparkline Card
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._gpuSparkCard = sparkCard;
+        sparkCard.add_child(new St.Label({ text: 'GPU Utilization (%)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._gpuSparkline = this._newSparkline('gpu', 100, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
+        this._gpuSparkline.x_expand = true;
+        sparkCard.add_child(this._gpuSparkline);
+        box.add_child(sparkCard);
+
+        // 3. VRAM Card (if dedicated or shared VRAM reported)
+        this._gpuVramCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const vramHead = new St.BoxLayout({ style: 'margin-bottom: 6px;', y_align: Clutter.ActorAlign.CENTER });
+        vramHead.add_child(new St.Label({ text: 'Video Memory (VRAM)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+        this._gpuVramPctLbl = new St.Label({ text: '--%', style_class: 'rp-fg', style: 'font-size: 0.85em; font-weight: bold;' });
+        vramHead.add_child(this._gpuVramPctLbl);
+        this._gpuVramCard.add_child(vramHead);
+
+        this._gpuVramBar = new ProgressBar(6, 0.2, 0.82, 0.48);
+        this._gpuVramCard.add_child(this._gpuVramBar);
+
+        const vramStatsBox = new St.BoxLayout({ vertical: true, style: 'margin-top: 8px;' });
+        this._gpuVramUsed = this._detailRow('Used / Total');
+        vramStatsBox.add_child(this._gpuVramUsed.row);
+        this._gpuVramFree = this._detailRow('Free VRAM');
+        vramStatsBox.add_child(this._gpuVramFree.row);
+        this._gpuVramCard.add_child(vramStatsBox);
+        box.add_child(this._gpuVramCard);
+
+        // 4. Performance & Thermal Stats Card
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._gpuStatsCard = statsCard;
+        statsCard.add_child(new St.Label({ text: 'Performance & Sensors', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._gpuUsage = this._detailRow('Core Utilization');
+        statsCard.add_child(this._gpuUsage.row);
+        this._gpuCoreClock = this._detailRow('Core Clock');
+        statsCard.add_child(this._gpuCoreClock.row);
+        this._gpuTemp  = this._detailRow('Temperature');
+        statsCard.add_child(this._gpuTemp.row);
+        this._gpuFan = this._detailRow('Fan Speed');
+        statsCard.add_child(this._gpuFan.row);
+        this._gpuPower = this._detailRow('Power Draw');
+        statsCard.add_child(this._gpuPower.row);
+        box.add_child(statsCard);
+
+        // 5. Inactive / None Fallback Notice
+        this._gpuInactiveCard = new St.BoxLayout({
+            style_class: 'rp-base', style: 'border-radius: 12px; padding: 16px;',
+            vertical: true,
+            visible: false
+        });
+        const inactTitle = new St.Label({
+            text: 'No Active GPU Detected',
+            style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold; margin-bottom: 6px;'
+        });
+        const inactMsg = new St.Label({
+            text: 'GPU telemetry requires NVIDIA proprietary drivers (nvidia-smi), AMD GPU sysfs (amdgpu), or Intel DRM driver (i915/xe).',
+            style_class: 'rp-fg-dim', style: 'font-size: 0.8em;'
+        });
+        this._wrapLabel(inactMsg);
+        this._gpuInactiveCard.add_child(inactTitle);
+        this._gpuInactiveCard.add_child(inactMsg);
+        box.add_child(this._gpuInactiveCard);
+
+        return box;
+    }
+
+    // ── Dashboard Update ──────────────────────────────────────────────────────
+
+    _updateDashboardUI(data, frame = false) {
+        if (!this._settings || !this._indicator) return;
+        // Pressure: the share of the last 10 s in which programs were stalled.
+        for (const [row, key] of [[this._cpuWait, 'cpu'], [this._memWait, 'memory'], [this._dskWait, 'io']]) {
+            if (!row) continue;
+            const some = data.psi?.[key]?.some;
+            row.val.text = Number.isFinite(some) ? `${some.toFixed(1)} % of the time` : 'n/a (no pressure figures from this kernel)';
+        }
+        const tempUnit = this._settings.get_string('unit-temp') || 'C';
+        const memUnit  = this._settings.get_string('unit-mem')  || 'GB';
+        const useGiB   = memUnit === 'GiB';
+
+        // ── CPU ──
+        if (data.cpu) {
+            const cpu = data.cpu;
+            if (this._summaryCards?.cpu) {
+                this._summaryCards.cpu.valueLabel.text = `${Math.round(cpu.total)}%`;
+                this._summaryCards.cpu.pbar.setPercent(cpu.total);
+            }
+            if (this._cpuDetailsVal) this._cpuDetailsVal.text = `${Math.round(cpu.total)}%`;
+
+            // Hardware details on Overview
+            if (this._hwName) this._hwName.text = cpu.hardwareModel || 'Unknown CPU';
+            if (this._hwStats) {
+                const parts = [];
+                if (cpu.cpuGen) parts.push(cpu.cpuGen);
+                if (cpu.coresCount) parts.push(`${cpu.coresCount} cores`);
+                parts.push(`${cpu.threadsCount || cpu.cores.length} threads`);
+                this._hwStats.text = parts.join(' · ');
+            }
+            
+            // Vendor badge: identity never changes, so style it once.
+            if (this._chipBox && this._chipFor !== cpu.hardwareModel) {
+                this._chipFor = cpu.hardwareModel;
+                const badge = cpu.vendor === 'amd'
+                    ? { bg: '#d22630', top: 'AMD', mid: /ryzen/i.test(cpu.hardwareModel) ? 'RYZEN' : 'CPU', c1: '#f9b8bb', c3: '#ffaaaa' }
+                    : cpu.vendor === 'intel'
+                        ? { bg: '#0e5fa6', top: 'intel', mid: /^i\d|ultra/i.test(cpu.hardwareModel) ? 'CORE' : 'CPU', c1: '#a0c8f0', c3: '#5bc3ff' }
+                        : { bg: '#4a4a55', top: '', mid: 'CPU', c1: '#c0c0c8', c3: '#e0e0e8' };
+                this._chipBox.style = `background-color: ${badge.bg}; border-radius: 6px; padding: 6px 10px;`;
+                this._chipLabel1.text = badge.top;
+                this._chipLabel1.visible = badge.top !== '';
+                this._chipLabel1.style = `font-size: 0.65em; color: ${badge.c1}; font-weight: 300;`;
+                this._chipLabel2.text = badge.mid;
+                this._chipLabel3.text = cpu.tier || '';
+                this._chipLabel3.visible = !!cpu.tier;
+                this._chipLabel3.style = `font-size: 1.1em; color: ${badge.c3}; font-weight: bold;`;
+            }
+
+            if (this._hwUptimeVal) this._hwUptimeVal.text = formatUptime(cpu.uptime);
+            if (this._hwLoadVal) this._hwLoadVal.text = cpu.loadavg.join(' · ');
+            if (this._hwOsVal) this._hwOsVal.text = cpu.osName || `GNOME ${Config.PACKAGE_VERSION.split('.')[0]}`;
+
+            // Details Stats row
+            if (this._cpuDetailsLoad) this._cpuDetailsLoad.text = cpu.loadavg.join(' · ');
+            if (this._cpuDetailsFreq && cpu.frequency) this._cpuDetailsFreq.text = cpu.frequency;
+            if (this._cpuDetailsUptime) this._cpuDetailsUptime.text = formatUptime(cpu.uptime);
+
+            if (cpu.cores) this._updateCpuCoresUI(cpu.cores, cpu.coreFreqs);
+        }
+
+        // ── Memory ──
+        if (data.mem) {
+            const mem = data.mem;
+            if (this._summaryCards?.memory) {
+                this._summaryCards.memory.valueLabel.text = `${Math.round(mem.percent)}%`;
+                this._summaryCards.memory.pbar.setPercent(mem.percent);
+            }
+            if (this._memUsed) this._memUsed.val.text =
+                `${formatBytes(mem.used, useGiB)} / ${formatBytes(mem.total, useGiB)}`;
+            if (this._memAvail) this._memAvail.val.text =
+                `${formatBytes(mem.available, useGiB)}`;
+            if (this._memBuffersCache) this._memBuffersCache.val.text =
+                `${formatBytes(mem.buffers, useGiB)} / ${formatBytes(mem.cached, useGiB)}`;
+            if (this._memSwap) this._memSwap.val.text =
+                `${Math.round(mem.swapPercent)}% (${formatBytes(mem.swapUsed, useGiB)} / ${formatBytes(mem.swapTotal, useGiB)})`;
+            if (this._memSwapActivity) {
+                const inStr = mem.swapInRate > 0 ? `${formatBytes(mem.swapInRate, false)}/s` : '0 B/s';
+                const outStr = mem.swapOutRate > 0 ? `${formatBytes(mem.swapOutRate, false)}/s` : '0 B/s';
+                this._memSwapActivity.val.text = (mem.swapInRate > 0 || mem.swapOutRate > 0) ? `In: ${inStr} · Out: ${outStr}` : 'Idle';
+            }
+        }
+
+        // ── Battery ──
+        if (data.bat) {
+            const bat = data.bat;
+            const sc = this._summaryCards?.battery;
+            if (sc) {
+                sc.box.visible = bat.present;
+                if (bat.present) {
+                    sc.valueLabel.text = `${Math.round(bat.percent)}%`;
+                    sc.pbar.setPercent(bat.percent);
+                    
+                    let stateStr = batteryStateLabel(bat.state);
+                    if (bat.timeRemaining > 0)
+                        stateStr += ` · ${formatDuration(bat.timeRemaining)} ${bat.state === 'charging' ? 'to full' : 'left'}`;
+                    sc.statusLbl.text = stateStr;
+                }
+            }
+            if (bat.present) {
+                if (this._batState) {
+                    this._batState.val.text = batteryStateLabel(bat.state);
+                }
+                if (this._batTimeEst) {
+                    let estText = '--';
+                    if (bat.state === 'charging' && (bat.timeToFull > 0 || bat.timeRemaining > 0)) {
+                        const t = bat.timeToFull || bat.timeRemaining;
+                        const h = Math.floor(t / 3600);
+                        const m = Math.floor((t % 3600) / 60);
+                        estText = `${h}h ${m}m to full`;
+                    } else if (bat.state === 'discharging' && (bat.timeToEmpty > 0 || bat.timeRemaining > 0)) {
+                        const t = bat.timeToEmpty || bat.timeRemaining;
+                        const h = Math.floor(t / 3600);
+                        const m = Math.floor((t % 3600) / 60);
+                        estText = `${h}h ${m}m remaining`;
+                    } else if (bat.state === 'full') {
+                        estText = 'Fully Charged';
+                    }
+                    this._batTimeEst.val.text = estText;
+                }
+                if (this._batHealth) this._batHealth.val.text = `${bat.health.toFixed(1)}%`;
+                if (this._activeTab === 'battery') this._refreshTopApp();
+                if (this._batCycles) this._batCycles.val.text = `${bat.cycleCount}`;
+                if (this._batCapacity) this._batCapacity.val.text = `${bat.energy.toFixed(1)} Wh / ${bat.energyFull.toFixed(1)} Wh`;
+                if (this._batDesign) this._batDesign.val.text = `${bat.energyFullDesign.toFixed(1)} Wh`;
+            }
+        }
+
+        // ── Power ──
+        if (data.pwr) {
+            const pwr = data.pwr;
+            const hasDraw = pwr.raplSupported || pwr.systemPower !== null;
+            const sc = this._summaryCards?.power;
+            
+            const readout = powerReadout(pwr);
+            const draw = readout.value ?? 0;
+            const drawStr = readout.value === null ? 'n/a' : `${draw.toFixed(1)} W`;
+
+            const bat = data.bat;
+            const isCharging = bat && bat.present && bat.state === 'charging' && bat.energyRate > 0;
+
+            if (sc) {
+                sc.box.visible = true;
+                sc.valueLabel.text = drawStr;
+                sc.pbar.setPercent(this._pwrScale.percent(draw, GLib.get_monotonic_time()));
+                sc.subLabel.visible = true;
+                if (isCharging) {
+                    sc.subLabel.text = `Charging (+${bat.energyRate.toFixed(1)} W)`;
+                } else {
+                    sc.subLabel.text = readout.value === null ? 'Energy counters not readable' : readout.source;
+                }
+            }
+            if (hasDraw) {
+                if (this._pwrSystem)  this._pwrSystem.val.text  = pwr.systemPower  !== null ? `${pwr.systemPower.toFixed(1)} W`  : '--';
+                if (this._pwrPackage) this._pwrPackage.val.text = pwr.packagePower !== null ? `${pwr.packagePower.toFixed(1)} W` : '--';
+                
+                const gpuPwr = data.gpu && data.gpu.present && data.gpu.powerDraw ? data.gpu.powerDraw : null;
+                if (this._pwrGpu) this._pwrGpu.val.text = gpuPwr !== null ? `${gpuPwr.toFixed(1)} W` : '--';
+                if (this._pwrCharging) {
+                    if (isCharging) {
+                        this._pwrCharging.val.text = `+${bat.energyRate.toFixed(1)} W`;
+                    } else if (bat && bat.present && bat.state === 'full') {
+                        this._pwrCharging.val.text = '0.0 W (Full)';
+                    } else {
+                        this._pwrCharging.val.text = '--';
+                    }
+                }
+                if (this._pwrPeak) this._pwrPeak.val.text = `${this._pwrStats.peak.toFixed(1)} W`;
+                if (this._pwrAvg) this._pwrAvg.val.text = `${this._pwrStats.mean.toFixed(1)} W`;
+            }
+        }
+
+        // ── Disk ──
+        if (data.dsk) {
+            const dsk = data.dsk;
+            const diskPct = dsk.diskPercent || 0;
+            const readMB  = dsk.readRate  / 1000000;
+            const writeMB = dsk.writeRate / 1000000;
+            const totalMB = readMB + writeMB;
+
+            const sc = this._summaryCards?.disk;
+            if (sc) {
+                // Same figure as the top bar: space used on the root filesystem.
+                const root = dsk.mounts && dsk.mounts[0];
+                sc.valueLabel.text = root ? `${Math.round(root.percent)}%` : 'n/a';
+                sc.pbar.setPercent(root ? root.percent : 0);
+                sc.subLabel.visible = true;
+                sc.subLabel.text = `used on / · ${Math.round(diskPct)}% busy`;
+            }
+            if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
+            if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
+            if (this._dskUsage) this._dskUsage.val.text = `${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`;
+
+            // Only a detailed sample has the full mount list.
+            if (this._menuOpen && this._activeTab === 'disk' && this._dskMountsBox && dsk.mounts && dsk.detailed) {
+                if (!this._dskMountRows) this._dskMountRows = [];
+                if (this._dskMountRows.length !== dsk.mounts.length) {
+                    this._dskMountsBox.destroy_all_children();
+                    this._dskMountRows = [];
+                    dsk.mounts.forEach(m => {
+                        const row = new St.BoxLayout({ vertical: true, style: 'spacing: 2px;' });
+                        const headRow = new St.BoxLayout();
+                        const mountLbl = new St.Label({ text: m.mount, style_class: 'rp-fg', style: 'font-size: 0.8em; font-weight: 500;', x_expand: true });
+                        const statLbl = new St.Label({ text: '', style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });
+                        headRow.add_child(mountLbl);
+                        headRow.add_child(statLbl);
+                        row.add_child(headRow);
+
+                        const pbar = new ProgressBar(4, 0.96, 0.83, 0.18);
+                        row.add_child(pbar);
+
+                        this._dskMountsBox.add_child(row);
+                        this._dskMountRows.push({ mountLbl, statLbl, pbar });
+                    });
+                }
+                dsk.mounts.forEach((m, idx) => {
+                    const r = this._dskMountRows[idx];
+                    if (r) {
+                        r.mountLbl.text = m.mount;
+                        r.statLbl.text = `${formatBytes(m.used, useGiB)} / ${formatBytes(m.size, useGiB)} (${Math.round(m.percent)}%)`;
+                        r.pbar.setPercent(m.percent);
+                    }
+                });
+            }
+        }
+
+        // ── Network ──
+        if (data.net) {
+            const net = data.net;
+            const sc = this._summaryCards?.network;
+            if (sc) {
+                sc.valueLabel.text = formatSpeed(net.total.rxRate + net.total.txRate);
+                sc.pbar.setPercent(this._netScale.percent(net.total.rxRate + net.total.txRate, GLib.get_monotonic_time()));
+                sc.subLabel.visible = true;
+                sc.subLabel.text = `↓ ${formatSpeed(net.total.rxRate)}   ↑ ${formatSpeed(net.total.txRate)}`;
+            }
+            if (this._netRx) this._netRx.val.text = formatSpeed(net.total.rxRate);
+            if (this._netTx) this._netTx.val.text = formatSpeed(net.total.txRate);
+            if (this._netSessionRx) this._netSessionRx.val.text = formatBytes(net.sessionRx || 0, useGiB);
+            if (this._netSessionTx) this._netSessionTx.val.text = formatBytes(net.sessionTx || 0, useGiB);
+            if (this._netToday) {
+                const now = GLib.DateTime.new_now_local();
+                const usage = this._netUsage;
+                const show = prefix => {
+                    const t = usage?.total(prefix);
+                    return t ? `↓ ${formatBytes(t.rx, useGiB)}  ↑ ${formatBytes(t.tx, useGiB)}` : '--';
+                };
+                this._netToday.val.text = show(now.format('%Y-%m-%d'));
+                this._netMonth.val.text = show(now.format('%Y-%m'));
+            }
+
+            if (this._menuOpen && this._activeTab === 'network' && this._netIfaceList && net.interfaces) {
+                const activeIfaces = visibleInterfaces(net.interfaces);
+                if (!this._netIfaceRows) this._netIfaceRows = [];
+                if (this._netIfaceRows.length !== activeIfaces.length) {
+                    this._netIfaceList.destroy_all_children();
+                    this._netIfaceRows = [];
+                    activeIfaces.forEach(() => {
+                        const row = new St.BoxLayout({ style: 'padding: 2px 0;' });
+                        const nameLbl = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.8em; font-weight: 500;', width: 80 });
+                        const statLbl = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.8em;', x_expand: true });
+                        row.add_child(nameLbl);
+                        row.add_child(statLbl);
+                        this._netIfaceList.add_child(row);
+                        this._netIfaceRows.push({ nameLbl, statLbl });
+                    });
+                }
+                activeIfaces.forEach(([name, iface], idx) => {
+                    const r = this._netIfaceRows[idx];
+                    if (r) {
+                        r.nameLbl.text = name;
+                        r.statLbl.text = `↓ ${formatSpeed(iface.rxRate)}   ↑ ${formatSpeed(iface.txRate)}`;
+                    }
+                });
+            }
+        }
+
+        // ── Thermal ──
+        if (data.thm) {
+            const thm = data.thm;
+            const sc = this._summaryCards?.thermal;
+            if (sc) {
+                const missing = thermalUnavailable(thm);
+                sc.valueLabel.text = missing ? 'n/a' : formatTemp(thm.packageTemp, tempUnit);
+                sc.pbar.setPercent(missing ? 0 : Math.min(100, thm.packageTemp)); // 100 °C full scale
+                sc.subLabel.visible = missing;
+                if (missing) sc.subLabel.text = 'No sensor found';
+            }
+            // A top-bar sample carries only the package sensor; rendering it
+            // here would collapse the list to one row until the next detailed one.
+            if (this._menuOpen && this._activeTab === 'thermal' && thm.detailed !== false) {
+                if (this._thmSensorsBox && thm.sensors) {
+                    if (!this._thmSensorRows) this._thmSensorRows = [];
+                    if (this._thmSensorRows.length !== thm.sensors.length) {
+                        this._thmSensorsBox.destroy_all_children();
+                        this._thmSensorRows = [];
+                        if (thm.sensors.length > 0) {
+                            thm.sensors.forEach(sensor => {
+                                const row = this._detailRow(sensor.label, '');
+                                this._thmSensorsBox.add_child(row.row);
+                                this._thmSensorRows.push(row);
+                            });
+                        } else {
+                            const row = this._detailRow('No sensors found', '--');
+                            this._thmSensorsBox.add_child(row.row);
+                        }
+                    }
+                    thm.sensors.forEach((sensor, idx) => {
+                        const r = this._thmSensorRows[idx];
+                        if (r) {
+                            r.lbl.text = sensor.label;
+                            r.val.text = formatTemp(sensor.temp, tempUnit);
+                        }
+                    });
+                }
+                if (this._thmFansCard && this._thmFansBox && thm.fans) {
+                    if (!this._thmFanRows) this._thmFanRows = [];
+                    if (thm.fans.length > 0) {
+                        this._thmFansCard.visible = true;
+                        if (this._thmFanRows.length !== thm.fans.length) {
+                            this._thmFansBox.destroy_all_children();
+                            this._thmFanRows = [];
+                            thm.fans.forEach(fan => {
+                                const row = this._detailRow(fan.label, '');
+                                this._thmFansBox.add_child(row.row);
+                                this._thmFanRows.push(row);
+                            });
+                        }
+                        thm.fans.forEach((fan, idx) => {
+                            const r = this._thmFanRows[idx];
+                            if (r) {
+                                r.lbl.text = fan.label;
+                                r.val.text = `${fan.rpm} RPM`;
+                            }
+                        });
+                    } else {
+                        this._thmFansCard.visible = false;
+                    }
+                }
+            }
+        }
+
+        // ── GPU ──
+        if (data.gpu) {
+            const gpu = data.gpu;
+            const sc = this._summaryCards?.gpu;
+            if (sc) {
+                sc.box.visible = true;
+                if (gpu.present) {
+                    sc.valueLabel.text = `${Math.round(gpu.percent)}%`;
+                    sc.pbar.setPercent(gpu.percent);
+                    sc.subLabel.visible = true;
+                    const clockText = gpu.clock ? ` · ${Math.round(gpu.clock)} MHz` : '';
+                    sc.subLabel.text = `${gpu.brand || 'GPU'}${clockText}`;
+                } else {
+                    sc.valueLabel.text = 'n/a';
+                    sc.pbar.setPercent(0);
+                    sc.subLabel.visible = true;
+                    sc.subLabel.text = 'No GPU Detected';
+                }
+            }
+
+            // Without a GPU only the notice is shown, not cards of placeholders.
+            if (this._gpuInactiveCard) {
+                this._gpuInactiveCard.visible = !gpu.present;
+                this._gpuHwCard.visible = gpu.present;
+                this._gpuSparkCard.visible = gpu.present;
+                this._gpuStatsCard.visible = gpu.present;
+            }
+
+            // Update Model / Chip Badge
+            if (this._gpuModelName) this._gpuModelName.text = gpu.model || `${gpu.brand} Graphics`;
+            if (this._gpuDriverDesc) {
+                this._gpuDriverDesc.visible = !!gpu.driver;
+                this._gpuDriverDesc.text = `Driver: ${gpu.driver || ''}`;
+            }
+
+            if (this._gpuChipBox) {
+                const brand = (gpu.brand || '').toLowerCase();
+                if (brand.includes('nvidia')) {
+                    this._gpuChipBox.style = 'background-color: #76b900; border-radius: 6px; padding: 6px 10px;';
+                    this._gpuChipLabel1.text = 'NVIDIA';
+                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #223300; font-weight: bold;';
+                    this._gpuChipLabel2.text = 'GEFORCE';
+                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #000000; font-weight: bold;';
+                } else if (brand.includes('amd')) {
+                    this._gpuChipBox.style = 'background-color: #d22630; border-radius: 6px; padding: 6px 10px;';
+                    this._gpuChipLabel1.text = 'AMD';
+                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #f9b8bb; font-weight: 300;';
+                    this._gpuChipLabel2.text = 'RADEON';
+                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #ffffff; font-weight: bold;';
+                } else {
+                    this._gpuChipBox.style = 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;';
+                    this._gpuChipLabel1.text = 'intel';
+                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;';
+                    this._gpuChipLabel2.text = 'GRAPHICS';
+                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #ffffff; font-weight: bold;';
+                }
+            }
+
+            // Quick Hardware Sub-Stats: only what this GPU reports.
+            const readings = gpuReadings(gpu, tempUnit);
+            if (this._gpuHwFields) {
+                this._gpuHwFields.clock.visible = readings.clock !== null;
+                this._gpuHwFields.temp.visible = readings.temp !== null;
+                this._gpuHwFields.power.visible = readings.power !== null;
+                this._gpuHwStatsRow.visible = readings.clock !== null || readings.temp !== null || readings.power !== null;
+                if (readings.clock !== null) this._gpuHwClockVal.text = readings.clock;
+                if (readings.temp !== null) this._gpuHwTempVal.text = readings.temp;
+                if (readings.power !== null) this._gpuHwPowerVal.text = readings.power;
+            }
+
+            // Sparkline
+
+            // VRAM Card
+            if (this._gpuVramCard) {
+                if (gpu.memTotal > 0) {
+                    this._gpuVramCard.visible = true;
+                    if (this._gpuVramPctLbl) this._gpuVramPctLbl.text = `${Math.round(gpu.memPercent)}%`;
+                    if (this._gpuVramBar) this._gpuVramBar.setPercent(gpu.memPercent);
+                    if (this._gpuVramUsed) {
+                        this._gpuVramUsed.val.text = `${formatBytes(gpu.memUsed, useGiB)} / ${formatBytes(gpu.memTotal, useGiB)} (${gpu.memPercent.toFixed(1)}%)`;
+                    }
+                    if (this._gpuVramFree) {
+                        this._gpuVramFree.val.text = formatBytes(gpu.memFree || (gpu.memTotal - gpu.memUsed), useGiB);
+                    }
+                } else {
+                    this._gpuVramCard.visible = false;
+                }
+            }
+
+            // Stats Card
+            if (this._gpuUsage) this._gpuUsage.val.text = `${Math.round(gpu.percent)}%`;
+            if (this._gpuCoreClock) {
+                this._setDetailRow(this._gpuCoreClock, readings.clock);
+                this._setDetailRow(this._gpuTemp, readings.temp);
+                this._setDetailRow(this._gpuFan, readings.fan);
+                this._setDetailRow(this._gpuPower, readings.power);
+            }
+        }
+
+        if (!frame) for (const spark of this._sparklines) spark.refresh();
+
+        // ── Top Processes (CPU & Memory tabs) ──
+        // A snapshot sorted for the other tab (or taken before the tab was
+        // opened) is not shown as if it were current: the list is dimmed
+        // until a sample for this tab arrives.
+        const lists = {
+            cpu: [this._procList, '_procWidgets'],
+            memory: [this._memProcList, '_memProcWidgets'],
+            disk: [this._dskProcList, '_dskProcWidgets'],
+        };
+        if (this._menuOpen && lists[this._activeTab]) {
+            const [list, widgetsKey] = lists[this._activeTab];
+            const fresh = data.procSort === this._activeTab && data.processes.length > 0;
+            // Disk: only processes that are reading or writing.
+            const rows = this._activeTab === 'disk' ? data.processes.filter(p => p.ioRate > 0) : data.processes;
+            if (list) {
+                if (fresh) this._renderProcessListUI(list, widgetsKey, rows, this._activeTab);
+                list.opacity = fresh ? 255 : 110;
+            }
+            if (this._activeTab === 'disk' && this._dskProcIdle && fresh) this._dskProcIdle.visible = rows.length === 0;
+            if (this._activeTab === 'disk' && this._dskProcNote && fresh) {
+                // Unprivileged: other users' counters are not readable. Said, not hidden.
+                this._dskProcNote.visible = data.ioDenied > 0;
+                this._dskProcNote.text = `Your processes only: ${data.ioDenied} processes of other users (system services) cannot be read without administrator rights.`;
+            }
+        }
+    }
+
+    /** @param {'cpu'|'memory'|'disk'} mode what the rows show and are sorted by */
+    _renderProcessListUI(container, targetWidgetsKey, processes, mode = 'cpu') {
+        const isMemory = mode === 'memory';
+        if (!container) return;
+        if (!this[targetWidgetsKey]) this[targetWidgetsKey] = [];
+
+        // All rows are built on first use and never rebuilt: a list whose
+        // length changes from poll to poll (the Disk page shows only active
+        // processes) hides the spare rows, so its actor count stays fixed.
+        const rowsWanted = Math.max(processes.length, PROCESS_ROWS);
+        if (this[targetWidgetsKey].length < rowsWanted) {
+            for (let i = this[targetWidgetsKey].length; i < rowsWanted; i++) {
+                const item = new St.BoxLayout({
+                    style: 'padding: 6px 8px; spacing: 8px; border-radius: 8px;',
+                    style_class: 'resource-pulse-process-item',
+                    y_align: Clutter.ActorAlign.CENTER,
+                    reactive: true,
+                    can_focus: true
+                });
+
+                const iconBox = new St.BoxLayout({ style_class: 'rp-chip-bg', style: 'width: 24px; height: 24px; border-radius: 6px;', y_align: Clutter.ActorAlign.CENTER });
+                const icon = new St.Icon({ icon_name: 'application-x-executable-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px;' });
+                iconBox.add_child(icon);
+                item.add_child(iconBox);
+
+                const detailsCol = new St.BoxLayout({ vertical: true, x_expand: true });
+                const nameLbl = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em; font-weight: 500;', text: '' });
+                detailsCol.add_child(nameLbl);
+
+                const color = isMemory ? [0.569, 0.255, 0.675] : mode === 'disk' ? [0.96, 0.83, 0.18] : [0.208, 0.518, 0.894];
+                const pbar = new ProgressBar(4, color[0], color[1], color[2]);
+                detailsCol.add_child(pbar);
+
+                item.add_child(detailsCol);
+
+                const statLbl = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.85em; font-weight: 600; text-align: right;', width: mode === 'cpu' ? 52 : 76 });
+                statLbl.x_align = Clutter.ActorAlign.END;
+                item.add_child(statLbl);
+
+                const endBtn = new St.Button({
+                    style_class: 'rp-end-button',
+                    can_focus: true,
+                    accessible_name: 'End process',
+                    y_align: Clutter.ActorAlign.CENTER,
+                    child: new St.Icon({ icon_name: 'window-close-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 12px;' }),
+                });
+                const widgets = { nameLbl, statLbl, pbar, endBtn, group: null };
+                endBtn.connect('clicked', () => {
+                    if (widgets.group) this._askEnd({ cpu: this._procEnd, memory: this._memProcEnd, disk: this._dskProcEnd }[mode], widgets.group);
+                });
+
+                item.add_child(endBtn);
+
+                // A press on the ✕ is its own: the row neither opens System
+                // Monitor nor plays its press animation, which shrinks the
+                // row about its centre and would move the ✕ away from under
+                // the pointer before the release (losing the click).
+                const onEnd = event => endBtn.contains(global.stage.get_event_actor(event));
+                item.connect('button-press-event', (actor, event) => {
+                    if (onEnd(event)) return Clutter.EVENT_PROPAGATE;
+                    this._launchSystemMonitor('processes');
+                    this._indicator.menu.close();
+                    return Clutter.EVENT_STOP;
+                });
+                this._addClickAnimations(item, onEnd);
+
+                container.add_child(item);
+                widgets.item = item;
+                this[targetWidgetsKey].push(widgets);
+            }
+        }
+
+        const useGiB = this._settings.get_string('unit-mem') === 'GiB';
+        this[targetWidgetsKey].forEach((w, i) => {
+            w.item.visible = i < processes.length;
+            if (i >= processes.length) w.group = null;
+        });
+        processes.forEach((proc, i) => {
+            const w = this[targetWidgetsKey][i];
+            if (!w) return;
+            w.nameLbl.text = proc.count > 1 ? `${proc.comm}  ×${proc.count}` : proc.comm;
+            if (mode === 'disk') {
+                // Relative to the busiest row: there is no natural 100 %.
+                const top = processes[0]?.ioRate || 0;
+                w.statLbl.text = formatSpeed(proc.ioRate);
+                w.pbar.setPercent(top > 0 ? (proc.ioRate / top) * 100 : 0);
+            } else {
+                const valNum = isMemory ? proc.mem : proc.cpu;
+                w.statLbl.text = isMemory ? formatBytes(proc.rssBytes, useGiB) : `${valNum.toFixed(1)}%`;
+                w.pbar.setPercent(Math.min(100, valNum));
+            }
+            w.group = proc;
+            // Hidden but still taking its room, so the values stay aligned.
+            const endable = canEnd(proc, this._selfPid);
+            w.endBtn.opacity = endable ? 255 : 0;
+            w.endBtn.reactive = endable;
+            w.endBtn.can_focus = endable;
+        });
+    }
+}

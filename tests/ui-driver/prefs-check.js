@@ -1,4 +1,4 @@
-// Exercises the preferences rows (ui/prefsrows.js) with real GTK widgets and
+// Exercises the preferences rows (src/ui/prefs/rows.js) with real GTK widgets and
 // a memory-backed copy of the schema. Started by the UI driver as a client of
 // the sandboxed shell: gjs -m prefs-check.js <extension directory>
 // Prints one PREFS-CHECK line per failure and a final verdict, then shows a
@@ -37,13 +37,13 @@ function newSettings() {
 }
 
 async function main() {
-    const prefsRows = await import(`file://${root}/ui/prefsrows.js`);
+    const prefsRows = await import(`file://${root}/ui/prefs/rows.js`);
     const { buildPreferences } = prefsRows;
-    const { allSettingRows, METRICS } = await import(`file://${root}/lib/settingsmodel.js`);
-    const { PowerSampler } = await import(`file://${root}/lib/power.js`);
+    const { allSettingRows, METRICS } = await import(`file://${root}/lib/common/settingsmodel.js`);
+    const { PowerSampler } = await import(`file://${root}/lib/collectors/power.js`);
     Adw.init();
 
-    const { styleWindow: style } = await import(`file://${root}/ui/prefsstyle.js`);
+    const { styleWindow: style } = await import(`file://${root}/ui/prefs/style.js`);
     const build = (settings, power) => {
         const window = new Adw.PreferencesWindow({ title: 'Resource Pulse' });
         style(window);
@@ -160,7 +160,7 @@ async function main() {
 
     // The window's stylesheet parses cleanly, dark and light, in the variant
     // this libadwaita loads (CSS variables from 1.6, named colours before).
-    const { windowCss, styleWindow } = await import(`file://${root}/ui/prefsstyle.js`);
+    const { windowCss, styleWindow } = await import(`file://${root}/ui/prefs/style.js`);
     const modern = Adw.get_minor_version() >= 6;
     for (const dark of [true, false]) {
         for (const variables of [modern]) {
@@ -223,7 +223,7 @@ async function main() {
 // gets the settings only; the panel (prefs-page set) also gets Tracking and
 // Diagnostics, also when it asks while a settings-only window is open.
 async function entryPoints() {
-    const { fillWindow } = await import(`file://${root}/ui/prefswindow.js`);
+    const { fillWindow } = await import(`file://${root}/ui/prefs/window.js`);
     const dir = GLib.dir_make_tmp('rp-prefs-entry-XXXXXX');
     const stubs = {
         historyPath: `${dir}/battery-history.json`,
@@ -296,7 +296,7 @@ const near = (rgb, colour, tolerance = 14) => hex(colour).every((v, i) => Math.a
 const show = rgb => `rgb(${rgb.slice(0, 3).join(', ')})`;
 
 async function renderedLook(shown) {
-    const { palette } = await import(`file://${root}/ui/prefsstyle.js`);
+    const { palette } = await import(`file://${root}/ui/prefs/style.js`);
     const manager = Adw.StyleManager.get_default();
     const window = shown.window;
     window.set_default_size(640, 660);
@@ -360,9 +360,9 @@ function findScrolled(widget) {
 // The Tracking and Diagnostics pages on a fixture history: two hours on
 // battery with a chat app working in the background and an editor in use.
 async function batteryPages(styleWindow) {
-    const { HistorySource, buildTrackingPage } = await import(`file://${root}/ui/prefsbattery.js`);
-    const { buildDiagnosticsPage } = await import(`file://${root}/ui/prefsdiagnostics.js`);
-    const { BatteryLedger, saveLedger } = await import(`file://${root}/lib/batteryledger.js`);
+    const { HistorySource, buildTrackingPage } = await import(`file://${root}/ui/prefs/tracking.js`);
+    const { buildDiagnosticsPage } = await import(`file://${root}/ui/prefs/diagnostics.js`);
+    const { BatteryLedger, saveLedger } = await import(`file://${root}/lib/engine/batteryledger.js`);
 
     const dir = GLib.dir_make_tmp('rp-prefs-history-XXXXXX');
     const path = `${dir}/battery-history.json`;

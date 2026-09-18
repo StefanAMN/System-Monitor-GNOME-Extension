@@ -1,4 +1,4 @@
-// Test-only driver, loaded by `./dev.sh test-ui` inside an isolated headless shell.
+// Test-only driver, loaded by `./scripts/dev.sh test-ui` inside an isolated headless shell.
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
@@ -932,7 +932,7 @@ async function endProcesses(rp) {
 // clears once the load is gone. The 30 s / 10 s timing is unit-tested; here
 // it is shortened so the scenario stays quick.
 async function alertsRaise(rp) {
-    const { AlertMonitor } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/alerts.js`);
+    const { AlertMonitor } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/engine/alerts.js`);
     const settings = rp._settings;
     const threshold = settings.get_int('threshold-cpu');
     settings.set_int('threshold-cpu', 50);
