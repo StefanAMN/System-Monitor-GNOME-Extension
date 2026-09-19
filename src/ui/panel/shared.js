@@ -10,6 +10,7 @@ import Pango from 'gi://Pango';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { METRICS } from '../../lib/common/settingsmodel.js';
+import { PREFS_OPEN_ATTEMPTS, PREFS_RETRY_MS } from './constants.js';
 import { sanitizeMetricList } from '../../lib/common/present.js';
 
 export class SharedMethods {
@@ -291,11 +292,39 @@ export class SharedMethods {
     _openDetailsWindow(page = 'settings') {
         this._settings.set_string('prefs-page', page);
         this._indicator.menu.close();
-        try {
-            this.openPreferences();
-        } catch (e) {
-            console.error(`ResourcePulse: cannot open the preferences window: ${e.message}`);
-        }
+        this._requestPrefsWindow(PREFS_OPEN_ATTEMPTS);
+    }
+
+    /**
+     * Ask GNOME's preferences service for the window. The service quits when
+     * its last window closes; a request that reaches it while it is quitting
+     * fails (seen when the window was closed and opened again within a
+     * second). The shell's own openPreferences() drops that error (GNOME
+     * 46-49 do not even return it), so the same D-Bus call is made here, the
+     * failure logged, and the request sent again: D-Bus starts a new service.
+     */
+    _requestPrefsWindow(attemptsLeft) {
+        const gen = this._gen;
+        Gio.DBus.session.call('org.gnome.Shell.Extensions', '/org/gnome/Shell/Extensions',
+            'org.gnome.Shell.Extensions', 'OpenExtensionPrefs',
+            new GLib.Variant('(ssa{sv})', [this.uuid, '', {}]), null, Gio.DBusCallFlags.NONE, -1, null,
+            (connection, result) => {
+                try {
+                    connection.call_finish(result);
+                } catch (e) {
+                    if (gen !== this._gen) return;
+                    if (attemptsLeft <= 1) {
+                        console.error(`ResourcePulse: cannot open the preferences window: ${e.message}`);
+                        return;
+                    }
+                    console.warn(`ResourcePulse: opening the preferences window failed (${e.message}); trying again`);
+                    this._prefsRetryId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PREFS_RETRY_MS, () => {
+                        this._prefsRetryId = 0;
+                        this._requestPrefsWindow(attemptsLeft - 1);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                }
+            });
     }
 
     /** Let a label wrap onto further lines instead of ending in an ellipsis. */

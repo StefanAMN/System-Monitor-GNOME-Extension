@@ -387,6 +387,10 @@ export default class ResourcePulseExtension extends Extension {
             global.stage.disconnect(this._stageReleaseId);
             this._stageReleaseId = null;
         }
+        if (this._prefsRetryId) {
+            GLib.source_remove(this._prefsRetryId);
+            this._prefsRetryId = 0;
+        }
 
         if (this._dragGrab) {
             this._dragGrab.dismiss();
