@@ -163,7 +163,14 @@ export default class ResourcePulseExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         });
 
-        this._scrollView.add_child(this._menuContainer);
+        // The scrolled child itself carries no padding: before GNOME Shell 49
+        // a padded viewport clips picking by its padding at the far edges,
+        // leaving a strip on the right and at the bottom that takes no clicks.
+        // It is also what the menu's width and height are set on; the padded
+        // container fills it.
+        this._menuViewport = new St.BoxLayout({ vertical: true, x_expand: true, y_expand: true });
+        this._menuViewport.add_child(this._menuContainer);
+        this._scrollView.add_child(this._menuViewport);
         this._popupStack.add_child(this._scrollView);
 
         // Build Corner Resize Handles
@@ -365,6 +372,7 @@ export default class ResourcePulseExtension extends Extension {
         this._summaryCards = null;
         this._popupStack = null;
         this._menuContainer = null;
+        this._menuViewport = null;
         this._scrollView = null;
         this._menuSection = null;
         this._coreWidgets = null;
@@ -540,10 +548,10 @@ export default class ResourcePulseExtension extends Extension {
         } else {
             this._currentWidth = defaultWidth;
             this._currentHeight = 0;
-            if (this._menuContainer) {
-                this._menuContainer.width = defaultWidth;
-                this._menuContainer.height = -1;
-                this._menuContainer.style = `width: ${defaultWidth}px; min-width: ${defaultWidth}px; max-width: ${defaultWidth}px;`;
+            if (this._menuViewport) {
+                this._menuViewport.width = defaultWidth;
+                this._menuViewport.height = -1;
+                this._menuViewport.style = `width: ${defaultWidth}px; min-width: ${defaultWidth}px; max-width: ${defaultWidth}px;`;
             }
             if (this._scrollView) {
                 this._scrollView.width = defaultWidth;
@@ -595,9 +603,9 @@ export default class ResourcePulseExtension extends Extension {
     _applyDimensions(w, h) {
         this._currentWidth = w;
         this._currentHeight = h;
-        if (this._menuContainer) {
-            this._menuContainer.width = w;
-            this._menuContainer.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px; min-height: ${h}px;`;
+        if (this._menuViewport) {
+            this._menuViewport.width = w;
+            this._menuViewport.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px; min-height: ${h}px;`;
         }
         if (this._scrollView) {
             this._scrollView.width = w;
@@ -637,12 +645,12 @@ export default class ResourcePulseExtension extends Extension {
     _buildCornerResizeHandles() {
         this._resizeHandles = {};
         const corners = [
-            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NWSE_RESIZE, size: 32 },
-            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END, cursor: Clutter.CursorType.NESW_RESIZE, size: 32 }
+            { id: 'se', xAlign: Clutter.ActorAlign.END,   yAlign: Clutter.ActorAlign.END, size: 32 },
+            { id: 'sw', xAlign: Clutter.ActorAlign.START, yAlign: Clutter.ActorAlign.END, size: 32 }
         ];
 
         corners.forEach(c => {
-            const handle = new ResizeHandle(c.id, c.size, c.cursor);
+            const handle = new ResizeHandle(c.id, c.size);
             handle.x_align = c.xAlign;
             handle.y_align = c.yAlign;
             handle.x_expand = true;
