@@ -135,6 +135,18 @@ stop_log_stream() {
     LOG_STREAM_PID=""
 }
 
+# After a failure, copy the kept sandbox's logs and screenshots to
+# RP_ARTIFACTS when it is set: test-compat sets it, because the sandbox lives
+# inside a container that is removed when the test ends.
+export_sandbox() {
+    [ -n "${RP_ARTIFACTS:-}" ] || return 0
+    mkdir -p "$RP_ARTIFACTS"
+    local f
+    for f in "$SANDBOX"/*.log "$SANDBOX"/*.txt "$SANDBOX/shots"; do
+        if [ -e "$f" ]; then cp -r "$f" "$RP_ARTIFACTS/"; fi
+    done
+}
+
 # Remove a sandbox after a pass unless RP_KEEP=1; failures are always kept.
 finish_sandbox() {
     if [ "${RP_KEEP:-0}" = "1" ]; then
@@ -323,6 +335,7 @@ cmd_test_ci() {
         finish_sandbox
     else
         log_error "Headless verification failed (sandbox kept: $SANDBOX)"
+        export_sandbox
         cat "$SANDBOX/info.txt" 2>/dev/null | sed 's/^/  /'
         echo "$BAD" | head -n 40
         exit 1
@@ -392,6 +405,7 @@ cmd_test_ui() {
         finish_sandbox
     else
         log_error "UI test failed (log and screenshots kept: $SANDBOX)"
+        export_sandbox
         driver_failure_details
         exit 1
     fi
@@ -418,6 +432,7 @@ cmd_test_overhead() {
         finish_sandbox
     else
         log_error "Overhead / soak test failed (log kept: $SANDBOX)"
+        export_sandbox
         driver_failure_details
         exit 1
     fi
@@ -443,12 +458,31 @@ cmd_test_unit() {
 #   Each version runs in a Fedora container that ships it (tests/compat).
 #   Software rendering, no logind, no hardware sensors: this proves the
 #   extension loads and its UI works on that shell, not its readings.
+#   RP_COMPAT_OUT=<dir> keeps the logs there (CI uploads it on failure);
+#   a failed test also leaves its sandbox's log and screenshots in
+#   <dir>/gnome-<version>-<test>/.
 # ------------------------------------------------------------------------------
 compat_fedora() {
     case "$1" in
-        45) echo 39 ;; 46) echo 40 ;; 47) echo 41 ;; 48) echo 42 ;; 49) echo 43 ;;
+        45) echo 39 ;; 46) echo 40 ;; 47) echo 41 ;; 48) echo 42 ;; 49) echo 43 ;; 50) echo 44 ;;
         *) return 1 ;;
     esac
+}
+
+# The line of a test's output that names what failed, without colour codes:
+# the failing check if the test printed one, else the first bad log line,
+# else the first error.
+compat_failure() {
+    local clean pat found
+    clean="$(sed 's/\x1b\[[0-9;]*m//g' "$1")"
+    for pat in 'RP-UITEST FAIL|PREFS-CHECK FAIL|^FAIL ' "$BAD_LOG_PATTERN" '\[ERROR\]'; do
+        if found="$(grep -m1 -E "$pat" <<< "$clean")"; then
+            # Without the line number and the shell's log prefix.
+            sed -E 's/^[0-9]+: ?//; s/^[A-Za-z ]+-Message: [0-9:.]+: //' <<< "$found"
+            return 0
+        fi
+    done
+    echo "no failure line found; see $1"
 }
 
 cmd_test_compat() {
@@ -463,9 +497,14 @@ cmd_test_compat() {
     fi
     compile_schemas >/dev/null
 
-    local OUT v fed img t name actual line failed=0
-    OUT="$(mktemp -d /tmp/rp-compat.XXXXXX)"
-    local SUMMARY=()
+    local OUT v fed img t name actual line art why attempt built failed=0
+    if [ -n "${RP_COMPAT_OUT:-}" ]; then
+        OUT="$RP_COMPAT_OUT"
+        mkdir -p "$OUT"
+    else
+        OUT="$(mktemp -d /tmp/rp-compat.XXXXXX)"
+    fi
+    local SUMMARY=() FAILS=()
     for v in "${VERSIONS[@]}"; do
         if ! fed="$(compat_fedora "$v")"; then
             log_error "No container image known for GNOME Shell $v"
@@ -473,8 +512,21 @@ cmd_test_compat() {
         fi
         img="rp-compat:gnome-$v"
         log_info "GNOME Shell $v: building $img (Fedora $fed, a few minutes the first time)..."
-        if ! docker build -q --build-arg "FEDORA=$fed" -t "$img" "$REPO_DIR/tests/compat" > "$OUT/gnome-$v-build.log" 2>&1; then
+        # A Fedora mirror sometimes fails mid-download: one more try.
+        built=0
+        : > "$OUT/gnome-$v-build.log"
+        for attempt in 1 2; do
+            if docker build -q --build-arg "FEDORA=$fed" -t "$img" "$REPO_DIR/tests/compat" >> "$OUT/gnome-$v-build.log" 2>&1; then
+                built=1
+                break
+            fi
+            if [ "$attempt" -eq 1 ]; then
+                log_warn "GNOME Shell $v: image build failed, trying once more"
+            fi
+        done
+        if [ "$built" -eq 0 ]; then
             SUMMARY+=("$v|not run|image build failed, see $OUT/gnome-$v-build.log")
+            FAILS+=("GNOME Shell $v image build: $(tail -n 1 "$OUT/gnome-$v-build.log")")
             failed=1
             continue
         fi
@@ -482,13 +534,26 @@ cmd_test_compat() {
         line="$v|$actual"
         for t in "test-unit" "test-headless 8" "test-ui"; do
             name="${t%% *}"
+            # Writable by the container's own user, whatever its uid here.
+            art="$OUT/gnome-$v-$name"
+            mkdir -p "$art"
+            chmod 777 "$art"
             # shellcheck disable=SC2086
-            if docker run --rm -v "$REPO_DIR":/src:ro "$img" ./scripts/dev.sh $t > "$OUT/gnome-$v-$name.log" 2>&1; then
+            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts \
+                    "$img" ./scripts/dev.sh $t > "$art.log" 2>&1; then
                 line="$line|$name pass"
             else
                 line="$line|$name FAIL"
+                why="$(compat_failure "$art.log")"
+                FAILS+=("GNOME Shell $v $name: $why")
+                # Shown on the GitHub run's page.
+                if [ -n "${GITHUB_ACTIONS:-}" ]; then
+                    echo "::error title=GNOME Shell $v, $name::${why//%/%25}"
+                fi
                 failed=1
             fi
+            # Empty unless the test failed.
+            if [ -z "$(ls -A "$art")" ]; then rmdir "$art"; fi
         done
         SUMMARY+=("$line")
         log_info "GNOME Shell $v: ${line#*|}"
@@ -501,9 +566,33 @@ cmd_test_compat() {
         printf '  %-8s %-10s %s\n' "$v" "$actual" "${line#*|*|}"
     done | sed 's/|/, /g'
     echo
+    if [ "${#FAILS[@]}" -gt 0 ]; then
+        log_error "What failed:"
+        printf '  %s\n' "${FAILS[@]}"
+        echo
+    fi
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        {
+            echo "| GNOME Shell | installed | results |"
+            echo "|---|---|---|"
+            for line in "${SUMMARY[@]}"; do
+                IFS='|' read -r v actual _ <<< "$line"
+                t="${line#*|*|}"
+                echo "| $v | $actual | ${t//|/, } |"
+            done
+            if [ "${#FAILS[@]}" -gt 0 ]; then
+                echo
+                echo "What failed:"
+                echo
+                echo '```'
+                printf '%s\n' "${FAILS[@]}"
+                echo '```'
+            fi
+        } >> "$GITHUB_STEP_SUMMARY"
+    fi
     if [ "$failed" -eq 0 ]; then
         log_success "All listed versions passed"
-        rm -rf "$OUT"
+        if [ -z "${RP_COMPAT_OUT:-}" ]; then rm -rf "$OUT"; fi
     else
         log_error "Some versions failed (logs: $OUT)"
         exit 1
