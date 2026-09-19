@@ -327,9 +327,20 @@ async function renderedLook(shown) {
         // Inside the row's left padding: the card surface.
         const card = point(row, 5, row.get_height() / 2);
         ok(near(card, p.card), `look (${variant}): card is ${show(card)}, not ${p.card}`);
-        // The checked switch's track, left of the knob: the extension's blue.
-        const track = point(toggle, toggle.get_width() * 0.22, toggle.get_height() / 2);
-        ok(near(track, '#3584e4', 30), `look (${variant}): a checked switch is ${show(track)}, not the extension's blue`);
+        // The checked switch's track: the extension's blue. Searched over
+        // the whole switch, since themes draw it in different shapes
+        // (Orchis: a thin 32 x 14 track that a fixed point can miss).
+        const sw = render(toggle);
+        let blue = null;
+        let seen = null;
+        for (let y = 0; sw && y < sw.height && !blue; y++) {
+            for (let x = 0; x < sw.width && !blue; x++) {
+                const px = sw.at(x, y);
+                if (px[3] > 200) seen ??= px;
+                if (px[3] > 200 && near(px, '#3584e4', 30)) blue = px;
+            }
+        }
+        ok(blue, `look (${variant}): a checked switch has no pixel of the extension's blue (first opaque ${seen ? show(seen) : 'none'})`);
         // The row title's ink: light on dark, dark on light.
         const text = render(title);
         let ink = null;
@@ -342,6 +353,33 @@ async function renderedLook(shown) {
         const lightness = ink ? (ink[0] + ink[1] + ink[2]) / 3 : -1;
         ok(variant === 'dark' ? lightness > 200 : lightness >= 0 && lightness < 90,
             `look (${variant}): row text is ${ink ? show(ink) : 'not drawn'}`);
+
+        // An open dropdown (the Temperature row; Tracking › Period is the
+        // same widget): its options on the popover's colour, text readable.
+        const combo = shown.rows['unit-temp'];
+        const popover = findAll(combo, w => w instanceof Gtk.Popover)[0];
+        popover.popup();
+        await sleep(500);
+        const options = findAll(popover, w => w.get_css_name() === 'row');
+        const option = options[1] ?? options[0];
+        const popShot = render(popover);
+        const [okOption, at] = option ? option.compute_point(popover, new Graphene.Point().init(option.get_width() - 4, option.get_height() / 2)) : [false, null];
+        const listBg = okOption && popShot ? popShot.at(at.x, at.y) : [0, 0, 0, 0];
+        ok(near(listBg, p.popover), `look (${variant}): an open dropdown's list is ${show(listBg)}, not ${p.popover}`);
+        const optionLabel = option && findAll(option, w => w instanceof Gtk.Label)[0];
+        const optionText = optionLabel && render(optionLabel);
+        let optionInk = null;
+        for (let y = 0; optionText && y < optionText.height; y++) {
+            for (let x = 0; x < optionText.width; x++) {
+                const px = optionText.at(x, y);
+                if (px[3] > 200) optionInk = px;
+            }
+        }
+        const lum = c => (c[0] + c[1] + c[2]) / 3;
+        ok(optionInk && Math.abs(lum(optionInk) - lum(listBg)) > 110,
+            `look (${variant}): dropdown text ${optionInk ? show(optionInk) : 'not drawn'} on ${show(listBg)} is not readable`);
+        popover.popdown();
+        await sleep(200);
     }
     manager.color_scheme = Adw.ColorScheme.DEFAULT;
     window.hide();

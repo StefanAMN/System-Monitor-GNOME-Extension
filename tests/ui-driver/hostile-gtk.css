@@ -32,3 +32,6 @@ viewswitcher button:checked { background-color: rgba(236, 64, 122, 0.3); color: 
 popover > contents { background-color: #ffffff; color: rgba(0, 0, 0, 0.87); }
 entry, spinbutton { background-color: #ffffff; color: rgba(0, 0, 0, 0.87); }
 image { color: rgba(0, 0, 0, 0.6); }
+/* Orchis paints every list white, including a dropdown's options. */
+listview, list, .view { background-color: #ffffff; }
+popover.background > contents { background-color: #ffffff; color: rgba(0, 0, 0, 0.87); }
