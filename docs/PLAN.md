@@ -715,9 +715,10 @@ Built as planned, with these differences:
   - one retry of a failed image build;
   - `RP_COMPAT_NO_BATTERY=1`: hides the batteries (`--tmpfs /sys/class/power_supply`), so a laptop can test what a desktop or a GitHub runner sees.
 - The manual trigger (`workflow_dispatch`) lets the full matrix run on any branch; it is how proofs 1 and 2 are run.
-- No image cache yet: on the runners an image builds in about 1–2 minutes, so caching 2 GB images would save little.
+- No image cache: a whole job on the runners, image build included, takes about 5½ minutes (a full run about 7 minutes), so caching 2 GB images would save little.
+- The actions are on their current majors (`checkout`, `setup-node`, `upload-artifact` v7), which run on Node 24; v4 drew GitHub's Node 20 deprecation warning.
 - Fedora 44 ships GNOME Shell 50.6; it passes unit, headless and UI tests locally (8 min 18 s with the image build).
-- GNOME 46's `gnome-extensions pack` handles the folder sources (71 files in the zip), so the release job packs on the Ubuntu runner.
+- GNOME 46's `gnome-extensions pack` handles the folder sources, so the release job packs on the Ubuntu runner.
 
 The first CI run (all five red) found two problems the laptop runs never showed:
 1. **A gap after "n/a" in the top bar** (GNOME 46, 47, 49, 50). The runners have no battery, so the pinned battery shows "n/a", but its label still reserved room for "100%" (16 px of empty space). A desktop user who pins the battery sees the same.
@@ -745,7 +746,14 @@ The first CI run (all five red) found two problems the laptop runs never showed:
    - It fails on the previous stylesheet with exactly the white box.
    - With the fix: 140 / 140 on GNOME 46, 47, 49 and 50 under the stand-in theme, and on 50 and 48 under the owner's Orchis-Pink-Light. Screenshots in light and dark checked by eye.
 
-: accessibility (screen readers)
+Proof (all on GitHub):
+1. Green: run 39161468401 on `ci-matrix`, all five shells pass (5½–7 minutes per job).
+2. Red: run 39161474404 on the throwaway branch `ci-proof-broken` (the ⋮ button's `clicked` handler removed). All five shells fail, each naming the same check on the run's page: `RP-UITEST FAIL: prefs: 0 window requests, expected the failed one and one retry`. Each job kept its logs and screenshots as an artifact (1.3–2.3 MB). Run 39199414195 repeated this on the v7 actions.
+3. Release: tag `v0.0.0-ci-test` (run 39199411239). All five shells passed, then the release job published "Resource Pulse v0.0.0-ci-test", marked as a pre-release, with the zip (160 KB). The downloaded zip is file-for-file identical to a local pack on GNOME 50 (61 files). The release, the tag and the throwaway branch were then deleted; the runs stay as the record.
+
+Not run: the soak in CI (area 5 first). Merging `ci-matrix` waits for the owner.
+
+### Area 2: accessibility (screen readers)
 
 Only 2 of the panel's interactive items have names a screen reader can announce. The rest are bare icons or cards.
 
