@@ -258,15 +258,21 @@ async function cycleTabs(rp, pass, tag = null) {
     rp._render(Object.assign({}, real, { processes: [], procSort: null }));
     check(rp._procList.opacity < 255, `pass ${pass}: stale process list not dimmed`);
 
-    // Top-bar labels keep their width whatever the value.
+    // Top-bar labels keep their width whatever the value. A metric the
+    // machine cannot provide ('n/a') reserves no room for numbers, which
+    // would only be a gap after it.
     for (const [key, w] of Object.entries(rp._topBarWidgets)) {
         if (!w.label) continue;
         const widths = [];
-        for (const text of ['9%', '99%', 'n/a']) {
+        for (const text of ['9%', '99%', 'n/a', '9%']) {
             w.label.text = text;
             widths.push(w.label.get_preferred_width(-1)[1]);
         }
-        check(widths[0] > 0 && widths.every(x => x === widths[0]), `pass ${pass}: top-bar ${key} width changes with value (${widths})`);
+        check(widths[0] > 0 && widths[1] === widths[0] && widths[3] === widths[0], `pass ${pass}: top-bar ${key} width changes with value (${widths})`);
+        w.label.text = 'n/a';
+        const [naText] = w.label.clutter_text.get_layout().get_pixel_size();
+        const naWidth = w.label.get_preferred_width(-1)[1];
+        check(naWidth <= widths[0] && naWidth - naText <= 14, `pass ${pass}: top-bar ${key} reserves ${naWidth - naText}px beyond 'n/a' (values: ${widths[0]}px)`);
     }
     if (rp._topBarWidgets.battery && rp._lastBat?.present)
         check(/^battery-level-\d+/.test(rp._topBarWidgets.battery.icon.icon_name),
@@ -983,14 +989,17 @@ async function alertsRaise(rp) {
         check(rp._dangerBox.visible, `alerts: no ⚠ after 20 s of ${n} burners (CPU ${rp._lastCpu?.total?.toFixed(0)} %)`);
         check(rp._topBarWidgets.cpu.label.has_style_class_name('resource-pulse-label-danger'), 'alerts: the pinned CPU value is not red');
         // The ⚠ is narrower than any value, so making room for it hides at
-        // most one. The number of hidden values is only logged: under load
+        // most one. A label showing 'n/a' reserves no room and may be
+        // narrower, but hiding it costs no value (it stays in the tooltip),
+        // and the next one hidden is wider than the ⚠, so still at most one
+        // value goes. The number of hidden values is only logged: under load
         // the CPU value itself grows ("62%" -> "100%", wider than the room
         // reserved for normal values) and may hide one more on a full bar
         // (seen in the compat containers with 1 px to spare).
         await sleep(2500);
         const widths = Object.entries(rp._topBarWidgets).map(([k, w]) => `${k} ${Math.round(w.box.width)}${w.label?.visible ? '' : ' (hidden)'}`).join(', ');
         console.log(`RP-UITEST alerts: hidden values ${collapsedBefore ?? '?'} -> ${rp._topBarCollapsed}; before: ${fitBefore}; after: ${fitState()}; ${widths}`);
-        const shortest = Math.min(...rp._topBarLabels().map(l => l.get_preferred_width(-1)[1]));
+        const shortest = Math.min(...rp._topBarLabels().filter(l => l.text !== 'n/a').map(l => l.get_preferred_width(-1)[1]));
         check(rp._dangerBox.width < shortest, `alerts: the ⚠ (${Math.round(rp._dangerBox.width)} px) is wider than a value (${Math.round(shortest)} px)`);
         check(!rp._topBarWidgets.memory.label.has_style_class_name('resource-pulse-label-danger'), 'alerts: memory marked although only CPU is high');
         // The cause needs two process scans a second apart.

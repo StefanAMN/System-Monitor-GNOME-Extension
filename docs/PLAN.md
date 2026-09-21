@@ -704,7 +704,34 @@ Today CI runs lint and unit tests only. The UI tests and GNOME 46–49 run only 
   2. A throwaway branch with a deliberately broken panel (one click handler removed) turns it red with the right check named, and that branch is then deleted.
   3. A test tag produces a release with the `.zip`; then the tag and release are deleted.
 
-### Area 2: accessibility (screen readers)
+#### State (branch `ci-matrix`, 2026-10-18; approved by the owner: "start with area 1")
+
+Built as planned, with these differences:
+- No `test-compat-one`: `scripts/dev.sh test-compat 47` already runs one version.
+- `test-compat` gained:
+  - `RP_COMPAT_OUT=<dir>`: keeps the logs;
+  - `RP_ARTIFACTS` (set inside each container): a failing test copies its sandbox's logs and screenshots out before the container goes;
+  - a GitHub `::error` annotation and a job-summary table naming the failing check;
+  - one retry of a failed image build;
+  - `RP_COMPAT_NO_BATTERY=1`: hides the batteries (`--tmpfs /sys/class/power_supply`), so a laptop can test what a desktop or a GitHub runner sees.
+- The manual trigger (`workflow_dispatch`) lets the full matrix run on any branch; it is how proofs 1 and 2 are run.
+- No image cache yet: on the runners an image builds in about 1–2 minutes, so caching 2 GB images would save little.
+- Fedora 44 ships GNOME Shell 50.6; it passes unit, headless and UI tests locally (8 min 18 s with the image build).
+- GNOME 46's `gnome-extensions pack` handles the folder sources (71 files in the zip), so the release job packs on the Ubuntu runner.
+
+The first CI run (all five red) found two problems the laptop runs never showed:
+1. **A gap after "n/a" in the top bar** (GNOME 46, 47, 49, 50). The runners have no battery, so the pinned battery shows "n/a", but its label still reserved room for "100%" (16 px of empty space). A desktop user who pins the battery sees the same.
+   - Fix (`ui/panel/topbar.js`): while a label shows "n/a", the value the machine cannot provide, it reserves nothing. The label's own `notify::text` handler follows it into and out of "n/a". The handler does one string comparison per text change and measures only on a transition.
+   - The UI test's width check now also checks "n/a" against its own text, and checks that a value after "n/a" gets its reserved room back.
+   - The alert test's "⚠ narrower than any value" check now measures only labels that show a value. An "n/a" label can be narrower than the ⚠ (20 vs 22 px), but hiding it costs no value, and the next label hidden is wider than the ⚠, so making room for the ⚠ still hides at most one value.
+   - Reproduced locally with `RP_COMPAT_NO_BATTERY=1`: the old code fails with exactly the CI message.
+2. **The open-dropdown check could not see the list on GNOME 48 and 49.** It read `rgb(0, 0, 0)`, the check's fallback for "no pixels".
+   - Cause: on GTK 4.18 a popover, being its own native surface, renders nothing through a `WidgetPaintable`, and on GTK 4.18 and 4.20 the first opening is not drawn within the fixed 500 ms.
+   - The window's colours were right; the check was blind. That check (from `fix-popover`) had only run on GNOME 50 before merging.
+   - Fix (`tests/ui-driver/prefs-check.js`): render the popover's `contents` node, wait (up to 5 s) until it has drawn, and say "not on screen" instead of reporting black.
+   - Run directly in the containers: 136 / 136 on 46, 47, 48 and 49. Against the stylesheet from before the popover fix it still fails on 48 and 50 with the original white list.
+
+: accessibility (screen readers)
 
 Only 2 of the panel's interactive items have names a screen reader can announce. The rest are bare icons or cards.
 
