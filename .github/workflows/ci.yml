@@ -13,9 +13,9 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -46,7 +46,7 @@ jobs:
       matrix:
         gnome: [46, 47, 48, 49, 50]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install glib tools
         run: |
@@ -60,7 +60,7 @@ jobs:
 
       - name: Keep the logs and screenshots
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gnome-${{ matrix.gnome }}-logs
           path: ${{ runner.temp }}/compat
@@ -73,7 +73,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # gnome-extensions (part of gnome-shell) packs the zip; node checks
       # the syntax first.
