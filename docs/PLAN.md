@@ -726,10 +726,24 @@ The first CI run (all five red) found two problems the laptop runs never showed:
    - The alert test's "⚠ narrower than any value" check now measures only labels that show a value. An "n/a" label can be narrower than the ⚠ (20 vs 22 px), but hiding it costs no value, and the next label hidden is wider than the ⚠, so making room for the ⚠ still hides at most one value.
    - Reproduced locally with `RP_COMPAT_NO_BATTERY=1`: the old code fails with exactly the CI message.
 2. **The open-dropdown check could not see the list on GNOME 48 and 49.** It read `rgb(0, 0, 0)`, the check's fallback for "no pixels".
-   - Cause: on GTK 4.18 a popover, being its own native surface, renders nothing through a `WidgetPaintable`, and on GTK 4.18 and 4.20 the first opening is not drawn within the fixed 500 ms.
-   - The window's colours were right; the check was blind. That check (from `fix-popover`) had only run on GNOME 50 before merging.
-   - Fix (`tests/ui-driver/prefs-check.js`): render the popover's `contents` node, wait (up to 5 s) until it has drawn, and say "not on screen" instead of reporting black.
-   - Run directly in the containers: 136 / 136 on 46, 47, 48 and 49. Against the stylesheet from before the popover fix it still fails on 48 and 50 with the original white list.
+   - That check (from `fix-popover`) had only run on GNOME 50 before merging.
+   - Attempt 1, waiting for the list to be laid out, failed: the popover stayed mapped and laid out for 5 s with nothing to read.
+   - Attempt 2 got past part of it. On GTK 4.18 a popover, being its own native surface, renders nothing through a `WidgetPaintable`, so the check now renders its `contents` node. That passed once in CI and failed once (the throwaway run), so per the two-attempts rule I stopped and traced it.
+   - Traced on GNOME 48 with 2 CPUs (fails 3–4 of 4 there):
+     - the compositor configures the popup (`layout` events, 208 × 148);
+     - the shared frame clock ticks;
+     - the contents are mapped and drawable;
+     - yet GTK never paints the first opening of a popover opened from code (no user input) in a window that has been up a while.
+     - Closed and opened again, it paints within 100 ms (every second opening in every run did).
+   - The shell sits in the Overview at startup on 46–49, but closing it did not change this.
+   - Fix (`tests/ui-driver/prefs-check.js`): the check reopens a popover that has not drawn within a second, up to 5 s in all, and says "not on screen" instead of reporting black. Result: 4 of 4 runs pass on GNOME 48 with 2 CPUs.
+3. **The dropdowns' current values sat in white boxes** under the stand-in theme, on every version: "Percentage (85%)" and the like, off-white on white. Found in the GNOME 48 screenshots while tracing item 2.
+   - The value is an inline `listview.view` in the row, which the stand-in paints white like every list. The owner's Orchis exempts it (`row.combo listview.inline { background: none }`), so their machine was not affected; a theme without that exemption would be.
+   - The prefs screenshots in `fix-popover` showed it and it was missed; no pixel check looked there.
+   - Fix (`ui/prefs/style.js`): inline lists in combo rows are transparent and inherit the row's text colour.
+   - New check: prefs-check reads the pixels around the Temperature row's current value. They must be the card colour, and the text must contrast with them (difference above 110).
+   - It fails on the previous stylesheet with exactly the white box.
+   - With the fix: 140 / 140 on GNOME 46, 47, 49 and 50 under the stand-in theme, and on 50 and 48 under the owner's Orchis-Pink-Light. Screenshots in light and dark checked by eye.
 
 : accessibility (screen readers)
 

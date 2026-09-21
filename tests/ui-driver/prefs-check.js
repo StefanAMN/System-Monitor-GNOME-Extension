@@ -357,13 +357,49 @@ async function renderedLook(shown) {
         // An open dropdown (the Temperature row; Tracking › Period is the
         // same widget): its options on the popover's colour, text readable.
         const combo = shown.rows['unit-temp'];
+        const lum = c => (c[0] + c[1] + c[2]) / 3;
+        // The last opaque pixel a widget draws: its text's ink.
+        const inkOf = widget => {
+            const drawn = widget && render(widget);
+            let last = null;
+            for (let y = 0; drawn && y < drawn.height; y++) {
+                for (let x = 0; x < drawn.width; x++) {
+                    const px = drawn.at(x, y);
+                    if (px[3] > 200) last = px;
+                }
+            }
+            return last;
+        };
+
+        // Its current value, in the row: on the card, readable. The
+        // stand-in theme paints every list white, as some themes do (Orchis
+        // exempts this one), which left white boxes behind the values.
+        const scrolled = findScrolled(window.get_visible_page());
+        const adj = scrolled?.get_vadjustment();
+        const [okTop, top] = scrolled ? combo.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0)) : [false, null];
+        // (top is where it shows now, so relative to the current scroll)
+        if (adj && okTop) adj.value = Math.min(Math.max(0, adj.value + top.y - 40), adj.upper - adj.page_size);
+        await sleep(300);
+        const inline = findAll(combo, w => w.get_css_name() === 'listview' && !w.get_ancestor(Gtk.Popover.$gtype))[0];
+        const rowShot = render(window);
+        const [okValue, edge] = inline ? inline.compute_point(window, new Graphene.Point().init(1, inline.get_height() / 2)) : [false, null];
+        const valueBg = okValue && rowShot ? rowShot.at(edge.x, edge.y) : null;
+        ok(valueBg && near(valueBg, p.card), `look (${variant}): a dropdown's current value sits on ${valueBg ? show(valueBg) : 'nothing'}, not the card ${p.card}`);
+        const valueInk = inkOf(inline && findAll(inline, w => w instanceof Gtk.Label)[0]);
+        ok(valueInk && valueBg && Math.abs(lum(valueInk) - lum(valueBg)) > 110,
+            `look (${variant}): a dropdown's current value ${valueInk ? show(valueInk) : 'not drawn'} on ${valueBg ? show(valueBg) : 'nothing'} is not readable`);
+
+        // Open: its options on the popover's colour, text readable.
         const popover = findAll(combo, w => w instanceof Gtk.Popover)[0];
         popover.popup();
         // Rendered from its contents node, which paints the surface: the
         // popover itself is a native surface and renders nothing this way
         // on GTK 4.18 (GNOME 48). Waited for until it has drawn with its
-        // options laid out: the first opening can take a while on GTK 4.18
-        // and 4.20, more so under software rendering on a busy CI runner.
+        // options laid out. On GTK 4.18 a popover opened from code (no user
+        // input) in a window that has been up a while is sometimes never
+        // painted, although the compositor configures it and frames tick;
+        // opened again, it paints at once. So it is reopened after each
+        // second without a drawing.
         let options = [];
         let option = null;
         let surface = popover;
@@ -374,25 +410,23 @@ async function renderedLook(shown) {
             option = options[1] ?? options[0];
             surface = findAll(popover, w => w.get_css_name() === 'contents')[0] ?? popover;
             if (popover.get_mapped() && option?.get_width() > 0) popShot = render(surface);
+            if (!popShot && waited % 1000 === 900) {
+                popover.popdown();
+                await sleep(200);
+                popover.popup();
+            }
         }
         const [okOption, at] = option ? option.compute_point(surface, new Graphene.Point().init(option.get_width() - 4, option.get_height() / 2)) : [false, null];
         const listBg = okOption && popShot ? popShot.at(at.x, at.y) : null;
         ok(listBg && near(listBg, p.popover), listBg
             ? `look (${variant}): an open dropdown's list is ${show(listBg)}, not ${p.popover}`
             : `look (${variant}): the dropdown's list was not on screen after 5 s (mapped ${popover.get_mapped()}, ${options.length} options)`);
-        const optionLabel = option && findAll(option, w => w instanceof Gtk.Label)[0];
-        const optionText = optionLabel && render(optionLabel);
-        let optionInk = null;
-        for (let y = 0; optionText && y < optionText.height; y++) {
-            for (let x = 0; x < optionText.width; x++) {
-                const px = optionText.at(x, y);
-                if (px[3] > 200) optionInk = px;
-            }
-        }
-        const lum = c => (c[0] + c[1] + c[2]) / 3;
+        const optionInk = inkOf(option && findAll(option, w => w instanceof Gtk.Label)[0]);
         ok(optionInk && listBg && Math.abs(lum(optionInk) - lum(listBg)) > 110,
             `look (${variant}): dropdown text ${optionInk ? show(optionInk) : 'not drawn'} on ${listBg ? show(listBg) : 'no list'} is not readable`);
         popover.popdown();
+        // Back to the top, where the next variant's checks look.
+        if (adj) adj.value = 0;
         await sleep(200);
     }
     manager.color_scheme = Adw.ColorScheme.DEFAULT;
