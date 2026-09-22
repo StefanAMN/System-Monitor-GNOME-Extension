@@ -29,7 +29,7 @@ import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netus
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth } from '../../src/lib/collectors/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../../src/lib/collectors/gpu.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel } from '../../src/lib/common/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel, spokenValue } from '../../src/lib/common/present.js';
 
 let failed = 0;
 let passed = 0;
@@ -339,6 +339,12 @@ docker0: 1 2 3
     ok(fits('power', {}, ['0.0W', '6.7W', 'n/a']), 'template: power');
     ok(fits('thermal', { tempUnit: 'C' }, [formatTemp(99, 'C'), 'n/a']), 'template: thermal C');
     eq(labelTemplate('battery', { batFmt: 'percent-time' }), '100%', 'template: no room reserved for a battery time estimate that may be absent');
+
+    // What a screen reader is given for the panel's values.
+    eq(['7%', '--', '', 'n/a', '↓1.2 MB/s ↑30 KB/s', '↓ 999 KB/s', '↑ 4.0 KB/s', '85% · 2h 10m', '40% · 1h 1m', '9% · 0h 23m', '5.2W', '17.0 W', '54°C', '3.1 GiB/s'].map(spokenValue),
+        ['7%', 'no reading yet', 'no reading yet', 'not available', 'download 1.2 MB per second, upload 30 KB per second', 'download 999 KB per second',
+            'upload 4.0 KB per second', '85%, 2 hours 10 minutes', '40%, 1 hour 1 minute', '9%, 23 minutes', '5.2 watts', '17.0 watts', '54°C', '3.1 GiB per second'],
+        'spoken values: placeholders, arrows, rates, watts, hours');
 
     eq([0, 500, 1000, 9.94 * 1000, 9.96 * 1000, 999.4 * 1000, 999.6 * 1000, 5 * 1000 ** 2, 2.5 * 1000 ** 3, NaN, -4].map(formatSpeedCompact),
         ['0.0 KB/s', '0.5 KB/s', '1.0 KB/s', '9.9 KB/s', '10 KB/s', '999 KB/s', '1.0 MB/s', '5.0 MB/s', '2.5 GB/s', '0.0 KB/s', '0.0 KB/s'],

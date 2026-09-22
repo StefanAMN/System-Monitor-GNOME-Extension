@@ -63,24 +63,29 @@ export class BatteryPage {
      */
     _refreshTopApp() {
         if (!this._batTopAppLabel) return;
+        // Read out as its line of text.
+        const show = text => {
+            this._batTopAppLabel.text = text;
+            this._batTopApp.accessible_name = text.includes('Tracking page') ? text : `${text} Opens the Tracking page.`;
+        };
         const stamp = this._tracker ? (this._tracker.lastSample ?? 'starting') : 'off';
         if (stamp === this._batTopAppStamp) return;
         this._batTopAppStamp = stamp;
         if (!this._tracker) {
-            this._batTopAppLabel.text = 'Battery use per app: tracking is off. Open the Tracking page to start it.';
+            show('Battery use per app: tracking is off. Open the Tracking page to start it.');
             return;
         }
         const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
         const sum = this._tracker.ledger?.summarize({ from: today, batteryOnly: true });
         const top = sum?.apps.find(a => !a.id.startsWith('@') && a.cpu > 0);
         if (!top) {
-            this._batTopAppLabel.text = 'Battery use per app: no time on battery recorded today yet.';
+            show('Battery use per app: no time on battery recorded today yet.');
             return;
         }
         const name = ledgerAppInfo(top.id).name;
         const share = sum.hasEnergy
             ? (sum.attributedWh > 0 ? top.wh / sum.attributedWh : 0)
             : (sum.cpu > 0 ? top.cpu / sum.cpu : 0);
-        this._batTopAppLabel.text = `Top app on battery today: ${name} (${Math.round(share * 100)} % of the processor's ${sum.hasEnergy ? 'energy' : 'time'})`;
+        show(`Top app on battery today: ${name} (${Math.round(share * 100)} % of the processor's ${sum.hasEnergy ? 'energy' : 'time'}).`);
     }
 }

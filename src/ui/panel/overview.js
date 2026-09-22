@@ -1,6 +1,7 @@
 // The overview page: metric cards and reordering them by dragging.
 // Methods of the extension (installed by extension.js); `this` is the extension.
 import GLib from 'gi://GLib';
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
@@ -57,7 +58,9 @@ export class OverviewMethods {
         const [r, g, b] = color;
         const box = new St.BoxLayout({
             style_class: `resource-pulse-metric-card tint-${key}`,
-            vertical: true, reactive: true, can_focus: true, x_expand: true
+            vertical: true, reactive: true, can_focus: true, x_expand: true,
+            // Named with its value by _nameValues (a11y.js).
+            accessible_name: label, accessible_role: Atk.Role.PUSH_BUTTON
         });
 
         const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
@@ -92,7 +95,7 @@ export class OverviewMethods {
         box.add_child(pbar);
 
         this._makeCardDraggable(box, key);
-        return { box, valueLabel, subLabel, pbar, spark: sparkline };
+        return { box, title: label, valueLabel, subLabel, pbar, spark: sparkline };
     }
 
     _attachCardsToGrid(order) {
@@ -570,7 +573,7 @@ export class OverviewMethods {
         const titleLbl = new St.Label({ text: 'System Overview', style_class: 'rp-fg', style: 'font-size: 1.3em; font-weight: bold;', x_expand: true });
         headerBox.add_child(titleLbl);
 
-        const refreshBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true });
+        const refreshBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: 'Refresh now' });
         const refreshIcon = new St.Icon({ icon_name: 'view-refresh-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         refreshIcon.set_pivot_point(0.5, 0.5);
         refreshBtn.add_child(refreshIcon);
@@ -584,7 +587,7 @@ export class OverviewMethods {
             });
         });
 
-        const menuBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true });
+        const menuBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true, accessible_name: 'Settings' });
         const menuIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         menuIcon.set_pivot_point(0.5, 0.5);
         menuBtn.add_child(menuIcon);
@@ -706,6 +709,7 @@ export class OverviewMethods {
         sysMonBox.add_child(sysMonLbl);
         sysMonBox.add_child(sysMonArrow);
         sysMonBtn.add_child(sysMonBox);
+        sysMonBtn.accessible_name = sysMonLbl.text;
 
         sysMonBtn.connect('clicked', () => {
             this._launchSystemMonitor();

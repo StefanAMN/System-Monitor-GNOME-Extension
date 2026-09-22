@@ -34,6 +34,7 @@ export class AlertsMethods {
         if (!this._dangerBox || !this._alerts) return;
         const active = new Set(this._alerts.active().map(a => ALERTS[a.key].tab));
         this._dangerBox.visible = active.size > 0;
+        if (active.size > 0) this._nameValues();
         for (const [key, widget] of Object.entries(this._topBarWidgets)) {
             if (!widget.label) continue;
             if (active.has(key)) widget.label.add_style_class_name('resource-pulse-label-danger');

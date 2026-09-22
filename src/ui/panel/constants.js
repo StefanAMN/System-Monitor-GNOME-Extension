@@ -62,6 +62,12 @@ export const SPARK_SCALES = {
     netRx: KBS_SCALE,
     netTx: KBS_SCALE
 };
+// What a screen reader calls each detail chart (the values are in the rows).
+export const CHART_NAMES = {
+    cpu: 'CPU usage', mem: 'Memory use', bat: 'Battery charge', batRate: 'Battery charge rate', pwr: 'Power draw',
+    dskRead: 'Disk read rate', dskWrite: 'Disk write rate', netRx: 'Download rate', netTx: 'Upload rate',
+    thm: 'Temperature', gpu: 'GPU usage'
+};
 // Opening the preferences window: tries, and the pause between them, when
 // GNOME's preferences service is quitting as the request arrives.
 export const PREFS_OPEN_ATTEMPTS = 3;

@@ -45,6 +45,7 @@ import { NetworkPage } from './ui/panel/pages/network.js';
 import { ThermalPage } from './ui/panel/pages/thermal.js';
 import { GpuPage } from './ui/panel/pages/gpu.js';
 import { DashboardMethods } from './ui/panel/dashboard.js';
+import { AccessibilityMethods } from './ui/panel/a11y.js';
 
 // ─── Extension Class ──────────────────────────────────────────────────────────
 // enable() and disable() live here; the panel's methods are grouped by
@@ -165,6 +166,7 @@ export default class ResourcePulseExtension extends Extension {
         this._menuContainer = new St.BoxLayout({
             vertical: true,
             style_class: 'resource-pulse-menu-section',
+            accessible_name: 'Resource Pulse panel',
             reactive: true,
             x_expand: true,
             y_expand: true
@@ -511,4 +513,4 @@ export default class ResourcePulseExtension extends Extension {
     }
 }
 
-installMethods(ResourcePulseExtension, [SharedMethods, SizingMethods, PollingMethods, TopbarMethods, AlertsMethods, ProcessesMethods, OverviewMethods, DetailsMethods, CpuPage, MemoryPage, BatteryPage, PowerPage, DiskPage, NetworkPage, ThermalPage, GpuPage, DashboardMethods]);
+installMethods(ResourcePulseExtension, [SharedMethods, SizingMethods, PollingMethods, TopbarMethods, AlertsMethods, ProcessesMethods, OverviewMethods, DetailsMethods, CpuPage, MemoryPage, BatteryPage, PowerPage, DiskPage, NetworkPage, ThermalPage, GpuPage, DashboardMethods, AccessibilityMethods]);

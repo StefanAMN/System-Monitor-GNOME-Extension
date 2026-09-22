@@ -1,6 +1,7 @@
 // Top-process lists (CPU, Memory, Disk) and ending processes from them.
 // Methods of the extension (installed by extension.js); `this` is the extension.
 import GLib from 'gi://GLib';
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import Pango from 'gi://Pango';
@@ -9,6 +10,10 @@ import { canEnd, liveMembers, signalProcesses } from '../../lib/collectors/proce
 import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed } from '../../lib/common/format.js';
 import { PROCESS_ROWS } from './constants.js';
+import { spokenValue } from '../../lib/common/present.js';
+
+// How a row's value is read out, by list.
+const SPOKEN_MODE = { cpu: 'CPU', memory: 'memory', disk: 'disk' };
 
 export class ProcessesMethods {
     /** A timer that disable() ends early (resolving false), so no flow outlives the session. */
@@ -130,7 +135,8 @@ export class ProcessesMethods {
                     style_class: 'resource-pulse-process-item',
                     y_align: Clutter.ActorAlign.CENTER,
                     reactive: true,
-                    can_focus: true
+                    can_focus: true,
+                    accessible_role: Atk.Role.LIST_ITEM
                 });
 
                 const iconBox = new St.BoxLayout({ style_class: 'rp-chip-bg', style: 'width: 24px; height: 24px; border-radius: 6px;', y_align: Clutter.ActorAlign.CENTER });
@@ -171,11 +177,18 @@ export class ProcessesMethods {
                 // row about its centre and would move the ✕ away from under
                 // the pointer before the release (losing the click).
                 const onEnd = event => endBtn.contains(global.stage.get_event_actor(event));
-                item.connect('button-press-event', (actor, event) => {
-                    if (onEnd(event)) return Clutter.EVENT_PROPAGATE;
+                const open = () => {
                     this._launchSystemMonitor('processes');
                     this._indicator.menu.close();
                     return Clutter.EVENT_STOP;
+                };
+                item.connect('button-press-event', (actor, event) => (onEnd(event) ? Clutter.EVENT_PROPAGATE : open()));
+                // From the keyboard too, as the overview cards do.
+                item.connect('key-press-event', (actor, event) => {
+                    const sym = event.get_key_symbol();
+                    if (sym !== Clutter.KEY_Return && sym !== Clutter.KEY_KP_Enter && sym !== Clutter.KEY_space)
+                        return Clutter.EVENT_PROPAGATE;
+                    return open();
                 });
                 this._addClickAnimations(item, onEnd);
 
@@ -205,11 +218,15 @@ export class ProcessesMethods {
                 w.pbar.setPercent(Math.min(100, valNum));
             }
             w.group = proc;
+            // Process lists change with samples, not glide frames.
+            const who = proc.count > 1 ? `${proc.comm}, ${proc.count} processes` : proc.comm;
+            w.item.accessible_name = `${who}, ${spokenValue(w.statLbl.text)} ${SPOKEN_MODE[mode]}, opens System Monitor`;
             // Hidden but still taking its room, so the values stay aligned.
             const endable = canEnd(proc, this._selfPid);
             w.endBtn.opacity = endable ? 255 : 0;
             w.endBtn.reactive = endable;
             w.endBtn.can_focus = endable;
+            w.endBtn.accessible_name = endable ? `End ${who}` : '';
         });
     }
 }

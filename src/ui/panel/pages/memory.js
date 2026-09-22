@@ -31,7 +31,7 @@ export class MemoryPage {
         const memProcCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
         const memProcHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
         memProcHead.add_child(new St.Label({ text: 'Top Memory Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
-        const memShowAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
+        const memShowAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true, accessible_name: 'Show all processes in System Monitor' });
         memShowAllBtn.child.style_class = 'rp-fg-dim';
         memShowAllBtn.child.style = 'font-size: 0.75em;';
         memShowAllBtn.connect('clicked', () => {

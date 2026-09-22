@@ -390,6 +390,147 @@ async function panelSizeFollows(rp) {
 
 // A focused overview card opens its page on Return and on Space, sent as
 // real key events through the compositor.
+// What a screen reader is given, read over AT-SPI by a separate process
+// (a11y-check.js) as Orca would: one tree per name asked for.
+async function a11yTrees(...names) {
+    const here = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
+    const proc = Gio.Subprocess.new(['gjs', '-m', `${here}/a11y-check.js`, ...names],
+        Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+    // A client stuck on the accessibility bus must not hang the whole test.
+    const killId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 60, () => {
+        proc.force_exit();
+        return GLib.SOURCE_REMOVE;
+    });
+    const [, out] = await new Promise((resolve, reject) => proc.communicate_utf8_async(null, null, (obj, res) => {
+        try {
+            resolve(obj.communicate_utf8_finish(res));
+        } catch (e) {
+            reject(e);
+        }
+    }));
+    GLib.source_remove(killId);
+    const trees = {};
+    for (const line of (out ?? '').split('\n')) {
+        const tree = /^A11Y-CHECK TREE ([^\t]+)\t(.*)$/.exec(line);
+        if (tree) trees[tree[1]] = JSON.parse(tree[2]);
+    }
+    const verdict = (out ?? '').split('\n').filter(line => /^A11Y-CHECK (DONE|FAIL)/.test(line));
+    check(proc.get_successful() && verdict.includes('A11Y-CHECK DONE'), `a11y: the AT-SPI client failed: ${verdict.join(' | ') || `exit ${proc.get_exit_status()}`}`);
+    return trees;
+}
+
+function a11yNodes(tree, out = []) {
+    out.push(tree);
+    for (const child of tree.children) a11yNodes(child, out);
+    return out;
+}
+
+// Interactive (reactive, so 'sensitive') objects a screen reader would
+// reach without a name; labels are named by their text.
+function a11yUnnamed(tree) {
+    return a11yNodes(tree).filter(n => n.showing && n.sensitive && !n.name && n.role !== 'label' && n.role !== 'text')
+        .map(n => n.role);
+}
+
+const A11Y_BUTTON = /^(push )?button$/;
+
+async function screenReader(rp) {
+    const root = Main.extensionManager.lookup(TARGET).path;
+    const { spokenValue } = await import(`file://${root}/lib/common/present.js`);
+    const { METRIC_NAMES } = await import(`file://${root}/ui/panel/constants.js`);
+    // No reading may land while the client reads the names: polls are held
+    // (the timer calls whatever rp._poll is) and the last glide finishes.
+    const hold = async () => {
+        rp._poll = () => {};
+        for (let i = 0; i < 50 && (rp._pollInFlight || rp._glideId); i++) await sleep(100);
+    };
+    const release = () => {
+        delete rp._poll;
+    };
+    const launched = [];
+    const launch = rp._launchSystemMonitor;
+    try {
+        // The top bar: each value named with its metric, dividers as
+        // separators, the ⚠ not offered while hidden.
+        await hold();
+        const bar = (await a11yTrees('Resource Pulse'))['Resource Pulse'];
+        const barNodes = a11yNodes(bar);
+        check(a11yUnnamed(bar).length === 0, `a11y: unnamed in the top bar: ${a11yUnnamed(bar).join(', ')}`);
+        for (const [key, w] of Object.entries(rp._topBarWidgets)) {
+            const want = `${METRIC_NAMES[key]} ${spokenValue(w.text)}`;
+            check(barNodes.some(n => n.showing && n.name === want), `a11y: no top-bar item '${want}' (have ${barNodes.filter(n => n.sensitive).map(n => `'${n.name}'`).join(', ')})`);
+        }
+        const separators = barNodes.filter(n => n.role === 'separator').length;
+        check(separators === Object.keys(rp._topBarWidgets).length - 1, `a11y: ${separators} separators between ${Object.keys(rp._topBarWidgets).length} metrics`);
+        const alerts = barNodes.find(n => n.name.startsWith('Alerts'));
+        check(alerts && !alerts.showing, `a11y: the hidden ⚠ is ${alerts ? 'offered' : 'missing'}`);
+        release();
+
+        // The overview: cards named with their values, buttons named.
+        rp._indicator.menu.open();
+        rp._activeTab = 'overview';
+        rp._updateTabVisibility();
+        await sleep(rp._intervalUs / 1000 + 800);
+        await hold();
+        let panel = (await a11yTrees('Resource Pulse panel'))['Resource Pulse panel'];
+        let nodes = a11yNodes(panel);
+        check(a11yUnnamed(panel).length === 0, `a11y: unnamed on the overview: ${a11yUnnamed(panel).join(', ')}`);
+        for (const card of Object.values(rp._summaryCards)) {
+            const start = `${card.title} ${spokenValue(card.valueLabel.text)}`;
+            check(nodes.some(n => n.showing && A11Y_BUTTON.test(n.role) && n.name.startsWith(start) && n.name.endsWith(`opens ${card.title} details`)),
+                `a11y: no card button '${start} …, opens ${card.title} details'`);
+        }
+        for (const name of ['Refresh now', 'Settings', 'Open System Monitor'])
+            check(nodes.some(n => n.showing && A11Y_BUTTON.test(n.role) && n.name === name), `a11y: no '${name}' button on the overview`);
+        release();
+
+        // The CPU page: range toggles, process rows (Enter opens System
+        // Monitor), the ✕ named with the process it ends.
+        rp._activeTab = 'cpu';
+        rp._updateTabVisibility();
+        await sleep(2 * rp._intervalUs / 1000 + 800);
+        await hold();
+        panel = (await a11yTrees('Resource Pulse panel'))['Resource Pulse panel'];
+        nodes = a11yNodes(panel);
+        check(a11yUnnamed(panel).length === 0, `a11y: unnamed on the CPU page: ${a11yUnnamed(panel).join(', ')}`);
+        const toggles = nodes.filter(n => n.showing && n.role === 'toggle button');
+        check(toggles.length === 3 && toggles.filter(n => n.checked).length === 1, `a11y: range toggles ${toggles.map(n => `${n.name}${n.checked ? ' (checked)' : ''}`).join(', ')}`);
+        const rows = rp._procWidgets.filter(w => w.item.visible);
+        const items = nodes.filter(n => n.showing && n.role === 'list item');
+        check(rows.length > 0 && items.length === rows.length, `a11y: ${items.length} process list items offered for ${rows.length} rows`);
+        for (const w of rows) {
+            check(items.some(n => n.name.startsWith(w.group.comm) && n.name.endsWith('opens System Monitor')), `a11y: no list item for ${w.group.comm} (have ${items.map(n => `'${n.name}'`).join(', ')})`);
+            if (w.endBtn.reactive)
+                check(nodes.some(n => n.sensitive && A11Y_BUTTON.test(n.role) && n.name.startsWith(`End ${w.group.comm}`)), `a11y: no 'End ${w.group.comm}' button`);
+        }
+        rp._launchSystemMonitor = view => launched.push(view);
+        rows[0].item.grab_key_focus();
+        await pressKey(Clutter.KEY_Return);
+        check(launched[0] === 'processes' && !rp._indicator.menu.isOpen, `a11y: Enter on a process row launched ${launched[0] ?? 'nothing'} and left the menu ${rp._indicator.menu.isOpen ? 'open' : 'closed'}`);
+        rp._launchSystemMonitor = launch;
+        release();
+
+        // The Battery page: its line about the top app is a named button.
+        rp._indicator.menu.open();
+        rp._activeTab = 'battery';
+        rp._updateTabVisibility();
+        await sleep(rp._intervalUs / 1000 + 800);
+        await hold();
+        panel = (await a11yTrees('Resource Pulse panel'))['Resource Pulse panel'];
+        check(a11yUnnamed(panel).length === 0, `a11y: unnamed on the Battery page: ${a11yUnnamed(panel).join(', ')}`);
+        check(a11yNodes(panel).some(n => n.showing && A11Y_BUTTON.test(n.role) && n.name.startsWith(rp._batTopAppLabel.text)),
+            `a11y: the top-app line '${rp._batTopAppLabel.text}' is not a named button`);
+        console.log(`RP-UITEST a11y: top bar ${barNodes.filter(n => n.sensitive && n.showing).map(n => `'${n.name}'`).join(', ')}`);
+    } finally {
+        rp._launchSystemMonitor = launch;
+        release();
+        rp._activeTab = 'overview';
+        rp._updateTabVisibility();
+        rp._indicator.menu.close();
+        await sleep(400);
+    }
+}
+
 async function keyboardOpensCards(rp) {
     rp._indicator.menu.open();
     await sleep(600);
@@ -832,6 +973,13 @@ async function smoothGlide(rp) {
         rp._present(reading(20, 10));
         await sleep(rp._intervalUs / 1000 + 300);
         check(mem() === 20 && cpu() === 10, `glide: first reading shown as ${mem()} / ${cpu()}`);
+        // Screen readers are told the reading, not each frame: one new name
+        // when the glide arrives (a11y.js).
+        const renamed = { bar: [], card: [] };
+        const barBox = rp._topBarWidgets.memory.box;
+        const cardBox = rp._summaryCards.memory.box;
+        const barId = barBox.connect('notify::accessible-name', () => renamed.bar.push(barBox.accessible_name));
+        const cardId = cardBox.connect('notify::accessible-name', () => renamed.card.push(cardBox.accessible_name));
         const t0 = GLib.get_monotonic_time();
         rp._present(reading(80, 90));
         const seen = [];
@@ -840,6 +988,10 @@ async function smoothGlide(rp) {
             seen.push(mem());
         }
         await sleep(450);
+        barBox.disconnect(barId);
+        cardBox.disconnect(cardId);
+        check(renamed.bar.join() === 'Memory 80%', `glide: the top-bar memory was renamed ${renamed.bar.length} times (${renamed.bar.join(' | ')}), not once to 'Memory 80%'`);
+        check(renamed.card.length === 1 && renamed.card[0].startsWith('Memory 80%,'), `glide: the memory card was renamed ${renamed.card.length} times (${renamed.card.join(' | ')})`);
         const between = new Set(seen.filter(v => v > 20 && v < 80));
         check(between.size >= 5, `glide: memory showed ${[...between].join(', ')} on the way (want ≥ 4 in-between values)`);
         check(seen.every((v, i) => i === 0 || v >= seen[i - 1]), `glide: memory went back on the way (${seen.join(', ')})`);
@@ -988,6 +1140,8 @@ async function alertsRaise(rp) {
         for (let i = 0; i < 40 && !rp._dangerBox.visible; i++) await sleep(500);
         check(rp._dangerBox.visible, `alerts: no ⚠ after 20 s of ${n} burners (CPU ${rp._lastCpu?.total?.toFixed(0)} %)`);
         check(rp._topBarWidgets.cpu.label.has_style_class_name('resource-pulse-label-danger'), 'alerts: the pinned CPU value is not red');
+        const warned = a11yNodes((await a11yTrees('Resource Pulse'))['Resource Pulse']).find(node => node.name.startsWith('Alerts'));
+        check(warned?.showing && warned.sensitive && /^Alerts: CPU \d+ % for /.test(warned.name), `alerts: a screen reader is given the ⚠ as '${warned?.name}'${warned?.showing ? '' : ' (not showing)'}`);
         // The ⚠ is narrower than any value, so making room for it hides at
         // most one. A label showing 'n/a' reserves no room and may be
         // narrower, but hiding it costs no value (it stays in the tooltip),
@@ -1105,6 +1259,7 @@ async function run() {
     await gpuPageFollowsReadings(ext.stateObj);
     await batteryTracking(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
+    await screenReader(ext.stateObj);
     await stuckCollector(ext.stateObj);
     await alertsRaise(ext.stateObj);
     await endProcesses(ext.stateObj);
