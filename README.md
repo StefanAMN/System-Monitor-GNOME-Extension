@@ -21,7 +21,8 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **Data per Day and Month**: The Network page shows today's and this month's traffic on physical interfaces, kept in `~/.local/share/resource-pulse/network-usage.json` (62 days).
 - **Copy Report**: Diagnostics can copy its findings and the machine's state as text.
 - **Smooth Changes**: In the open panel, values and bars glide to each new reading over one update interval instead of jumping (charts still step once per reading); CPU, GPU, network and disk speeds are lightly averaged, also in the top bar, which changes once per reading to stay within the 1 % idle budget. Alerts and history use the raw readings. A switch in Settings turns it off.
-- **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and buttons, Return or Space opens a card, Left / Right move between detail pages, Backspace goes back to the overview, Escape closes the panel.
+- **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and buttons, Return or Space opens a card or a process row, Left / Right move between detail pages, Backspace goes back to the overview, Escape closes the panel.
+- **Screen Readers**: Every value and control has an accessible name in words a screen reader says well ("Network download 1.2 MB per second", "CPU 7%, opens CPU details", "End firefox, 3 processes"), with button, toggle and list roles. Names change once per reading, not on every frame of a glide. Checked over AT-SPI on GNOME 46–50; not yet tried with Orca itself.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
 ## File Structure

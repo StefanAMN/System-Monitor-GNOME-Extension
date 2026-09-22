@@ -199,7 +199,7 @@ export function agoLabel(samplesBack, sampleSeconds) {
  * @param {string} text  e.g. "7%", "↓1.2 MB/s ↑30 KB/s", "85% · 2h 10m", "n/a"
  */
 export function spokenValue(text) {
-    if (!text || text === '--') return 'no reading yet';
+    if (!text || text.startsWith('--')) return 'no reading yet';
     if (text === 'n/a') return 'not available';
     const unit = (n, one, many) => `${n} ${n === '1' ? one : many}`;
     return text

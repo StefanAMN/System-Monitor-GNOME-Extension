@@ -477,8 +477,13 @@ async function screenReader(rp) {
         check(a11yUnnamed(panel).length === 0, `a11y: unnamed on the overview: ${a11yUnnamed(panel).join(', ')}`);
         for (const card of Object.values(rp._summaryCards)) {
             const start = `${card.title} ${spokenValue(card.valueLabel.text)}`;
+            // A card for hardware this machine lacks (a battery) is hidden.
+            if (!card.box.visible) {
+                check(!nodes.some(n => n.showing && n.name.startsWith(`${card.title} `) && n.name.endsWith('details')), `a11y: the hidden ${card.title} card is offered`);
+                continue;
+            }
             check(nodes.some(n => n.showing && A11Y_BUTTON.test(n.role) && n.name.startsWith(start) && n.name.endsWith(`opens ${card.title} details`)),
-                `a11y: no card button '${start} …, opens ${card.title} details'`);
+                `a11y: no card button '${start} ..., opens ${card.title} details'`);
         }
         for (const name of ['Refresh now', 'Settings', 'Open System Monitor'])
             check(nodes.some(n => n.showing && A11Y_BUTTON.test(n.role) && n.name === name), `a11y: no '${name}' button on the overview`);

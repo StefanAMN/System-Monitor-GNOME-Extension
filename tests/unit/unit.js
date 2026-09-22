@@ -341,8 +341,8 @@ docker0: 1 2 3
     eq(labelTemplate('battery', { batFmt: 'percent-time' }), '100%', 'template: no room reserved for a battery time estimate that may be absent');
 
     // What a screen reader is given for the panel's values.
-    eq(['7%', '--', '', 'n/a', '↓1.2 MB/s ↑30 KB/s', '↓ 999 KB/s', '↑ 4.0 KB/s', '85% · 2h 10m', '40% · 1h 1m', '9% · 0h 23m', '5.2W', '17.0 W', '54°C', '3.1 GiB/s'].map(spokenValue),
-        ['7%', 'no reading yet', 'no reading yet', 'not available', 'download 1.2 MB per second, upload 30 KB per second', 'download 999 KB per second',
+    eq(['7%', '--', '--%', '', 'n/a', '↓1.2 MB/s ↑30 KB/s', '↓ 999 KB/s', '↑ 4.0 KB/s', '85% · 2h 10m', '40% · 1h 1m', '9% · 0h 23m', '5.2W', '17.0 W', '54°C', '3.1 GiB/s'].map(spokenValue),
+        ['7%', 'no reading yet', 'no reading yet', 'no reading yet', 'not available', 'download 1.2 MB per second, upload 30 KB per second', 'download 999 KB per second',
             'upload 4.0 KB per second', '85%, 2 hours 10 minutes', '40%, 1 hour 1 minute', '9%, 23 minutes', '5.2 watts', '17.0 watts', '54°C', '3.1 GiB per second'],
         'spoken values: placeholders, arrows, rates, watts, hours');
 
