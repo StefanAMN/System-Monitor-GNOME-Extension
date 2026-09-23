@@ -21,7 +21,19 @@ const BUDGET_CLOSED = 1.0;
 const BUDGET_OPEN = 5.0;
 
 const WINDOW_S = parseInt(GLib.getenv('RP_OVERHEAD_WINDOW') || '30', 10);
-const SOAK_S = parseInt(GLib.getenv('RP_SOAK') || '600', 10);
+const SOAK_S = parseInt(GLib.getenv('RP_SOAK') || '1200', 10);
+// Only the soak: the CPU windows need a quiet machine, the memory checks do
+// not, so soaks can run side by side (and on CI runners).
+const SOAK_ONLY = GLib.getenv('RP_SOAK_ONLY') === '1';
+// Test-only: keep one small object per reading, as a leak would, to prove
+// the heap census catches it.
+const SOAK_LEAK = GLib.getenv('RP_SOAK_LEAK') === '1';
+// A JavaScript cell kind (Object, Array, Function, ...) leaks when it grows
+// by more than this many cells per 100 polls in both halves of the steady
+// phase; a cache that fills once grows in one half only.
+const LEAK_CELLS_PER_100_POLLS = 40;
+// RSS is a sanity bound only: allocator retention moves it without a leak.
+const RSS_SLOPE_LIMIT = 0.5;
 
 let started = false;
 
@@ -104,19 +116,62 @@ function showTab(ext, tab) {
     ext._updateTabVisibility();
 }
 
-function slopePerMinute(points) {
-    // Least-squares slope of value over time (minutes).
-    const n = points.length;
-    if (n < 2) return 0;
-    const mx = points.reduce((a, p) => a + p.t, 0) / n;
-    const my = points.reduce((a, p) => a + p.v, 0) / n;
-    let num = 0;
-    let den = 0;
-    for (const p of points) {
-        num += (p.t - mx) * (p.v - my);
-        den += (p.t - mx) ** 2;
+/**
+ * Robust slope (Theil–Sen): the median of the slopes between every pair of
+ * points, so one GC or allocator step does not tilt it.
+ */
+function medianSlope(points) {
+    const slopes = [];
+    for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+            if (points[j].t > points[i].t) slopes.push((points[j].v - points[i].v) / (points[j].t - points[i].t));
+        }
     }
-    return den > 0 ? num / den : 0;
+    if (!slopes.length) return 0;
+    slopes.sort((a, b) => a - b);
+    const mid = slopes.length >> 1;
+    return slopes.length % 2 ? slopes[mid] : (slopes[mid - 1] + slopes[mid]) / 2;
+}
+
+/**
+ * Live JavaScript cells in the shell by kind (Object, Array, Function,
+ * string, ...), after a full collection. The heap dump runs to tens of MB,
+ * so another process (awk) counts it and the shell does not parse it.
+ */
+async function heapCensus() {
+    const path = GLib.build_filenamev([GLib.get_user_runtime_dir(), `rp-heap-${GLib.get_monotonic_time()}.txt`]);
+    System.gc();
+    System.dumpHeap(path);
+    try {
+        const proc = Gio.Subprocess.new(['awk',
+            '/^# zone/ { cells = 1 } cells && /^0x[0-9a-f]+ [BGW] / { n[$3]++ } END { for (k in n) print n[k], k }', path],
+        Gio.SubprocessFlags.STDOUT_PIPE);
+        const [, out] = await new Promise((resolve, reject) => proc.communicate_utf8_async(null, null, (obj, res) => {
+            try {
+                resolve(obj.communicate_utf8_finish(res));
+            } catch (e) {
+                reject(e);
+            }
+        }));
+        check(proc.get_successful(), `heap census: awk failed (exit ${proc.get_exit_status()})`);
+        const counts = {};
+        for (const line of out.trim().split('\n')) {
+            const [n, kind] = line.split(' ');
+            if (kind) counts[kind] = Number(n);
+        }
+        check(counts.Object > 0, `heap census: no objects counted in ${path}`);
+        return counts;
+    } finally {
+        Gio.File.new_for_path(path).delete(null);
+    }
+}
+
+/** Growth per kind between two censuses, in cells per 100 polls. */
+function growth(a, b, polls) {
+    const out = {};
+    for (const kind of new Set([...Object.keys(a), ...Object.keys(b)]))
+        out[kind] = ((b[kind] ?? 0) - (a[kind] ?? 0)) * 100 / polls;
+    return out;
 }
 
 async function overhead() {
@@ -217,11 +272,27 @@ async function churn() {
 async function soak() {
     // Worst realistic case: 1 s interval, menu open, every tab visited.
     const ext = rp();
+    if (SOAK_ONLY) {
+        ext._settings.set_strv('pinned-metrics', ALL_METRICS);
+        ext._settings.set_boolean('battery-tracking', true);
+    }
+    const kept = [];
+    if (SOAK_LEAK) {
+        const present = ext._present;
+        ext._present = function (data) {
+            kept.push({ at: GLib.get_monotonic_time(), cpu: data.cpu?.total });
+            return present.call(this, data);
+        };
+    }
     ext._settings.set_int('poll-interval', 1);
     ext._indicator.menu.open();
     const t0 = GLib.get_monotonic_time();
     const c0 = cpuTicks();
     const samples = [];
+    // Heap censuses: after a quarter (lazy pages and caches are built by
+    // then), half way through the rest, and at the end.
+    const censusAt = [SOAK_S / 4, SOAK_S * 5 / 8, SOAK_S];
+    const censuses = [];
     let tab = 0;
     for (let elapsed = 0; elapsed < SOAK_S; elapsed += 15) {
         for (let k = 0; k < 3; k++) {
@@ -230,42 +301,58 @@ async function soak() {
         }
         System.gc();
         await sleep(200);
+        const t = (GLib.get_monotonic_time() - t0) / 1e6;
         samples.push({
-            t: (GLib.get_monotonic_time() - t0) / 60e6,
+            t: t / 60,
             rss: rssMb(),
             fds: fdCount(),
             actors: actorCount(ext._indicator.menu.box),
             sparks: ext._sparklines.length
         });
+        if (censuses.length < censusAt.length && elapsed + 15 >= censusAt[censuses.length])
+            censuses.push({ t, cells: await heapCensus() });
     }
     const cpu = ((cpuTicks() - c0) / CLK_TCK / ((GLib.get_monotonic_time() - t0) / 1e6)) * 100;
     showTab(ext, 'overview');
     ext._indicator.menu.close();
     ext._settings.set_int('poll-interval', 2);
+    if (SOAK_LEAK) delete ext._present;
 
-    // Ignore the first quarter: lazy pages and caches are still being built.
-    const steady = samples.slice(Math.floor(samples.length / 4));
+    // RSS after the first half: the collector and the allocator settle
+    // for minutes after the pages are built.
+    const steady = samples.filter(s => s.t * 60 >= SOAK_S / 2);
     const first = steady[0];
     const last = steady[steady.length - 1];
-    const rssSlope = slopePerMinute(steady.map(s => ({ t: s.t, v: s.rss })));
-    report(`soak ${SOAK_S}s @1s interval, menu open, tabs cycling: shell CPU ${cpu.toFixed(2)}% (incl. idle shell)`);
-    report(`soak RSS ${samples[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, steady-state slope ${rssSlope.toFixed(3)} MB/min`);
+    const rssSlope = medianSlope(steady.map(s => ({ t: s.t, v: s.rss })));
+    report(`soak ${SOAK_S}s @1s interval, menu open, tabs cycling: shell CPU ${cpu.toFixed(2)}% (incl. idle shell)${SOAK_LEAK ? `, planted leak of ${kept.length} objects` : ''}`);
+    report(`soak RSS ${samples[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, slope after the first half ${rssSlope.toFixed(3)} MB/min (median of pairs)`);
     report(`soak fds ${first.fds} -> ${last.fds}, menu actors ${first.actors} -> ${last.actors}, sparklines ${first.sparks} -> ${last.sparks}`);
+
+    // Cells per 100 polls (one poll a second) in each half; a leak grows in both.
+    check(censuses.length === 3, `heap census: ${censuses.length} of 3 taken`);
+    const [c1, c2, c3] = censuses;
+    const g1 = growth(c1.cells, c2.cells, c2.t - c1.t);
+    const g2 = growth(c2.cells, c3.cells, c3.t - c2.t);
+    const kinds = Object.keys(g2).sort((a, b) => Math.max(g2[b], g1[b]) - Math.max(g2[a], g1[a]));
+    report(`soak heap: ${c1.cells.Object} -> ${c2.cells.Object} -> ${c3.cells.Object} objects; growth per 100 polls (first half / second half): ` +
+        kinds.slice(0, 6).map(k => `${k} ${g1[k] >= 0 ? '+' : ''}${g1[k].toFixed(0)} / ${g2[k] >= 0 ? '+' : ''}${g2[k].toFixed(0)}`).join(', '));
+    const leaking = kinds.filter(k => g1[k] > LEAK_CELLS_PER_100_POLLS && g2[k] > LEAK_CELLS_PER_100_POLLS);
 
     check(steady.every(s => s.sparks === first.sparks), 'sparkline list grew during the soak');
     check(Math.max(...steady.map(s => s.actors)) === Math.min(...steady.map(s => s.actors)) ||
         steady.every(s => Math.abs(s.actors - first.actors) <= 20),
     `menu actor count drifted (${steady.map(s => s.actors).join(', ')})`);
     check(last.fds <= first.fds + 3, `fd count grew from ${first.fds} to ${last.fds}`);
-    // A real leak of one allocation per poll shows up as a steady climb.
-    // 0.5 MB/min is 30 MB/hour, well above allocator noise after GC.
-    check(rssSlope <= 0.5, `shell RSS keeps growing at ${rssSlope.toFixed(2)} MB/min`);
+    check(leaking.length === 0, `JavaScript heap keeps growing: ${leaking.map(k => `${k} +${g1[k].toFixed(0)} then +${g2[k].toFixed(0)} cells per 100 polls`).join(', ')}`);
+    check(rssSlope <= RSS_SLOPE_LIMIT, `shell RSS keeps growing at ${rssSlope.toFixed(2)} MB/min after the first half`);
 }
 
 async function run() {
     await sleep(3000);
-    await overhead();
-    await churn();
+    if (!SOAK_ONLY) {
+        await overhead();
+        await churn();
+    }
     if (SOAK_S > 0) await soak();
 }
 
