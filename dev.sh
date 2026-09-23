@@ -314,7 +314,8 @@ cmd_test_ci() {
     # polling loop ran cleanly for DURATION seconds.
     local BAD
     BAD="$(grep -nE "$BAD_LOG_PATTERN" "$LOG" || true)"
-    if grep -q "State: ACTIVE" "$SANDBOX/info.txt" 2>/dev/null && [ -z "$BAD" ]; then
+    # GNOME Shell 45 reports the same state as ENABLED.
+    if grep -qE "State: (ACTIVE|ENABLED)" "$SANDBOX/info.txt" 2>/dev/null && [ -z "$BAD" ]; then
         log_success "Extension ACTIVE for ${DURATION}s in an isolated shell with a clean log."
         finish_sandbox
     else
@@ -363,7 +364,10 @@ driver_passed() {
 driver_failure_details() {
     echo "$BAD" | head -n 40
     grep -A12 "RP-UITEST FAIL" "$LOG" | head -n 30 || true
-    grep -q "RP-UITEST" "$LOG" || echo "  (driver never finished: timed out)"
+    if ! grep -q "RP-UITEST" "$LOG"; then
+        echo "  (driver never finished: timed out; end of the shell log follows)"
+        grep -v "^$" "$LOG" | tail -n 25
+    fi
 }
 
 cmd_test_ui() {
@@ -441,7 +445,9 @@ compat_fedora() {
 
 cmd_test_compat() {
     local VERSIONS=("$@")
-    [ "${#VERSIONS[@]}" -gt 0 ] || VERSIONS=(45 46 47 48 49)
+    # 45 can be asked for by name; it is known not to work (the menu body
+    # stays empty there) and is not listed in metadata.json.
+    [ "${#VERSIONS[@]}" -gt 0 ] || VERSIONS=(46 47 48 49)
     log_title "Compatibility tests: GNOME Shell ${VERSIONS[*]}"
     if ! command -v docker >/dev/null 2>&1; then
         log_error "docker not found: other GNOME Shell versions were NOT tested."
@@ -572,7 +578,7 @@ cmd_help() {
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Enable in an isolated headless shell for [sec] (default 5) and scan its log"
     echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
-    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless and test-ui on other GNOME Shell versions in containers (default 45-49; needs docker)"
+    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless and test-ui on other GNOME Shell versions in containers (default 46-49; needs docker)"
     echo -e "  ${GREEN}lint${RESET}               Run ESLint (needs 'npm ci' once)"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
     echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 600) for leaks"
