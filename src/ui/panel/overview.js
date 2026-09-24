@@ -9,6 +9,7 @@ import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 import { ProgressBar } from './widgets.js';
 import { CARD_SLOT_HEIGHT } from './constants.js';
+import { _ } from '../../lib/common/i18n.js';
 
 export class OverviewMethods {
     _sanitizeCardOrder(list) {
@@ -570,10 +571,10 @@ export class OverviewMethods {
 
         // Header container (System Overview, Refresh, Menu)
         const headerBox = new St.BoxLayout({ style: 'margin-bottom: 12px;', y_align: Clutter.ActorAlign.CENTER });
-        const titleLbl = new St.Label({ text: 'System Overview', style_class: 'rp-fg', style: 'font-size: 1.3em; font-weight: bold;', x_expand: true });
+        const titleLbl = new St.Label({ text: _('System Overview'), style_class: 'rp-fg', style: 'font-size: 1.3em; font-weight: bold;', x_expand: true });
         headerBox.add_child(titleLbl);
 
-        const refreshBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: 'Refresh now' });
+        const refreshBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: _('Refresh now') });
         const refreshIcon = new St.Icon({ icon_name: 'view-refresh-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         refreshIcon.set_pivot_point(0.5, 0.5);
         refreshBtn.add_child(refreshIcon);
@@ -587,7 +588,7 @@ export class OverviewMethods {
             });
         });
 
-        const menuBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true, accessible_name: 'Settings' });
+        const menuBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px; margin-left: 6px;', reactive: true, accessible_name: _('Settings') });
         const menuIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         menuIcon.set_pivot_point(0.5, 0.5);
         menuBtn.add_child(menuIcon);
@@ -614,14 +615,14 @@ export class OverviewMethods {
         // value, a slot of fixed height (trend graph or one line of detail)
         // and a bar. `spark` names the history a card's trend graph draws.
         const cards = [
-            { key: 'cpu', label: 'CPU', color: [0.208, 0.518, 0.894], placeholder: '--%', spark: 'cpu' },
-            { key: 'memory', label: 'Memory', color: [0.569, 0.255, 0.675], placeholder: '--%', spark: 'mem' },
-            { key: 'battery', label: 'Battery', color: [0.18, 0.76, 0.494], placeholder: '--%' },
-            { key: 'disk', label: 'Disk', color: [0.96, 0.83, 0.18] },
-            { key: 'network', label: 'Network', color: [0.88, 0.11, 0.14] },
-            { key: 'thermal', label: 'Thermal', color: [1.0, 0.47, 0.0] },
-            { key: 'power', label: 'Power', color: [0.96, 0.83, 0.18] },
-            { key: 'gpu', label: 'GPU', color: [0.2, 0.82, 0.48] }
+            { key: 'cpu', label: _('CPU'), color: [0.208, 0.518, 0.894], placeholder: '--%', spark: 'cpu' },
+            { key: 'memory', label: _('Memory'), color: [0.569, 0.255, 0.675], placeholder: '--%', spark: 'mem' },
+            { key: 'battery', label: _('Battery'), color: [0.18, 0.76, 0.494], placeholder: '--%' },
+            { key: 'disk', label: _('Disk'), color: [0.96, 0.83, 0.18] },
+            { key: 'network', label: _('Network'), color: [0.88, 0.11, 0.14] },
+            { key: 'thermal', label: _('Thermal'), color: [1.0, 0.47, 0.0] },
+            { key: 'power', label: _('Power'), color: [0.96, 0.83, 0.18] },
+            { key: 'gpu', label: _('GPU'), color: [0.2, 0.82, 0.48] }
         ];
         for (const card of cards) this._summaryCards[card.key] = this._buildMetricCard(card);
         // The battery card's detail line is its charging state.
@@ -647,8 +648,8 @@ export class OverviewMethods {
         hwTop.add_child(this._chipBox);
 
         const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
-        this._hwName = new St.Label({ text: 'Intel Processor', style_class: 'rp-fg', style: 'font-size: 1.05em; font-weight: bold;' });
-        this._hwStats = new St.Label({ text: 'Cores & Threads', style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });
+        this._hwName = new St.Label({ text: _('Intel Processor'), style_class: 'rp-fg', style: 'font-size: 1.05em; font-weight: bold;' });
+        this._hwStats = new St.Label({ text: _('Cores & Threads'), style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });
         hwDesc.add_child(this._hwName);
         hwDesc.add_child(this._hwStats);
         hwTop.add_child(hwDesc);
@@ -658,17 +659,17 @@ export class OverviewMethods {
         const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
 
         const uptimeBox = new St.BoxLayout({ vertical: true });
-        uptimeBox.add_child(new St.Label({ text: 'Uptime', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        uptimeBox.add_child(new St.Label({ text: _('Uptime'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._hwUptimeVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
         uptimeBox.add_child(this._hwUptimeVal);
 
         const loadBox = new St.BoxLayout({ vertical: true, x_expand: true });
-        loadBox.add_child(new St.Label({ text: 'Load Average', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        loadBox.add_child(new St.Label({ text: _('Load Average'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._hwLoadVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
         loadBox.add_child(this._hwLoadVal);
 
         const osBox = new St.BoxLayout({ vertical: true });
-        osBox.add_child(new St.Label({ text: 'OS', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        osBox.add_child(new St.Label({ text: _('OS'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._hwOsVal = new St.Label({ text: `GNOME ${Config.PACKAGE_VERSION.split('.')[0]}`, style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
         osBox.add_child(this._hwOsVal);
 
@@ -695,7 +696,7 @@ export class OverviewMethods {
             style_class: 'rp-c-cpu', style: 'icon-size: 16px;'
         });
         const sysMonLbl = new St.Label({
-            text: 'Open System Monitor',
+            text: _('Open System Monitor'),
             style_class: 'resource-pulse-sysmon-label',
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER

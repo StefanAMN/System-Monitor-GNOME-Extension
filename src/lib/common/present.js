@@ -2,6 +2,7 @@
 // touching any widget, so they can be unit-tested under plain gjs.
 import { formatTemp } from './format.js';
 import { METRICS } from './settingsmodel.js';
+import { _, fill, ngettext } from './i18n.js';
 
 export const METRIC_KEYS = METRICS.map(m => m.key);
 
@@ -19,20 +20,29 @@ export function sanitizeMetricList(list) {
 }
 
 /**
+ * What a value reads when this machine cannot provide it. The top bar's
+ * labels compare against it too (they reserve no room while showing it).
+ */
+export function na() {
+    // Translators: "not available", in a top-bar value or a card; keep it short.
+    return _('n/a');
+}
+
+/**
  * What to show for power draw.
  * value is null when nothing on this machine can measure it right now.
  * @returns {{value: number|null, source: string, reason: string}}
  */
 export function powerReadout(pwr) {
-    if (!pwr) return { value: null, source: '', reason: 'Not sampled yet' };
+    if (!pwr) return { value: null, source: '', reason: _('Not sampled yet') };
     if (pwr.systemPower !== null && pwr.systemPower !== undefined)
-        return { value: pwr.systemPower, source: 'On Battery', reason: '' };
+        return { value: pwr.systemPower, source: _('On Battery'), reason: '' };
     if (pwr.raplSupported)
-        return { value: pwr.packagePower || 0, source: 'AC · CPU package only', reason: '' };
+        return { value: pwr.packagePower || 0, source: _('AC · CPU package only'), reason: '' };
     return {
         value: null,
         source: '',
-        reason: 'CPU energy counters are not readable.\nSee "Enable CPU Power Monitoring" in settings.'
+        reason: _('CPU energy counters are not readable.\nSee "Enable CPU Power Monitoring" in settings.')
     };
 }
 
@@ -49,11 +59,11 @@ export function thermalUnavailable(thm) {
  * @param {string} tempUnit 'C' or 'F'
  */
 export function gpuTooltip(gpu, tempUnit = 'C') {
-    if (!gpu || !gpu.present) return 'GPU not available\nNo supported GPU was detected.';
+    if (!gpu || !gpu.present) return _('GPU not available\nNo supported GPU was detected.');
     const extra = [];
-    if (gpu.memTotal > 0) extra.push(`VRAM: ${Math.round(gpu.memPercent)}%`);
-    if (gpu.temp > 0) extra.push(`Temp: ${formatTemp(gpu.temp, tempUnit)}`);
-    const head = `${gpu.brand || 'GPU'}: ${Math.round(gpu.percent)}%`;
+    if (gpu.memTotal > 0) extra.push(fill(_('VRAM: {percent}%'), { percent: Math.round(gpu.memPercent) }));
+    if (gpu.temp > 0) extra.push(fill(_('Temp: {temp}'), { temp: formatTemp(gpu.temp, tempUnit) }));
+    const head = fill(_('{gpu}: {percent}%'), { gpu: gpu.brand || _('GPU'), percent: Math.round(gpu.percent) });
     return extra.length > 0 ? `${head}\n${extra.join(' · ')}` : head;
 }
 
@@ -182,14 +192,17 @@ export function hoverIndex(x, padLeft, graphWidth, capacity, length) {
 /** "now", "14s ago", "1m 20s ago" for a sample `samplesBack` ticks old. */
 export function agoLabel(samplesBack, sampleSeconds) {
     const t = Math.round(samplesBack * sampleSeconds);
-    if (t <= 0) return 'now';
-    if (t < 60) return `${t}s ago`;
+    // Translators: how old a chart point is, under the pointer; kept short.
+    if (t <= 0) return _('now');
+    if (t < 60) return fill(_('{s}s ago'), { s: t });
     if (t >= 3600) {
+        const h = Math.floor(t / 3600);
         const m = Math.floor((t % 3600) / 60);
-        return m ? `${Math.floor(t / 3600)}h ${m}m ago` : `${Math.floor(t / 3600)}h ago`;
+        return m ? fill(_('{h}h {m}m ago'), { h, m }) : fill(_('{h}h ago'), { h });
     }
+    const m = Math.floor(t / 60);
     const s = t % 60;
-    return s ? `${Math.floor(t / 60)}m ${s}s ago` : `${Math.floor(t / 60)}m ago`;
+    return s ? fill(_('{m}m {s}s ago'), { m, s }) : fill(_('{m}m ago'), { m });
 }
 
 /**
@@ -199,16 +212,17 @@ export function agoLabel(samplesBack, sampleSeconds) {
  * @param {string} text  e.g. "7%", "↓1.2 MB/s ↑30 KB/s", "85% · 2h 10m", "n/a"
  */
 export function spokenValue(text) {
-    if (!text || text.startsWith('--')) return 'no reading yet';
-    if (text === 'n/a') return 'not available';
-    const unit = (n, one, many) => `${n} ${n === '1' ? one : many}`;
+    if (!text || text.startsWith('--')) return _('no reading yet');
+    if (text === na()) return _('not available');
+    const hours = n => fill(ngettext('{n} hour', '{n} hours', Number(n)), { n });
+    const minutes = n => fill(ngettext('{n} minute', '{n} minutes', Number(n)), { n });
     return text
         .replace(/\s*·\s*/g, ', ')
-        .replace(/\b(\d+)h (\d+)m\b/g, (_m, h, m) => (h === '0' ? unit(m, 'minute', 'minutes') : `${unit(h, 'hour', 'hours')} ${unit(m, 'minute', 'minutes')}`))
-        .replace(/\s*↓\s*/g, (_m, at) => (at > 0 ? ', download ' : 'download '))
-        .replace(/\s*↑\s*/g, (_m, at) => (at > 0 ? ', upload ' : 'upload '))
-        .replace(/([KMGT]?i?B)\/s\b/g, '$1 per second')
-        .replace(/(\d)\s?W\b/g, '$1 watts')
+        .replace(/\b(\d+)h (\d+)m\b/g, (_whole, h, m) => (h === '0' ? minutes(m) : `${hours(h)} ${minutes(m)}`))
+        .replace(/\s*↓\s*/g, (_whole, at) => `${at > 0 ? ', ' : ''}${_('download')} `)
+        .replace(/\s*↑\s*/g, (_whole, at) => `${at > 0 ? ', ' : ''}${_('upload')} `)
+        .replace(/([KMGT]?i?B)\/s\b/g, (_whole, unit) => `${unit} ${_('per second')}`)
+        .replace(/(\d)\s?W\b/g, (_whole, digit) => `${digit} ${_('watts')}`)
         .replace(/\s+/g, ' ')
         .trim();
 }

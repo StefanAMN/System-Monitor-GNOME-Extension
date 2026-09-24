@@ -1199,11 +1199,70 @@ async function alertsRaise(rp) {
     rp._alerts = new AlertMonitor();
 }
 
+// The pseudo-language run (./scripts/dev.sh test-i18n: LANGUAGE=xx, a
+// catalogue that wraps every string in ⟦ ⟧): visible text, tooltips and
+// accessible names in the top bar and on every page of the panel must read
+// ⟦…⟧ except for data (process, sensor, CPU and GPU names...); then the same
+// for the preferences window (prefs-check.js coverage).
+async function translationCoverage(rp) {
+    const { untranslated, dataStrings } = await import('./i18n-coverage.js');
+    rp._settings.set_strv('pinned-metrics', ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu']);
+    await sleep(3000);
+    const found = new Map();
+    const look = (text, where) => {
+        const data = dataStrings(rp._lastData);
+        if (untranslated(text, data) && !found.has(text)) found.set(text, where);
+    };
+    const scan = (root, where) => eachDescendant(root, actor => {
+        if (!actor.mapped) return;
+        if (actor instanceof St.Label) look(actor.text, where);
+        look(actor.accessible_name, `${where}, accessible name`);
+    });
+    scan(rp._indicator, 'top bar');
+    for (const [key, text] of Object.entries(rp._tooltipTexts)) look(text, `${key} tooltip`);
+    look(rp._alertText(), 'alerts');
+    check(rp._topBarWidgets.cpu.box.accessible_name.includes('⟦'), `coverage: the pseudo-language is not loaded (CPU named '${rp._topBarWidgets.cpu.box.accessible_name}')`);
+    let texts = 0;
+    rp._indicator.menu.open();
+    for (const tab of TABS) {
+        rp._activeTab = tab;
+        rp._updateTabVisibility();
+        // Process lists need two samples.
+        await sleep(['cpu', 'memory', 'disk'].includes(tab) ? 4500 : 2500);
+        eachDescendant(rp._indicator.menu.box, actor => {
+            if (actor.mapped && actor instanceof St.Label) texts++;
+        });
+        scan(rp._indicator.menu.box, `${tab} page`);
+    }
+    rp._indicator.menu.close();
+    console.log(`RP-UITEST coverage: ${texts} panel labels read on ${TABS.length} pages`);
+    check(found.size === 0, `coverage: untranslated: ${[...found].map(([text, where]) => `${where}: '${text}'`).join('; ')}`);
+
+    // The window, in its own process.
+    const here = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
+    const proc = Gio.Subprocess.new(['gjs', '-m', `${here}/prefs-check.js`, Main.extensionManager.lookup(TARGET).path, 'coverage'],
+        Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+    const [, out] = await new Promise((resolve, reject) => proc.communicate_utf8_async(null, null, (obj, res) => {
+        try {
+            resolve(obj.communicate_utf8_finish(res));
+        } catch (e) {
+            reject(e);
+        }
+    }));
+    const lines = (out ?? '').split('\n').filter(line => line.startsWith('PREFS-CHECK') && !line.startsWith('PREFS-CHECK INFO'));
+    check(proc.get_successful() && lines.some(line => line.startsWith('PREFS-CHECK DONE')), `coverage: ${lines.join(' | ') || `prefs-check exit ${proc.get_exit_status()}`}`);
+    console.log(`RP-UITEST coverage: ${lines.join(' | ')}`);
+}
+
 async function run() {
     await sleep(1500);
     enabledAt = GLib.get_monotonic_time() - 4000000;
     let ext = Main.extensionManager.lookup(TARGET);
     check(ext?.stateObj, 'target extension not enabled');
+    if (GLib.getenv('LANGUAGE') === 'xx') {
+        await translationCoverage(ext.stateObj);
+        return;
+    }
 
     // A stored list with an unknown key and a duplicate (GSettings accepts
     // both) must not put a broken or repeated metric in the top bar.

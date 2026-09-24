@@ -1,5 +1,6 @@
 import GLib from 'gi://GLib';
 import { readFileAsync, listDirAsync, runSubprocess, noteReadError } from '../common/utils.js';
+import { _ } from '../common/i18n.js';
 
 /**
  * First GPU from `nvidia-smi --query-gpu=name,driver_version,utilization.gpu,
@@ -420,7 +421,7 @@ export class GpuSampler {
         return {
             present: false,
             brand: 'None',
-            model: 'No Active GPU',
+            model: _('No Active GPU'),
             driver: '--',
             percent: 0,
             memPercent: 0,

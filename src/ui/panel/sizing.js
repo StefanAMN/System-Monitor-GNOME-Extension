@@ -6,6 +6,7 @@ import Clutter from 'gi://Clutter';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { ResizeHandle } from './widgets.js';
+import { _ } from '../../lib/common/i18n.js';
 
 export class SizingMethods {
     _updateMenuDimensions() {
@@ -138,7 +139,7 @@ export class SizingMethods {
 
         corners.forEach(c => {
             const handle = new ResizeHandle(c.id, c.size);
-            handle.accessible_name = 'Resize the panel';
+            handle.accessible_name = _('Resize the panel');
             handle.x_align = c.xAlign;
             handle.y_align = c.yAlign;
             handle.x_expand = true;

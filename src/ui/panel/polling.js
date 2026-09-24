@@ -10,6 +10,7 @@ import { smoothReading, interpolateReading, glideBuffer } from '../../lib/engine
 import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
+import { _, fill } from '../../lib/common/i18n.js';
 import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
 
 export class PollingMethods {
@@ -46,7 +47,8 @@ export class PollingMethods {
         // Samples taken at another cadence would distort the time axis.
         for (const key of HISTORY_KEYS) this._hist[key].clear();
         const span = interval * HISTORY_CAPACITY;
-        const spanLabel = span > 60 && span % 60 === 0 ? `${span / 60}m` : `${span}s`;
+        // Translators: how much a chart shows, kept short: "2m", "60s".
+        const spanLabel = span > 60 && span % 60 === 0 ? fill(_('{m}m'), { m: span / 60 }) : fill(_('{s}s'), { s: span });
         this._spanLabel = spanLabel;
         this._sampleSeconds = interval;
         this._pwrStats.maxGapS = 2.5 * interval;
@@ -238,7 +240,7 @@ export class PollingMethods {
             if (!spark.options.showGrid) continue;
             spark.history = spec ? this._long[this._range][spark.histKey] : this._hist[spark.histKey];
             spark.setSampleSeconds(spec ? spec.bucketUs / 1e6 : this._sampleSeconds);
-            spark.setSpanLabel(spec ? spec.label : this._spanLabel);
+            spark.setSpanLabel(spec ? _(spec.label) : this._spanLabel);
             spark.refresh();
         }
         for (const [range, button] of Object.entries(this._rangeButtons ?? {})) {
@@ -246,7 +248,7 @@ export class PollingMethods {
             else button.remove_style_class_name('rp-range-on');
             button.checked = range === this._range;
         }
-        if (this._rangeButtons?.live) this._rangeButtons.live.label = this._spanLabel || 'live';
+        if (this._rangeButtons?.live) this._rangeButtons.live.label = this._spanLabel || _('live');
     }
 
     /**
@@ -455,7 +457,7 @@ export class PollingMethods {
         const spark = new Sparkline(this._hist[key], height, Object.assign({}, options, scale));
         spark.histKey = key;
         // The detail charts answer the pointer, so they need a name.
-        if (options.showGrid) spark.accessible_name = `${CHART_NAMES[key]} over time`;
+        if (options.showGrid) spark.accessible_name = fill(_('{chart} over time'), { chart: CHART_NAMES[key] });
         // Pages are built on first visit, after polling has started.
         if (this._spanLabel) spark.setSpanLabel(this._spanLabel);
         if (this._sampleSeconds) spark.setSampleSeconds(this._sampleSeconds);

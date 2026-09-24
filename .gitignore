@@ -13,3 +13,5 @@ scratch/
 __pycache__/
 *.pyc
 node_modules/
+# Built from po/ by scripts/dev.sh (and the pseudo-language of test-i18n).
+src/locale/

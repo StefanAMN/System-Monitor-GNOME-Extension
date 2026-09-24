@@ -5,6 +5,8 @@ FROM registry.fedoraproject.org/fedora:${FEDORA}
 RUN dnf install -y --setopt=install_weak_deps=False \
         gnome-shell gjs glib2 glib2-devel dbus-daemon dbus-tools mesa-dri-drivers \
         nodejs procps-ng pciutils findutils which util-linux \
+        # test-i18n: gettext tools, and a real locale (LANGUAGE is ignored under C).
+        gettext glibc-langpack-en \
     && dnf clean all \
     && useradd -m tester \
     # Xwayland, which the shell starts even when headless, needs its socket directory.

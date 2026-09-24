@@ -6,6 +6,7 @@
 // SUSTAIN_US, and clears once it has stayed HYSTERESIS points below the
 // threshold for RECOVER_US, so a value hovering at the line does not flap.
 // All times are monotonic microseconds.
+import { _, fill } from '../common/i18n.js';
 
 export const SUSTAIN_US = 30e6;
 export const RECOVER_US = 10e6;
@@ -128,5 +129,6 @@ export function alertReadings(data, limits, thermalUnavailable) {
 /** "CPU 97 % for 1 min" */
 export function alertLine(alert, now, { name, format }) {
     const minutes = Math.max(1, Math.round((now - alert.since) / 60e6));
-    return `${name} ${format(alert.value)} for ${minutes} min`;
+    // Translators: an alert, such as "CPU 97 % for 3 min".
+    return fill(_('{name} {value} for {minutes} min'), { name, value: format(alert.value), minutes });
 }

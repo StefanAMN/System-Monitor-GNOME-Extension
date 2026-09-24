@@ -4,6 +4,7 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import { ProgressBar } from '../widgets.js';
+import { _, fill } from '../../../lib/common/i18n.js';
 
 export class CpuPage {
     _buildCpuDetails() {
@@ -12,7 +13,7 @@ export class CpuPage {
         // CPU Usage Card
         const usageCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
         const usageHead = new St.BoxLayout({ style: 'margin-bottom: 4px;' });
-        usageHead.add_child(new St.Label({ text: 'CPU Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+        usageHead.add_child(new St.Label({ text: _('CPU Usage'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
         this._cpuDetailsVal = new St.Label({ text: '--%', style_class: 'rp-c-cpu', style: 'font-size: 1.0em; font-weight: bold;' });
         usageHead.add_child(this._cpuDetailsVal);
         usageCard.add_child(usageHead);
@@ -34,7 +35,7 @@ export class CpuPage {
 
         // Per-Core Usage Card
         const coreCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
-        coreCard.add_child(new St.Label({ text: 'Per-Core Usage · GHz', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 8px;' }));
+        coreCard.add_child(new St.Label({ text: _('Per-Core Usage · GHz'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 8px;' }));
 
         // Two-column layout for cores
         const colsBox = new St.BoxLayout({ style: 'spacing: 16px;' });
@@ -50,19 +51,19 @@ export class CpuPage {
 
         const loadBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
         loadBox.add_child(new St.Icon({ icon_name: 'system-run-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
-        loadBox.add_child(new St.Label({ text: 'Load Average', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        loadBox.add_child(new St.Label({ text: _('Load Average'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsLoad = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         loadBox.add_child(this._cpuDetailsLoad);
 
         const freqBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
         freqBox.add_child(new St.Icon({ icon_name: 'power-profile-performance-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
-        freqBox.add_child(new St.Label({ text: 'Frequency', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        freqBox.add_child(new St.Label({ text: _('Frequency'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsFreq = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         freqBox.add_child(this._cpuDetailsFreq);
 
         const uptimeBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
         uptimeBox.add_child(new St.Icon({ icon_name: 'preferences-system-time-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
-        uptimeBox.add_child(new St.Label({ text: 'Uptime', style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
+        uptimeBox.add_child(new St.Label({ text: _('Uptime'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsUptime = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         uptimeBox.add_child(this._cpuDetailsUptime);
 
@@ -72,16 +73,16 @@ export class CpuPage {
         box.add_child(statsRow);
 
         const waitCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
-        this._cpuWait = this._detailRow('Waiting for CPU');
+        this._cpuWait = this._detailRow(_('Waiting for CPU'));
         waitCard.add_child(this._cpuWait.row);
         box.add_child(waitCard);
 
         // Top CPU Usage Card
         const procCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
         const procHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
-        procHead.add_child(new St.Label({ text: 'Top CPU Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+        procHead.add_child(new St.Label({ text: _('Top CPU Usage'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
 
-        const showAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true, accessible_name: 'Show all processes in System Monitor' });
+        const showAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: _('Show All'), reactive: true, can_focus: true, accessible_name: _('Show all processes in System Monitor') });
         showAllBtn.child.style_class = 'rp-fg-dim';
         showAllBtn.child.style = 'font-size: 0.75em;';
         showAllBtn.connect('clicked', () => {
@@ -111,7 +112,7 @@ export class CpuPage {
             
             cores.forEach((load, i) => {
                 const row = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
-                const lbl = new St.Label({ text: `Core ${i}`, style_class: 'rp-fg-dim', style: 'font-size: 0.78em;', width: 44 });
+                const lbl = new St.Label({ text: fill(_('Core {n}'), { n: i }), style_class: 'rp-fg-dim', style: 'font-size: 0.78em;', width: 44 });
                 const pbar = new ProgressBar(5, 0.18, 0.76, 0.494);
                 pbar.x_expand = true;
                 // Unit lives in the card title; with it every row was wider than the

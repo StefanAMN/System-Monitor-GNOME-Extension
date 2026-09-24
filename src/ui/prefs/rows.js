@@ -9,11 +9,12 @@ import Adw from 'gi://Adw';
 
 import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned } from '../../lib/common/settingsmodel.js';
 import { sanitizeMetricList } from '../../lib/common/present.js';
-import { RAPL_FIX_ARGV, RAPL_FIX_WARNING } from '../../lib/common/raplfix.js';
+import { RAPL_FIX_ARGV, raplFixWarning } from '../../lib/common/raplfix.js';
 import { PowerSampler } from '../../lib/collectors/power.js';
+import { _, fill } from '../../lib/common/i18n.js';
 
 function pinSubtitle(position) {
-    return position > 0 ? `Position ${position} in the top bar` : 'Not pinned';
+    return position > 0 ? fill(_('Position {n} in the top bar'), { n: position }) : _('Not pinned');
 }
 
 /**
@@ -55,10 +56,10 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     };
 
     const addPins = row => {
-        const group = addGroup(row.title, row.detail);
+        const group = addGroup(_(row.title), _(row.detail));
         const pinned = () => sanitizeMetricList(settings.get_strv(row.key));
         for (const { key, name } of METRICS) {
-            const pinRow = new Adw.SwitchRow({ title: name });
+            const pinRow = new Adw.SwitchRow({ title: _(name) });
             const gicon = iconFor?.(key);
             if (gicon) pinRow.add_prefix(new Gtk.Image({ gicon, css_classes: [`rp-c-${key}`] }));
             pinRow.connect('notify::active', () => {
@@ -80,21 +81,21 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     const addRow = (group, row) => {
         let widget;
         if (row.kind === 'switch') {
-            widget = new Adw.SwitchRow({ title: row.title, subtitle: row.detail });
+            widget = new Adw.SwitchRow({ title: _(row.title), subtitle: _(row.detail) });
             settings.bind(row.key, widget, 'active', Gio.SettingsBindFlags.DEFAULT);
         } else if (row.kind === 'number') {
             widget = new Adw.SpinRow({
-                title: row.title,
-                subtitle: row.detail,
+                title: _(row.title),
+                subtitle: _(row.detail),
                 adjustment: new Gtk.Adjustment({ lower: row.min, upper: row.max, step_increment: row.step, page_increment: row.step }),
             });
             settings.bind(row.key, widget, 'value', Gio.SettingsBindFlags.DEFAULT);
         } else {
             const values = row.choices.map(([value]) => value);
             widget = new Adw.ComboRow({
-                title: row.title,
-                subtitle: row.detail,
-                model: Gtk.StringList.new(row.choices.map(([, , longLabel]) => longLabel)),
+                title: _(row.title),
+                subtitle: _(row.detail),
+                model: Gtk.StringList.new(row.choices.map(([, , longLabel]) => _(longLabel))),
             });
             widget.connect('notify::selected', () => {
                 if (following) return;
@@ -117,7 +118,8 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
                 addPins(row);
                 continue;
             }
-            group ??= addGroup(section.title, section.hint ? `${section.hint[0].toUpperCase()}${section.hint.slice(1)}` : '');
+            const hint = section.hint ? _(section.hint) : '';
+            group ??= addGroup(_(section.title), hint ? `${hint[0].toUpperCase()}${hint.slice(1)}` : '');
             addRow(group, row);
         }
     }
@@ -134,9 +136,9 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     const changedId = settings.connect('changed', follow);
 
     // The panel's size: set by dragging a bottom corner of the panel.
-    const panelGroup = addGroup('Panel', 'Drag a bottom corner of the panel to resize it.');
-    const sizeRow = new Adw.ActionRow({ title: 'Size' });
-    const resetButton = new Gtk.Button({ label: 'Reset', valign: Gtk.Align.CENTER });
+    const panelGroup = addGroup(_('Panel'), _('Drag a bottom corner of the panel to resize it.'));
+    const sizeRow = new Adw.ActionRow({ title: _('Size') });
+    const resetButton = new Gtk.Button({ label: _('Reset'), valign: Gtk.Align.CENTER });
     resetButton.connect('clicked', () => {
         settings.set_int('menu-custom-width', 0);
         settings.set_int('menu-custom-height', 0);
@@ -149,19 +151,19 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
         const w = settings.get_int('menu-custom-width');
         const h = settings.get_int('menu-custom-height');
         const custom = w > 0 && h > 0;
-        sizeRow.subtitle = custom ? `${w} × ${h} pixels, set by dragging` : 'Automatic';
+        sizeRow.subtitle = custom ? fill(_('{width} × {height} pixels, set by dragging'), { width: w, height: h }) : _('Automatic');
         resetButton.sensitive = custom;
     });
     follow();
 
     // Offered only while the counters are blocked.
-    const powerGroup = addGroup('Troubleshooting');
+    const powerGroup = addGroup(_('Troubleshooting'));
     powerGroup.visible = false;
     const powerRow = new Adw.ActionRow({
-        title: 'CPU power is not readable',
-        subtitle: `Enabling it asks for an administrator password. ${RAPL_FIX_WARNING}`,
+        title: _('CPU power is not readable'),
+        subtitle: `${_('Enabling it asks for an administrator password.')} ${raplFixWarning()}`,
     });
-    const powerButton = new Gtk.Button({ label: 'Enable', valign: Gtk.Align.CENTER });
+    const powerButton = new Gtk.Button({ label: _('Enable'), valign: Gtk.Align.CENTER });
     powerButton.connect('clicked', () => {
         powerButton.sensitive = false;
         try {
@@ -169,15 +171,15 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
             proc.wait_check_async(null, (obj, res) => {
                 try {
                     obj.wait_check_finish(res);
-                    powerRow.title = 'CPU power is now readable';
+                    powerRow.title = _('CPU power is now readable');
                     powerRow.subtitle = '';
                 } catch (e) {
-                    powerRow.subtitle = `Failed: ${e.message}`;
+                    powerRow.subtitle = fill(_('Failed: {error}'), { error: e.message });
                     powerButton.sensitive = true;
                 }
             });
         } catch (e) {
-            powerRow.subtitle = `Failed: ${e.message}`;
+            powerRow.subtitle = fill(_('Failed: {error}'), { error: e.message });
             powerButton.sensitive = true;
         }
     });

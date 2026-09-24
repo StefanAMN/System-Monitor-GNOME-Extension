@@ -11,15 +11,16 @@ import { BatteryLedger, LedgerFormatError, DAYS_KEPT } from '../../lib/engine/ba
 import { ledgerPath, TRACK_INTERVAL_S } from '../../lib/engine/batterytracker.js';
 import { appInfo } from '../../lib/common/appnames.js';
 import { formatDuration } from '../../lib/common/format.js';
+import { _, fill, ngettext } from '../../lib/common/i18n.js';
 
 const HOUR_MS = 3600 * 1000;
 const APPS_SHOWN = 15;
 
 export const PERIODS = [
-    { id: 'day', label: 'Last 24 hours', from: now => now - 24 * HOUR_MS },
-    { id: 'today', label: 'Today', from: now => new Date(new Date(now).setHours(0, 0, 0, 0)).getTime() },
-    { id: 'week', label: 'Last 7 days', from: now => now - 7 * 24 * HOUR_MS },
-    { id: 'all', label: `Last ${DAYS_KEPT} days`, from: now => now - DAYS_KEPT * 24 * HOUR_MS },
+    { id: 'day', label: () => _('Last 24 hours'), from: now => now - 24 * HOUR_MS },
+    { id: 'today', label: () => _('Today'), from: now => new Date(new Date(now).setHours(0, 0, 0, 0)).getTime() },
+    { id: 'week', label: () => _('Last 7 days'), from: now => now - 7 * 24 * HOUR_MS },
+    { id: 'all', label: () => fill(ngettext('Last {n} day', 'Last {n} days', DAYS_KEPT), { n: DAYS_KEPT }), from: now => now - DAYS_KEPT * 24 * HOUR_MS },
 ];
 
 /** "1.24 Wh" / "320 mWh". */
@@ -83,7 +84,7 @@ export class HistorySource {
             const [, bytes] = GLib.file_get_contents(this.path);
             text = new TextDecoder().decode(bytes);
         } catch (e) {
-            if (!e.matches(GLib.FileError, GLib.FileError.NOENT)) this.problem = `cannot read the history: ${e.message}`;
+            if (!e.matches(GLib.FileError, GLib.FileError.NOENT)) this.problem = fill(_('cannot read the history: {error}'), { error: e.message });
         }
         if (text !== null) {
             try {
@@ -92,7 +93,7 @@ export class HistorySource {
             } catch (e) {
                 // The extension moves a damaged file aside on its next start;
                 // here it is only reported.
-                this.problem = e instanceof LedgerFormatError ? `the history file is damaged (${e.message})` : e.message;
+                this.problem = e instanceof LedgerFormatError ? fill(_('the history file is damaged ({error})'), { error: e.message }) : e.message;
             }
         }
         for (const listener of this._listeners) listener(this);
@@ -211,9 +212,9 @@ function drawDrain(area, cr, width, height, points) {
 function appRow(app, total, hasEnergy) {
     const info = appInfo(app.id);
     const background = app.cpu > 0 ? 1 - app.fg / app.cpu : 0;
-    const parts = [`${formatCpu(app.cpu)} of processor time`];
-    if (app.gpu > 0) parts.push(`${formatCpu(app.gpu / 1000)} of graphics time`);
-    if (!app.id.startsWith('@') && app.cpu > 0) parts.push(`${Math.round(background * 100)} % in the background`);
+    const parts = [fill(_('{time} of processor time'), { time: formatCpu(app.cpu) })];
+    if (app.gpu > 0) parts.push(fill(_('{time} of graphics time'), { time: formatCpu(app.gpu / 1000) }));
+    if (!app.id.startsWith('@') && app.cpu > 0) parts.push(fill(_('{percent} % in the background'), { percent: Math.round(background * 100) }));
     const row = new Adw.ActionRow({ title: info.name, subtitle: parts.join(' · ') });
     row.appId = app.id;
     const icon = info.gicon ? new Gtk.Image({ gicon: info.gicon, pixel_size: 32 }) : new Gtk.Image({ icon_name: info.iconName, pixel_size: 24 });
@@ -240,30 +241,30 @@ function appRow(app, total, hasEnergy) {
  * @returns {{page: Adw.PreferencesPage, rows: object, render: function(), dispose: function()}}
  */
 export function buildTrackingPage(settings, history, { fullWh = () => null } = {}) {
-    const page = new Adw.PreferencesPage({ title: 'Tracking', name: 'tracking', icon_name: 'battery-level-70-symbolic' });
+    const page = new Adw.PreferencesPage({ title: _('Tracking'), name: 'tracking', icon_name: 'battery-level-70-symbolic' });
     const rows = {};
 
     // Tracking itself.
     const control = new Adw.PreferencesGroup({
-        title: 'Battery tracking',
-        description: `Records which apps use the processor, every ${TRACK_INTERVAL_S} seconds while you are logged in. ` +
-            `Kept for ${DAYS_KEPT} days, on this computer only.`,
+        title: _('Battery tracking'),
+        description: fill(_('Records which apps use the processor, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
+            { seconds: TRACK_INTERVAL_S, days: DAYS_KEPT }),
     });
     page.add(control);
-    rows.tracking = new Adw.SwitchRow({ title: 'Track battery use per app' });
+    rows.tracking = new Adw.SwitchRow({ title: _('Track battery use per app') });
     settings.bind('battery-tracking', rows.tracking, 'active', Gio.SettingsBindFlags.DEFAULT);
     control.add(rows.tracking);
-    rows.status = new Adw.ActionRow({ title: 'Status' });
+    rows.status = new Adw.ActionRow({ title: _('Status') });
     control.add(rows.status);
-    rows.clear = new Adw.ActionRow({ title: 'History', subtitle: `Recorded figures of the last ${DAYS_KEPT} days` });
-    rows.clearButton = new Gtk.Button({ label: 'Clear…', valign: Gtk.Align.CENTER, css_classes: ['destructive-action'] });
+    rows.clear = new Adw.ActionRow({ title: _('History'), subtitle: fill(ngettext('Recorded figures of the last {n} day', 'Recorded figures of the last {n} days', DAYS_KEPT), { n: DAYS_KEPT }) });
+    rows.clearButton = new Gtk.Button({ label: _('Clear…'), valign: Gtk.Align.CENTER, css_classes: ['destructive-action'] });
     rows.clearButton.connect('clicked', () => {
         const dialog = new Adw.AlertDialog({
-            heading: 'Clear the battery history?',
-            body: 'All recorded figures are deleted. Tracking goes on if it is switched on.',
+            heading: _('Clear the battery history?'),
+            body: _('All recorded figures are deleted. Tracking goes on if it is switched on.'),
         });
-        dialog.add_response('cancel', 'Cancel');
-        dialog.add_response('clear', 'Clear');
+        dialog.add_response('cancel', _('Cancel'));
+        dialog.add_response('clear', _('Clear'));
         dialog.set_response_appearance('clear', Adw.ResponseAppearance.DESTRUCTIVE);
         dialog.connect('response', (_d, response) => {
             if (response === 'clear') settings.set_boolean('action-clear-history', true);
@@ -274,21 +275,19 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     control.add(rows.clear);
 
     // What to report on.
-    const options = new Adw.PreferencesGroup({ title: 'Report' });
+    const options = new Adw.PreferencesGroup({ title: _('Report') });
     page.add(options);
-    rows.period = new Adw.ComboRow({ title: 'Period', model: Gtk.StringList.new(PERIODS.map(p => p.label)) });
+    rows.period = new Adw.ComboRow({ title: _('Period'), model: Gtk.StringList.new(PERIODS.map(p => p.label())) });
     options.add(rows.period);
-    rows.batteryOnly = new Adw.SwitchRow({ title: 'On battery only', subtitle: 'Leave out the time on the charger', active: true });
+    rows.batteryOnly = new Adw.SwitchRow({ title: _('On battery only'), subtitle: _('Leave out the time on the charger'), active: true });
     options.add(rows.batteryOnly);
 
     const summary = new Adw.PreferencesGroup({
-        title: 'Summary',
-        description: 'Processor energy is shared among apps by the processor time each used, and the integrated ' +
-            'graphics part by graphics time where the machine reports it: an estimate. ' +
-            'The display, radios and the rest of the machine cannot be measured per app.',
+        title: _('Summary'),
+        description: _('Processor energy is shared among apps by the processor time each used, and the integrated graphics part by graphics time where the machine reports it: an estimate. The display, radios and the rest of the machine cannot be measured per app.'),
     });
     page.add(summary);
-    for (const [key, title] of [['used', 'Battery used'], ['drain', 'Average drain'], ['runtime', 'A full charge lasts'], ['time', 'Time on battery']])
+    for (const [key, title] of [['used', _('Battery used')], ['drain', _('Average drain')], ['runtime', _('A full charge lasts')], ['time', _('Time on battery')]])
         rows[key] = tile(title, 'battery');
     const batteryBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12 });
     batteryBox.append(tileGrid([rows.used, rows.drain, rows.runtime, rows.time]));
@@ -296,8 +295,8 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     // Battery use over the period.
     const chartBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-chart'] });
     const chartHead = new Gtk.Box({ spacing: 12 });
-    chartHead.append(new Gtk.Label({ label: 'Battery use', xalign: 0, hexpand: true, css_classes: ['rp-tile-label'] }));
-    for (const [text, colour] of [['battery', 'rp-c-battery'], ['processor', 'rp-c-cpu']]) {
+    chartHead.append(new Gtk.Label({ label: _('Battery use'), xalign: 0, hexpand: true, css_classes: ['rp-tile-label'] }));
+    for (const [text, colour] of [[_('battery'), 'rp-c-battery'], [_('processor'), 'rp-c-cpu']]) {
         const key = new Gtk.Box({ spacing: 4 });
         key.append(new Gtk.Label({ label: '■', css_classes: [colour] }));
         key.append(new Gtk.Label({ label: text, css_classes: ['rp-tile-detail'] }));
@@ -310,8 +309,8 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     chartBox.append(area);
     batteryBox.append(chartBox);
 
-    for (const [key, title] of [['apps', 'Processor, shared among apps'], ['graphics', 'of which graphics'], ['idle', 'Processor idle and platform'],
-        ['rest', 'Display, radios and the rest'], ['gap', 'While locked or asleep']])
+    for (const [key, title] of [['apps', _('Processor, shared among apps')], ['graphics', _('of which graphics')], ['idle', _('Processor idle and platform')],
+        ['rest', _('Display, radios and the rest')], ['gap', _('While locked or asleep')]])
         rows[key] = tile(title);
     rows.graphics.add_css_class('rp-tint-gpu');
     rows.apps.add_css_class('rp-tint-cpu');
@@ -319,7 +318,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     summary.add(batteryBox);
     rows.summary = summary;
 
-    const appsGroup = new Adw.PreferencesGroup({ title: 'Apps', description: 'Most first' });
+    const appsGroup = new Adw.PreferencesGroup({ title: _('Apps'), description: _('Most first') });
     page.add(appsGroup);
     const list = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
     appsGroup.add(list);
@@ -334,38 +333,39 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
         const sum = history.ledger.summarize({ from: startOfHour(period.from(now)), batteryOnly });
         const hours = history.ledger.summarize().seconds / 3600;
 
-        if (history.problem) rows.status.subtitle = `Problem: ${history.problem}`;
-        else if (!tracking) rows.status.subtitle = hours > 0 ? 'Off. The history below is kept until you clear it.' : 'Off';
-        else if (hours === 0) rows.status.subtitle = 'Recording. The first figures appear within a minute.';
-        else rows.status.subtitle = `Recording · ${formatDuration(hours * 3600)} recorded · ` +
-            (sum.hasEnergy || history.ledger.summarize().hasEnergy ? 'energy measured' : 'processor time only: power readings are not available');
+        if (history.problem) rows.status.subtitle = fill(_('Problem: {problem}'), { problem: history.problem });
+        else if (!tracking) rows.status.subtitle = hours > 0 ? _('Off. The history below is kept until you clear it.') : _('Off');
+        else if (hours === 0) rows.status.subtitle = _('Recording. The first figures appear within a minute.');
+        else rows.status.subtitle = fill(sum.hasEnergy || history.ledger.summarize().hasEnergy
+            ? _('Recording · {time} recorded · energy measured')
+            : _('Recording · {time} recorded · processor time only: power readings are not available'), { time: formatDuration(hours * 3600) });
         rows.clearButton.sensitive = history.ledger.buckets.length > 0;
 
         // Nothing recorded for this period: no column of zeros.
         summary.visible = sum.seconds > 0 || sum.gapWh > 0;
         const full = fullWh();
         const drain = sum.seconds > 0 && sum.batteryWh > 0 ? sum.batteryWh / (sum.seconds / 3600) : null;
-        const ofBattery = wh => (sum.batteryWh > 0 ? `${Math.round(wh / sum.batteryWh * 100)} % of the battery used` : '');
+        const ofBattery = wh => (sum.batteryWh > 0 ? fill(_('{percent} % of the battery used'), { percent: Math.round(wh / sum.batteryWh * 100) }) : '');
         rows.used.value.label = formatWh(sum.batteryWh);
-        rows.used.detail.label = full > 0 && sum.batteryWh > 0 ? `${Math.round(sum.batteryWh / full * 100)} % of a full charge` : '';
-        rows.time.title = batteryOnly ? 'Time on battery' : 'Time recorded';
+        rows.used.detail.label = full > 0 && sum.batteryWh > 0 ? fill(_('{percent} % of a full charge'), { percent: Math.round(sum.batteryWh / full * 100) }) : '';
+        rows.time.title = batteryOnly ? _('Time on battery') : _('Time recorded');
         rows.time.value.label = formatDuration(sum.seconds);
         rows.time.detail.label = '';
         rows.drain.value.label = drain !== null ? `${drain.toFixed(1)} W` : '—';
-        rows.drain.detail.label = 'on average';
+        rows.drain.detail.label = _('on average');
         rows.runtime.value.label = drain !== null && full > 0 ? `${formatDuration(full / drain * 3600)}` : '—';
-        rows.runtime.detail.label = drain !== null && full > 0 ? 'at this drain' : '';
-        rows.apps.value.label = sum.hasEnergy ? formatWh(sum.attributedWh) : 'not measured';
-        rows.apps.detail.label = sum.hasEnergy ? ofBattery(sum.attributedWh) : 'power readings are not available';
-        rows.idle.value.label = sum.hasEnergy ? formatWh(sum.idleWh) : 'not measured';
+        rows.runtime.detail.label = drain !== null && full > 0 ? _('at this drain') : '';
+        rows.apps.value.label = sum.hasEnergy ? formatWh(sum.attributedWh) : _('not measured');
+        rows.apps.detail.label = sum.hasEnergy ? ofBattery(sum.attributedWh) : _('power readings are not available');
+        rows.idle.value.label = sum.hasEnergy ? formatWh(sum.idleWh) : _('not measured');
         rows.idle.detail.label = sum.hasEnergy ? ofBattery(sum.idleWh) : '';
         rows.graphics.value.label = formatWh(sum.graphicsWh);
-        rows.graphics.detail.label = 'by graphics time';
+        rows.graphics.detail.label = _('by graphics time');
         const rest = Math.max(0, sum.batteryWh - sum.packageWh);
         rows.rest.value.label = formatWh(rest);
-        rows.rest.detail.label = `${ofBattery(rest)}${ofBattery(rest) ? '; ' : ''}not measurable per app`;
+        rows.rest.detail.label = ofBattery(rest) ? fill(_('{share}; not measurable per app'), { share: ofBattery(rest) }) : _('not measurable per app');
         rows.gap.value.label = formatWh(sum.gapWh);
-        rows.gap.detail.label = 'not attributed: extensions pause while the screen is locked';
+        rows.gap.detail.label = _('not attributed: extensions pause while the screen is locked');
         showTile(rows.graphics, sum.graphicsWh > 0);
         showTile(rows.rest, batteryOnly && sum.hasEnergy && sum.batteryWh > 0);
         showTile(rows.gap, sum.gapWh > 0);
@@ -385,13 +385,13 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
         }
         const hidden = sum.apps.filter(a => a.cpu > 0).slice(APPS_SHOWN);
         if (hidden.length > 0) {
-            const more = new Adw.ActionRow({ title: `${hidden.length} more`, subtitle: 'Each below the ones above' });
+            const more = new Adw.ActionRow({ title: fill(_('{n} more'), { n: hidden.length }), subtitle: _('Each below the ones above') });
             list.append(more);
         }
         if (shown.length === 0) {
             list.append(new Adw.ActionRow({
-                title: 'No figures for this period',
-                subtitle: tracking ? 'Tracking is on; figures appear as time passes.' : 'Switch on tracking above to start recording.',
+                title: _('No figures for this period'),
+                subtitle: tracking ? _('Tracking is on; figures appear as time passes.') : _('Switch on tracking above to start recording.'),
             }));
         }
     };

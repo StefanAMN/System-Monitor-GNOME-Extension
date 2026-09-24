@@ -1,3 +1,5 @@
+import { _, fill } from './i18n.js';
+
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
 const BYTE_UNITS_IEC = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
 const SPEED_UNITS = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
@@ -40,25 +42,26 @@ export function formatUptime(seconds) {
     const d = Math.floor(seconds / 86400);
     const h = Math.floor((seconds % 86400) / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    if (d > 0) return `${d}d ${h}h`;
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
+    // Translators: an uptime, kept short: days and hours, hours and minutes, minutes.
+    if (d > 0) return fill(_('{d}d {h}h'), { d, h });
+    if (h > 0) return fill(_('{h}h {m}m'), { h, m });
+    return fill(_('{m}m'), { m });
 }
 
 export function formatDuration(seconds) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    return `${h}h ${m}m`;
+    return fill(_('{h}h {m}m'), { h, m });
 }
 
 export function batteryStateLabel(state) {
     switch (state) {
-    case 'charging': return 'Charging';
-    case 'discharging': return 'Discharging';
-    case 'full': return 'Fully Charged';
-    case 'not charging': return 'Not Charging';
-    case 'empty': return 'Empty';
-    default: return 'Unknown';
+    case 'charging': return _('Charging');
+    case 'discharging': return _('Discharging');
+    case 'full': return _('Fully Charged');
+    case 'not charging': return _('Not Charging');
+    case 'empty': return _('Empty');
+    default: return _('Unknown');
     }
 }
 

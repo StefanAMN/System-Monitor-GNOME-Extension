@@ -1,22 +1,22 @@
 import GLib from 'gi://GLib';
 import { readFileAsync, listDirAsync, noteReadError } from '../common/utils.js';
+import { _, fill } from '../common/i18n.js';
 
 /**
  * Display label for a hwmon temperature input, and whether it is the CPU
  * package / die sensor the top bar should show.
  */
 export function sensorLabel(chipName, rawLabel) {
+    // Decided from the kernel's names, so the labels below can be translated.
     const lower = rawLabel.toLowerCase();
-    let label = rawLabel || chipName;
-    if (chipName === 'acpitz') label = 'Motherboard';
-    else if (chipName === 'nvme') label = rawLabel ? `NVMe ${rawLabel}` : 'NVMe Drive';
-    else if (chipName === 'iwlwifi') label = 'Wi-Fi Adapter';
-    else if (lower.includes('package id')) label = 'CPU Package';
-    else if (lower === 'tctl') label = 'CPU Package (Tctl)';
-    else if (lower === 'tdie') label = 'CPU Die (Tdie)';
-    else if (lower.startsWith('tccd')) label = `CPU ${rawLabel}`;
-    const isPackage = label === 'CPU Package' || label === 'CPU Package (Tctl)' || label === 'CPU Die (Tdie)';
-    return { label, isPackage };
+    if (chipName === 'acpitz') return { label: _('Motherboard'), isPackage: false };
+    if (chipName === 'nvme') return { label: rawLabel ? fill(_('NVMe {sensor}'), { sensor: rawLabel }) : _('NVMe Drive'), isPackage: false };
+    if (chipName === 'iwlwifi') return { label: _('Wi-Fi Adapter'), isPackage: false };
+    if (lower.includes('package id')) return { label: _('CPU Package'), isPackage: true };
+    if (lower === 'tctl') return { label: _('CPU Package (Tctl)'), isPackage: true };
+    if (lower === 'tdie') return { label: _('CPU Die (Tdie)'), isPackage: true };
+    if (lower.startsWith('tccd')) return { label: fill(_('CPU {sensor}'), { sensor: rawLabel }), isPackage: false };
+    return { label: rawLabel || chipName, isPackage: false };
 }
 
 /**
@@ -96,7 +96,7 @@ export class ThermalSampler {
                                 label = (await readFileAsync(`${basePath}/${labelFile}`)).trim();
                             } catch (e) { noteReadError(e); }
                         } else {
-                            label = `Fan ${file.replace('fan', '').replace('_input', '')}`;
+                            label = fill(_('Fan {n}'), { n: file.replace('fan', '').replace('_input', '') });
                         }
                         fans.push({ path: fanPath, label });
                     }
@@ -108,7 +108,7 @@ export class ThermalSampler {
                 const thermalDirs = await listDirAsync('/sys/class/thermal');
                 for (const tDir of thermalDirs) {
                     if (tDir.startsWith('thermal_zone')) {
-                        let type = `Thermal Zone ${tDir.replace('thermal_zone', '')}`;
+                        let type = fill(_('Thermal Zone {n}'), { n: tDir.replace('thermal_zone', '') });
                         try {
                             type = (await readFileAsync(`/sys/class/thermal/${tDir}/type`)).trim();
                         } catch (e) { noteReadError(e); }

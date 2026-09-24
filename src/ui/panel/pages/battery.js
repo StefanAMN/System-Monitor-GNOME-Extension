@@ -4,6 +4,7 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import { appInfo as ledgerAppInfo } from '../../../lib/common/appnames.js';
+import { _, fill } from '../../../lib/common/i18n.js';
 
 export class BatteryPage {
     _buildBatteryDetails() {
@@ -11,7 +12,7 @@ export class BatteryPage {
         
         // Percent History
         const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
-        sparkCard.add_child(new St.Label({ text: 'Charge Level History (%)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        sparkCard.add_child(new St.Label({ text: _('Charge Level History (%)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._batSparkline = this._newSparkline('bat', 90, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batSparkline.x_expand = true;
         sparkCard.add_child(this._batSparkline);
@@ -19,25 +20,25 @@ export class BatteryPage {
 
         // Power Rate History (W)
         const rateCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
-        rateCard.add_child(new St.Label({ text: 'Charge/Discharge Rate (W)', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        rateCard.add_child(new St.Label({ text: _('Charge/Discharge Rate (W)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._batRateSparkline = this._newSparkline('batRate', 90, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batRateSparkline.x_expand = true;
         rateCard.add_child(this._batRateSparkline);
         box.add_child(rateCard);
 
         const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
-        statsCard.add_child(new St.Label({ text: 'Stats', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
-        this._batState  = this._detailRow('State');
+        statsCard.add_child(new St.Label({ text: _('Stats'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._batState  = this._detailRow(_('State'));
         statsCard.add_child(this._batState.row);
-        this._batTimeEst = this._detailRow('Time Estimate');
+        this._batTimeEst = this._detailRow(_('Time Estimate'));
         statsCard.add_child(this._batTimeEst.row);
-        this._batHealth = this._detailRow('Health');
+        this._batHealth = this._detailRow(_('Health'));
         statsCard.add_child(this._batHealth.row);
-        this._batCycles = this._detailRow('Cycle Count');
+        this._batCycles = this._detailRow(_('Cycle Count'));
         statsCard.add_child(this._batCycles.row);
-        this._batCapacity = this._detailRow('Current / Full');
+        this._batCapacity = this._detailRow(_('Current / Full'));
         statsCard.add_child(this._batCapacity.row);
-        this._batDesign = this._detailRow('Design Capacity');
+        this._batDesign = this._detailRow(_('Design Capacity'));
         statsCard.add_child(this._batDesign.row);
         box.add_child(statsCard);
 
@@ -64,28 +65,30 @@ export class BatteryPage {
     _refreshTopApp() {
         if (!this._batTopAppLabel) return;
         // Read out as its line of text.
-        const show = text => {
+        const show = (text, opens = true) => {
             this._batTopAppLabel.text = text;
-            this._batTopApp.accessible_name = text.includes('Tracking page') ? text : `${text} Opens the Tracking page.`;
+            this._batTopApp.accessible_name = opens ? fill(_('{line} Opens the Tracking page.'), { line: text }) : text;
         };
         const stamp = this._tracker ? (this._tracker.lastSample ?? 'starting') : 'off';
         if (stamp === this._batTopAppStamp) return;
         this._batTopAppStamp = stamp;
         if (!this._tracker) {
-            show('Battery use per app: tracking is off. Open the Tracking page to start it.');
+            show(_('Battery use per app: tracking is off. Open the Tracking page to start it.'), false);
             return;
         }
         const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
         const sum = this._tracker.ledger?.summarize({ from: today, batteryOnly: true });
         const top = sum?.apps.find(a => !a.id.startsWith('@') && a.cpu > 0);
         if (!top) {
-            show('Battery use per app: no time on battery recorded today yet.');
+            show(_('Battery use per app: no time on battery recorded today yet.'));
             return;
         }
         const name = ledgerAppInfo(top.id).name;
         const share = sum.hasEnergy
             ? (sum.attributedWh > 0 ? top.wh / sum.attributedWh : 0)
             : (sum.cpu > 0 ? top.cpu / sum.cpu : 0);
-        show(`Top app on battery today: ${name} (${Math.round(share * 100)} % of the processor's ${sum.hasEnergy ? 'energy' : 'time'}).`);
+        show(fill(sum.hasEnergy
+            ? _('Top app on battery today: {app} ({share} % of the processor\'s energy).')
+            : _('Top app on battery today: {app} ({share} % of the processor\'s time).'), { app: name, share: Math.round(share * 100) }));
     }
 }

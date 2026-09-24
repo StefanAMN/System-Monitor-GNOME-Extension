@@ -11,9 +11,10 @@ import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed } from '../../lib/common/format.js';
 import { PROCESS_ROWS } from './constants.js';
 import { spokenValue } from '../../lib/common/present.js';
+import { _, fill, ngettext, N_, translated } from '../../lib/common/i18n.js';
 
-// How a row's value is read out, by list.
-const SPOKEN_MODE = { cpu: 'CPU', memory: 'memory', disk: 'disk' };
+// How a row's value is read out, by list: "firefox, 12% CPU".
+const SPOKEN_MODE = translated({ cpu: N_('{process}, {value} CPU, opens System Monitor'), memory: N_('{process}, {value} memory, opens System Monitor'), disk: N_('{process}, {value} disk, opens System Monitor') });
 
 export class ProcessesMethods {
     /** A timer that disable() ends early (resolving false), so no flow outlives the session. */
@@ -40,8 +41,8 @@ export class ProcessesMethods {
         label.clutter_text.line_wrap = true;
         label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         const buttons = new St.BoxLayout({ style: 'spacing: 8px;', x_align: Clutter.ActorAlign.END });
-        const confirm = new St.Button({ style_class: 'rp-end-confirm', label: 'End', can_focus: true });
-        const cancel = new St.Button({ style_class: 'rp-chip-bg rp-end-cancel', label: 'Cancel', can_focus: true });
+        const confirm = new St.Button({ style_class: 'rp-end-confirm', label: _('End'), can_focus: true });
+        const cancel = new St.Button({ style_class: 'rp-chip-bg rp-end-cancel', label: _('Cancel'), can_focus: true });
         buttons.add_child(confirm);
         buttons.add_child(cancel);
         box.add_child(label);
@@ -78,8 +79,10 @@ export class ProcessesMethods {
         bar.run++;
         bar.target = { comm: group.comm, count: group.count, members: group.members.map(m => ({ ...m })) };
         bar.step = 'confirm';
-        const what = group.count > 1 ? `all ${group.count} ${group.comm} processes` : group.comm;
-        this._showEndBar(bar, `End ${what}? Unsaved work in it may be lost.`, { confirm: 'End', cancel: 'Cancel' });
+        const text = group.count > 1
+            ? fill(_('End all {n} {process} processes? Unsaved work in them may be lost.'), { n: group.count, process: group.comm })
+            : fill(_('End {process}? Unsaved work in it may be lost.'), { process: group.comm });
+        this._showEndBar(bar, text, { confirm: _('End'), cancel: _('Cancel') });
         bar.confirm.grab_key_focus();
     }
 
@@ -92,12 +95,12 @@ export class ProcessesMethods {
         if (mine.length === 0) {
             bar.step = 'done';
             this._showEndBar(bar, others > 0
-                ? `${comm} belongs to another user and cannot be ended from here.`
-                : `${comm} has already exited.`, { cancel: 'Close' });
+                ? fill(_('{process} belongs to another user and cannot be ended from here.'), { process: comm })
+                : fill(_('{process} has already exited.'), { process: comm }), { cancel: _('Close') });
             return;
         }
         bar.step = 'waiting';
-        this._showEndBar(bar, signal === 'TERM' ? `Asking ${comm} to quit…` : `Forcing ${comm} to quit…`);
+        this._showEndBar(bar, fill(signal === 'TERM' ? _('Asking {process} to quit…') : _('Forcing {process} to quit…'), { process: comm }));
         const sent = await signalProcesses(mine, signal);
         // Quitting cleanly can take a moment (saving, closing files).
         if (!(await this._wait(signal === 'TERM' ? 5000 : 1000)) || gen !== this._gen || run !== bar.run) return;
@@ -105,16 +108,17 @@ export class ProcessesMethods {
         const note = !sent.ok && sent.error ? ` (${sent.error})` : '';
         if (left.length === 0) {
             bar.step = 'done';
-            this._showEndBar(bar, `${comm} ended.`);
+            this._showEndBar(bar, fill(_('{process} ended.'), { process: comm }));
             if (await this._wait(3000) && gen === this._gen && run === bar.run) this._hideEndBar(bar);
         } else if (signal === 'TERM') {
             bar.step = 'force';
-            this._showEndBar(bar, `${left.length} of ${mine.length} ${comm} did not quit${note}. Force quit loses unsaved work.`,
-                { confirm: 'Force quit', cancel: 'Cancel' });
+            this._showEndBar(bar, fill(_('{left} of {all} {process} did not quit{error}. Force quit loses unsaved work.'),
+                { left: left.length, all: mine.length, process: comm, error: note }),
+            { confirm: _('Force quit'), cancel: _('Cancel') });
             bar.confirm.grab_key_focus();
         } else {
             bar.step = 'done';
-            this._showEndBar(bar, `${left.length} ${comm} could not be ended${note}.`, { cancel: 'Close' });
+            this._showEndBar(bar, fill(_('{left} {process} could not be ended{error}.'), { left: left.length, process: comm, error: note }), { cancel: _('Close') });
         }
     }
 
@@ -161,7 +165,7 @@ export class ProcessesMethods {
                 const endBtn = new St.Button({
                     style_class: 'rp-end-button',
                     can_focus: true,
-                    accessible_name: 'End process',
+                    accessible_name: _('End process'),
                     y_align: Clutter.ActorAlign.CENTER,
                     child: new St.Icon({ icon_name: 'window-close-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 12px;' }),
                 });
@@ -219,14 +223,14 @@ export class ProcessesMethods {
             }
             w.group = proc;
             // Process lists change with samples, not glide frames.
-            const who = proc.count > 1 ? `${proc.comm}, ${proc.count} processes` : proc.comm;
-            w.item.accessible_name = `${who}, ${spokenValue(w.statLbl.text)} ${SPOKEN_MODE[mode]}, opens System Monitor`;
+            const who = proc.count > 1 ? fill(ngettext('{process}, {n} process', '{process}, {n} processes', proc.count), { process: proc.comm, n: proc.count }) : proc.comm;
+            w.item.accessible_name = fill(SPOKEN_MODE[mode], { process: who, value: spokenValue(w.statLbl.text) });
             // Hidden but still taking its room, so the values stay aligned.
             const endable = canEnd(proc, this._selfPid);
             w.endBtn.opacity = endable ? 255 : 0;
             w.endBtn.reactive = endable;
             w.endBtn.can_focus = endable;
-            w.endBtn.accessible_name = endable ? `End ${who}` : '';
+            w.endBtn.accessible_name = endable ? fill(_('End {process}'), { process: who }) : '';
         });
     }
 }

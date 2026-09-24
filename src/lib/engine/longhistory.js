@@ -9,6 +9,8 @@
 // Time is the monotonic clock, which stops while the machine is suspended:
 // buckets on either side of a suspend are adjacent.
 
+import { N_ } from '../common/i18n.js';
+
 export class BucketSeries {
     /**
      * @param {number} bucketUs bucket width in µs
@@ -110,6 +112,7 @@ export class BucketSeries {
 // The chart ranges: the live ring (one sample per poll) and two bucketed ones.
 export const RANGES = {
     live: null,
-    hour: { bucketUs: 60e6, capacity: 61, label: '1h' },
-    day: { bucketUs: 15 * 60e6, capacity: 97, label: '24h' },
+    // Translators: chart ranges on a chip, kept short: one hour, 24 hours.
+    hour: { bucketUs: 60e6, capacity: 61, label: N_('1h') },
+    day: { bucketUs: 15 * 60e6, capacity: 97, label: N_('24h') },
 };
