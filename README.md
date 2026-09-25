@@ -1,6 +1,6 @@
 # Resource Pulse GNOME Shell Extension
 
-Resource Pulse is a modern system resource monitoring extension for GNOME Shell 50.1 (ESM-based, Wayland-only). It displays a compact, customizable summary of pinned metrics in the top bar, and reveals a detailed dashboard panel with live Cairo-based charts (history graphs and progress bars) when clicked.
+Resource Pulse is a modern system resource monitoring extension for GNOME Shell 46 to 50 (ESM-based, Wayland-only; developed on 50.1). It displays a compact, customizable summary of pinned metrics in the top bar, and reveals a detailed dashboard panel with live Cairo-based charts (history graphs and progress bars) when clicked.
 
 ## Features
 
@@ -52,7 +52,7 @@ npm ci && ./dev.sh lint   # ESLint (development dependency only; the extension h
 RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
 ./dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
 ./dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 10 min leak soak
-./dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 45-49 in Fedora containers (needs docker; ./dev.sh test-compat 46 for one)
+./dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./dev.sh test-compat 46 for one)
 ./dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```
@@ -70,6 +70,7 @@ Every push and pull request runs the lint and the unit tests on GitHub Actions (
 - **Session figures** (network totals, power average and peak) start over when the extension is disabled, which GNOME does on every screen lock.
 - **Top bar room**: when the pinned metrics do not fit beside the clock, the last-pinned ones show only their icon (the value is in the hover tooltip) until there is room again. Pin the metrics you most want to read first.
 - **Language**: the interface is English only.
+- **GNOME Shell versions**: developed and used on 50. Versions 46 to 49 are covered by the automated tests in containers (software rendering, Fedora builds), not by daily use. On 45 the menu does not render, so it is not listed.
 
 ## Installation & Deployment
 
