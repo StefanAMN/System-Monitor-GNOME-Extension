@@ -28,6 +28,7 @@ import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/l
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth } from '../../src/lib/collectors/battery.js';
+import { _, N_, ngettext, fill, translated, setTranslations } from '../../src/lib/common/i18n.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../../src/lib/collectors/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel, spokenValue } from '../../src/lib/common/present.js';
 
@@ -345,6 +346,19 @@ docker0: 1 2 3
         ['7%', 'no reading yet', 'no reading yet', 'no reading yet', 'not available', 'download 1.2 MB per second, upload 30 KB per second', 'download 999 KB per second',
             'upload 4.0 KB per second', '85%, 2 hours 10 minutes', '40%, 1 hour 1 minute', '9%, 23 minutes', '5.2 watts', '17.0 watts', '54°C', '3.1 GiB per second'],
         'spoken values: placeholders, arrows, rates, watts, hours');
+
+    // Translations: named placeholders, tables translated when read, the
+    // English pass-through outside the shell and again after disable().
+    eq(fill('{app} used {share} %, {app}', { app: 'chat', share: 40 }), 'chat used 40 %, chat', 'i18n: fill repeats and orders placeholders');
+    eq(fill('{known} {unknown}', { known: 1 }), '1 {unknown}', 'i18n: an unknown placeholder stays');
+    eq([_('Settings'), N_('Settings'), ngettext('{n} core', '{n} cores', 1), ngettext('{n} core', '{n} cores', 4)],
+        ['Settings', 'Settings', '{n} core', '{n} cores'], 'i18n: English pass-through');
+    const table = translated({ name: N_('Memory'), nested: { title: N_('GPU usage is high') }, list: [N_('Fan')], n: 3 });
+    setTranslations(str => `<${str}>`, (str, plural, n) => `<${n === 1 ? str : plural}>`);
+    eq([table.name, table.nested.title, table.list[0], table.n, table.nested === table.nested, _('Settings'), ngettext('a', 'b', 2)],
+        ['<Memory>', '<GPU usage is high>', '<Fan>', 3, true, '<Settings>', '<b>'], 'i18n: tables translated when read, nested ones once');
+    setTranslations(str => str, (str, plural, n) => (n === 1 ? str : plural));
+    eq([table.name, _('Settings')], ['Memory', 'Settings'], 'i18n: back to English');
 
     eq([0, 500, 1000, 9.94 * 1000, 9.96 * 1000, 999.4 * 1000, 999.6 * 1000, 5 * 1000 ** 2, 2.5 * 1000 ** 3, NaN, -4].map(formatSpeedCompact),
         ['0.0 KB/s', '0.5 KB/s', '1.0 KB/s', '9.9 KB/s', '10 KB/s', '999 KB/s', '1.0 MB/s', '5.0 MB/s', '2.5 GB/s', '0.0 KB/s', '0.0 KB/s'],
