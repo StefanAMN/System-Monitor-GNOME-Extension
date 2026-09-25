@@ -202,3 +202,26 @@ To resume: `git switch audit-fixes`, then `./dev.sh test-unit && ./dev.sh test-u
 | D6 | `shell-version` lists only versions the extension was actually run on | `./dev.sh test-compat`: unit tests and a headless enable in containers with other GNOME Shell versions | per-version result table; a version that cannot be run is not listed |
 
 Translations: not wanted for now.
+
+## State of the owner's decisions (2026-10-11)
+
+D1–D6 are done and committed on `audit-fixes` (not merged, not pushed).
+
+- D3: the local install was migrated without touching the running session: a second symlink `~/.local/share/gnome-shell/extensions/resource-pulse@stefanamn.github.io` and a second entry in `org.gnome.shell enabled-extensions`. The old symlink and entry (`resource-pulse@yourdomain.example`) are still there and should be removed after the next login.
+- D4: proof as planned. The first version passed by timing only: the fit returned early while a relayout was pending (`has_allocation()`), seen as one failing run in three and fixed in `c9fe012`; three consecutive passes after it. The room is read from the panel's centre box; nothing was tested with a dock that shifts the work area, or in RTL.
+- D5: lint clean; the workflow's steps were rehearsed in an `ubuntu:24.04` container (gjs 1.80.2, 186 checks). The workflow has not run on GitHub.
+- D6: `./dev.sh test-compat` result with the final code:
+
+  | GNOME Shell | image | unit | headless enable | UI test |
+  |---|---|---|---|---|
+  | 45.10 | Fedora 39 | pass with a `/proc` listing fallback that was not kept | pass | FAIL: the menu body does not render |
+  | 46.10 | Fedora 40 | pass | pass | pass |
+  | 47.10 | Fedora 41 | pass | pass | pass |
+  | 48.8 | Fedora 42 | pass | pass | pass |
+  | 49.10 | Fedora 43 | pass | pass | pass |
+  | 50.1 | this machine | pass | pass | pass |
+
+  `shell-version` is therefore 46–50. What the containers do not show: real GPUs (software rendering), Ubuntu's or other distributions' builds of these versions, and behaviour over days of use. The legacy cursor path (45–49) is only checked for not throwing; the cursor shape itself was not looked at. The matrix was run before the unused GNOME 45 `/proc` fallback was dropped again; that code is not reached on 46+.
+- Intermediate commits `c9fe012` and `7b00a39` were split out of one tested tree and not tested on their own.
+
+Still open from the audit: GPU tab `--` values on Intel, truncated settings rows, widgets updated while the menu is closed, first battery / GPU only, no tests for `prefs.js`, drag or resize, dead CSS and inline styles. Translations are not wanted for now.
