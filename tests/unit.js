@@ -427,10 +427,12 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         await sleep(300);
         const steady = await ps.sample(16e9, false, 5, 10);
         ok(!steady.warmingUp, 'proc baseline: consecutive samples are not warm-up');
-        ps._prevTime -= 60 * 1000000;
-        for (const prev of ps._prev.values()) prev.time -= 60 * 1000000;
-        const stale = await ps.sample(16e9, false, 5, 10);
-        ok(stale.warmingUp && stale.top.every(p => p.cpu === 0), 'proc baseline: a minute-old baseline is dropped (warm-up, no rates)');
+        // Let real time pass rather than rewinding the stored timestamps:
+        // on a machine up for less than the rewind (a fresh CI runner) they
+        // would go negative, which the sampler reads as "no baseline".
+        await sleep(300);
+        const stale = await ps.sample(16e9, false, 5, 0.1);
+        ok(stale.warmingUp && stale.top.every(p => p.cpu === 0), 'proc baseline: a baseline older than allowed is dropped (warm-up, no rates)');
         await sleep(300);
         ok(!(await ps.sample(16e9, false, 5, 10)).warmingUp, 'proc baseline: next sample has rates again');
         ps.destroy();
