@@ -54,7 +54,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   │       ├── settingsmodel.js  # The user-facing settings, described once
 │   │       ├── present.js     # Pure presentation decisions (n/a, icons, scales, hover)
 │   │       ├── format.js  utils.js  appnames.js
-│   │       └── raplfix.js     # The single privileged (pkexec) action
+│   │       └── raplfix.js     # The commands that make CPU power readable (shown, never run)
 │   └── ui/
 │       ├── panel/            # Shell side: the top bar and the panel (methods of the extension)
 │       │   ├── polling.js     # The poll loop: collectors, history, glide, network totals, tracking
@@ -102,7 +102,7 @@ RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screensh
 ./scripts/dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 20 min leak soak
 ./scripts/dev.sh test-soak           # only the soak: live JavaScript objects counted by kind (a leak grows in both halves), RSS, fds, actors
 RP_SOAK_LEAK=1 ./scripts/dev.sh test-soak   # the same with a planted leak (one object kept per reading), which must fail
-./scripts/dev.sh test-compat         # unit, headless, UI and translation tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one, 50 also works)
+./scripts/dev.sh test-compat         # unit, headless, UI, translation and packed-zip tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one, 50 also works)
 ./scripts/dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```
@@ -118,7 +118,7 @@ GitHub Actions (`.github/workflows/ci.yml`):
 
 - **One battery, one GPU**: the first battery and the first GPU found are shown.
 - **GPU**: Intel, AMD and NVIDIA are supported, but only the Intel path has been run on real hardware. Integrated GPUs report no dedicated memory, fan or power draw (and often no temperature or clock); the GPU page leaves those fields out.
-- **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; while that is the case the preferences window (Settings › Troubleshooting) offers a one-time fix. On battery it is the battery's discharge rate.
+- **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; while that is the case the preferences window (Settings › Troubleshooting) shows the two commands that fix it, to copy into a terminal (the extension never runs anything as root). On battery it is the battery's discharge rate.
 - **Temperature**: the top bar shows the CPU package sensor, else the first core, else the hottest sensor.
 - **Process CPU**: 100% means one full core, as in `top`. The list needs two samples, so it stays dimmed for about half a second after the tab opens.
 - **Units**: rates are decimal (1 MB/s = 1 000 000 bytes/s). Memory follows the GB / GiB setting.

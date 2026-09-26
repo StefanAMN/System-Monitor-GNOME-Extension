@@ -20,6 +20,12 @@ export function setTranslations(singular, plural) {
     translatePlural = plural;
 }
 
+/** Back to the English pass-through (disable()). */
+export function resetTranslations() {
+    translate = str => str;
+    translatePlural = (str, plural, n) => (n === 1 ? str : plural);
+}
+
 /** The translation of `str`. */
 export function _(str) {
     return translate(str);

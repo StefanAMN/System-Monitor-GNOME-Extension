@@ -42,7 +42,7 @@ export function powerReadout(pwr) {
     return {
         value: null,
         source: '',
-        reason: _('CPU energy counters are not readable.\nSee "Enable CPU Power Monitoring" in settings.')
+        reason: _('CPU energy counters are not readable.\nSettings › Troubleshooting shows how to make them readable.')
     };
 }
 

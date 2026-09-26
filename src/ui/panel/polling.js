@@ -11,6 +11,7 @@ import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
 import { _, fill } from '../../lib/common/i18n.js';
+import { logOnce } from '../../lib/common/utils.js';
 import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
 
 export class PollingMethods {
@@ -274,7 +275,7 @@ export class PollingMethods {
         sample.then(settle, settle);
         return Promise.race([sample, deadline.then(() => {
             if (!settled)
-                console.warn(`ResourcePulse: ${key} collector did not answer within ${POLL_DEADLINE_MS} ms; showing its last value`);
+                logOnce(`ResourcePulse: ${key} collector did not answer within ${POLL_DEADLINE_MS} ms; showing its last value`);
             return fallback;
         })]);
     }
@@ -437,7 +438,7 @@ export class PollingMethods {
             // Fetch the second reading now instead of at the next tick.
             if (procWarmingUp) this._deferPoll(MIN_RESAMPLE_US);
         } catch (e) {
-            console.error(`ResourcePulse poll error: ${e.message}`);
+            logOnce(`ResourcePulse poll error: ${e.message}`, 'error');
         } finally {
             if (gen === this._gen) {
                 this._pollInFlight = false;

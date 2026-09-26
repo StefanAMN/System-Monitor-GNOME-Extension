@@ -22,6 +22,11 @@ const SERVICES = {
 const CACHE_LIMIT = 500;
 const cache = new Map();
 
+/** Drop the cached names and icons (disable()). */
+export function forgetAppInfo() {
+    cache.clear();
+}
+
 function desktopInfo(id) {
     try {
         return Gio.DesktopAppInfo.new(`${id}.desktop`);

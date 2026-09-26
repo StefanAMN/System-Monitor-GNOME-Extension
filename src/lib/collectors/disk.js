@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import { readFileAsync } from '../common/utils.js';
+import { readFileAsync, logOnce } from '../common/utils.js';
 
 function queryFilesystem(path) {
     return new Promise((resolve) => {
@@ -117,7 +117,7 @@ export class DiskSampler {
             try {
                 mountList.push(...parseMounts(await readFileAsync('/proc/mounts')));
             } catch (e) {
-                console.error(`Failed to read /proc/mounts: ${e.message}`);
+                logOnce(`Failed to read /proc/mounts: ${e.message}`, 'error');
             }
         }
 
@@ -167,7 +167,7 @@ export class DiskSampler {
                     }
                 }
             } catch (e) {
-                console.error(`Failed to read /proc/diskstats: ${e.message}`);
+                logOnce(`Failed to read /proc/diskstats: ${e.message}`, 'error');
             }
 
             let readRate = 0;
@@ -202,7 +202,7 @@ export class DiskSampler {
                 maxSpeed: this._maxSpeed
             };
         } catch (e) {
-            console.error(`Error in Disk sample: ${e.message}`);
+            logOnce(`Error in Disk sample: ${e.message}`, 'error');
             return {
                 mounts: [],
                 readRate: 0,
