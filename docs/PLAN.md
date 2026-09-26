@@ -930,6 +930,41 @@ Not done: a real translation (none asked for), and screenshots in one.
 - **Proof:** the checklist recorded here with each item's state, a pack and install from the `.zip` on GNOME 50 and in the containers, and the overhead soak after any change to the reads.
 - **Not mine to do:** the submission itself goes through the owner's account.
 
+#### State (branch `ego-ready`, 2026-10-19): the review guidelines, item by item
+
+Fetched from gjs.guide's review guidelines on 2026-10-19.
+
+| Rule | State |
+|---|---|
+| Nothing created, connected or scheduled before `enable()` | Complies. Module scope holds constants, static tables and built-in objects (`Map`, `Set`, the `translated()` proxies, `WeakMap`), which the rules allow, plus `GObject.registerClass` for the chart and resize widgets (no instance, the pattern of GNOME's own examples). |
+| Destroy, disconnect and remove main-loop sources in `disable()` | Complies (the UI test's disable/enable cycles and the soak's actor and fd counts check it). **Fixed:** module-level data that outlived `disable()` (the once-logged messages, the cached `getconf` result, the app-name cache holding GIcons, the installed gettext) is now cleared there (`resetUtils`, `forgetAppInfo`, `resetTranslations`). |
+| No deprecated modules (`ByteArray`, `Lang`, `Mainloop`) | None used. |
+| No Gtk/Gdk/Adw in the shell, no Clutter/Meta/St/Shell in the preferences | Checked by import scan: the preferences modules import only GTK, Gio/GLib and the `lib/` modules (which import neither). |
+| No interference with the extension system | Only `OpenExtensionPrefs` for its own UUID. |
+| Not minified or obfuscated | Plain modules; ESLint clean. |
+| No excessive logging | Logs are error paths only. **Fixed:** errors a poll can hit every time (a collector failing the same way, a stuck collector, a GPU tool's error) now log once per message (`logOnce`), like read errors already did. |
+| No forced disposal (`run_dispose`) | None. |
+| No binaries; scripts in GJS; processes exit cleanly | No binaries or scripts. Subprocesses are argv lists: `getconf`, `lspci` and `nvidia-smi` run with timeouts (`nvidia-smi` is also cancelled on disable), `kill` (ending a process) is awaited, and System Monitor and Settings are launched as apps. |
+| Clipboard use declared in the description | **Fixed:** metadata's description now says the window copies the Diagnostics report and the CPU-power commands when asked. |
+| Privileged subprocesses avoided; never a user-writable script | **Fixed:** the one-click fix ran `pkexec /bin/sh -c '<script>'`, the script coming from the extension's (user-writable) files. The window now shows the two commands with a Copy button for the owner to run in a terminal, and Check again; the extension never runs anything as root. |
+| AI-generated code | **For the owner:** the rules reject submissions that look AI-generated and require the developer to be able to explain the code; this code was written with an AI assistant. |
+| metadata.json well formed | No `version`; `url` is the GitHub repository; `shell-version` 46–50, all stable; no `session-modes` or `donations`; `uuid` `resource-pulse@stefanamn.github.io`; `settings-schema` and `gettext-domain` set. |
+| Session modes | User mode only (the lock screen disables it); nothing to declare. |
+| GSettings: id and path under `org.gnome.shell.extensions`, XML in the zip, `<schema-id>.gschema.xml` | Complies; the zip carries the XML only (GNOME 44+ compiles on install). |
+| No telemetry | None; nothing leaves the machine. |
+| Licence GPL-compatible | MIT, which is GPL-compatible. Reviewers name GPL-2.0-or-later as the example; relicensing is the owner's call. |
+| Trademarks | **For the owner:** the CPU/GPU badges show vendor names (Intel, AMD, NVIDIA, GeForce, Radeon, Ryzen) as text in vendor-like colours. They are not logos, but reviewers may ask. |
+| No unnecessary files in the zip | Code, icons, schema XML, LICENSE and compiled translations only; no `.po`/`.pot`, tests or scripts. |
+
+Synchronous reads in the shell, which the rules do not forbid: `/proc` only (in memory, never the disk). The boot id is read once per enable; the process sampler reads `/proc/<pid>/stat` and `io` in chunks while a process page is open; `/proc/<pid>/stat` is read when ending a process. They stay.
+
+Proof:
+- `./scripts/dev.sh test-zip` packs, installs the zip with `gnome-extensions install` into an isolated shell (instead of the source tree), enables it and scans the log. GNOME 50: 64 files installed, ACTIVE for 8 s, clean log.
+  - Found on the way: the installer fails with "Can't recursively copy directory" when its temporary folder and the destination are on different filesystems, so the test keeps both in the sandbox.
+- The fix's commands write exactly the rule this machine already has (compared as text; not run here, since they need sudo).
+- Unit tests: `logOnce` logs once per message and again after `resetUtils`; `resetTranslations` restores English.
+- Not mine: the submission, from the owner's account.
+
 ### Area 6: more than one battery or GPU
 
 - **Batteries:**
