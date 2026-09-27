@@ -1,4 +1,5 @@
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 
 import { readFileAsync, listDirAsync, noteReadError, logOnce } from '../common/utils.js';
 
@@ -38,19 +39,70 @@ export function batteryHealth(energyFull, energyFullDesign, fallback = 100) {
     return Math.max(0, Math.min(100, h));
 }
 
+/**
+ * One reading for several batteries (a laptop with a second, removable one):
+ * charge from the summed energy, health from the summed capacities, the time
+ * estimate from the summed rate. `batteries` lists each one for the Battery
+ * page. With one battery, its reading as it is.
+ * @param {object[]} list readings, each with its `name` (BAT0, BAT1)
+ * @returns {?object} null when none is present
+ */
+export function combineBatteries(list) {
+    const present = list.filter(b => b?.present);
+    if (present.length === 0) return null;
+    if (present.length === 1) return present[0];
+    const sum = key => present.reduce((total, b) => total + (b[key] || 0), 0);
+    const energy = sum('energy');
+    const energyFull = sum('energyFull');
+    const energyFullDesign = sum('energyFullDesign');
+    const energyRate = sum('energyRate');
+    const states = present.map(b => b.state);
+    const state = states.includes('charging') ? 'charging'
+        : states.includes('discharging') ? 'discharging'
+            : states.every(st => st === 'full') ? 'full' : states[0];
+    const percent = energyFull > 0 ? (energy / energyFull) * 100 : sum('percent') / present.length;
+    const timeToEmpty = state === 'discharging' && energyRate > 0 ? Math.round((energy / energyRate) * 3600) : 0;
+    const timeToFull = state === 'charging' && energyRate > 0 ? Math.round(((energyFull - energy) / energyRate) * 3600) : 0;
+    return {
+        present: true,
+        percent,
+        state,
+        timeRemaining: state === 'charging' ? timeToFull : timeToEmpty,
+        timeToEmpty,
+        timeToFull,
+        health: batteryHealth(energyFull, energyFullDesign, sum('health') / present.length),
+        cycleCount: Math.max(...present.map(b => b.cycleCount || 0)),
+        energyRate,
+        energy,
+        energyFull,
+        energyFullDesign,
+        batteries: present.map(b => ({ name: b.name, percent: b.percent, state: b.state, health: b.health, cycleCount: b.cycleCount })),
+    };
+}
+
+// Batteries are looked for again this often: a dock or a removable second
+// battery can come and go.
+const DETECT_EVERY_US = 60e6;
+
 export class BatterySampler {
-    constructor() {
+    /** @param {string} [sysRoot] the sysfs root (a fixture in the unit tests) */
+    constructor(sysRoot = '/sys') {
+        this._supply = `${sysRoot}/class/power_supply`;
         this._proxy = null;
         this._batName = null;
+        this._batNames = [];
+        this._lastDetect = 0;
     }
 
-    async _detectBatteryName() {
-        if (this._batName) return this._batName;
-        this._batName = 'BAT0'; // Default fallback
-        const names = await listDirAsync('/sys/class/power_supply');
-        const bat = names.filter(n => n.startsWith('BAT')).sort()[0];
-        if (bat) this._batName = bat;
-        return this._batName;
+    /** Every battery's name, BAT0 first; the first is the one UPower is asked about. */
+    async _detectBatteries() {
+        const now = GLib.get_monotonic_time();
+        if (this._batName && now - this._lastDetect < DETECT_EVERY_US) return this._batNames;
+        this._lastDetect = now;
+        const names = (await listDirAsync(this._supply)).filter(n => n.startsWith('BAT')).sort();
+        this._batNames = names;
+        this._batName = names[0] ?? 'BAT0';
+        return names;
     }
 
     async _initProxy(batName) {
@@ -81,7 +133,14 @@ export class BatterySampler {
     }
 
     async sample() {
-        const batName = await this._detectBatteryName();
+        const names = await this._detectBatteries();
+        if (names.length > 1) {
+            const each = [];
+            for (const name of names) each.push(await this._sampleSysfs(name));
+            const combined = combineBatteries(each);
+            if (combined) return combined;
+        }
+        const batName = this._batName;
         try {
             const proxy = await this._initProxy(batName);
             if (proxy) {
@@ -102,7 +161,7 @@ export class BatterySampler {
                     let cycleCount = getProp('CycleCount') ?? 0;
                     if (cycleCount === 0) {
                         try {
-                            const cycleStr = await readFileAsync(`/sys/class/power_supply/${batName}/cycle_count`);
+                            const cycleStr = await readFileAsync(`${this._supply}/${batName}/cycle_count`);
                             cycleCount = parseInt(cycleStr.trim(), 10) || 0;
                         } catch (e) { noteReadError(e); }
                     }
@@ -146,19 +205,19 @@ export class BatterySampler {
         try {
             let capacityExists = false;
             try {
-                await readFileAsync(`/sys/class/power_supply/${batName}/capacity`);
+                await readFileAsync(`${this._supply}/${batName}/capacity`);
                 capacityExists = true;
             } catch (e) { noteReadError(e); }
             if (capacityExists) {
-                const percentStr = await readFileAsync(`/sys/class/power_supply/${batName}/capacity`);
+                const percentStr = await readFileAsync(`${this._supply}/${batName}/capacity`);
                 const percent = parseFloat(percentStr.trim()) || 0;
 
-                const statusStr = await readFileAsync(`/sys/class/power_supply/${batName}/status`);
+                const statusStr = await readFileAsync(`${this._supply}/${batName}/status`);
                 const status = statusStr.trim().toLowerCase();
 
                 let cycleCount = 0;
                 try {
-                    const cycleStr = await readFileAsync(`/sys/class/power_supply/${batName}/cycle_count`);
+                    const cycleStr = await readFileAsync(`${this._supply}/${batName}/cycle_count`);
                     cycleCount = parseInt(cycleStr.trim(), 10) || 0;
                 } catch (e) { noteReadError(e); }
 
@@ -168,30 +227,30 @@ export class BatterySampler {
                 let powerNow = 0;
 
                 try {
-                    const enStr = await readFileAsync(`/sys/class/power_supply/${batName}/energy_now`);
+                    const enStr = await readFileAsync(`${this._supply}/${batName}/energy_now`);
                     energyNow = (parseInt(enStr.trim(), 10) || 0) / 1000000;
-                    const efStr = await readFileAsync(`/sys/class/power_supply/${batName}/energy_full`);
+                    const efStr = await readFileAsync(`${this._supply}/${batName}/energy_full`);
                     energyFull = (parseInt(efStr.trim(), 10) || 0) / 1000000;
-                    const efdStr = await readFileAsync(`/sys/class/power_supply/${batName}/energy_full_design`);
+                    const efdStr = await readFileAsync(`${this._supply}/${batName}/energy_full_design`);
                     energyFullDesign = (parseInt(efdStr.trim(), 10) || 0) / 1000000;
-                    const pnStr = await readFileAsync(`/sys/class/power_supply/${batName}/power_now`);
+                    const pnStr = await readFileAsync(`${this._supply}/${batName}/power_now`);
                     powerNow = parseInt(pnStr.trim(), 10) || 0;
                 } catch (e) {
                     try {
-                        const cnStr = await readFileAsync(`/sys/class/power_supply/${batName}/charge_now`);
+                        const cnStr = await readFileAsync(`${this._supply}/${batName}/charge_now`);
                         const chargeNow = (parseInt(cnStr.trim(), 10) || 0) / 1000000;
-                        const cfStr = await readFileAsync(`/sys/class/power_supply/${batName}/charge_full`);
+                        const cfStr = await readFileAsync(`${this._supply}/${batName}/charge_full`);
                         const chargeFull = (parseInt(cfStr.trim(), 10) || 0) / 1000000;
-                        const cfdStr = await readFileAsync(`/sys/class/power_supply/${batName}/charge_full_design`);
+                        const cfdStr = await readFileAsync(`${this._supply}/${batName}/charge_full_design`);
                         const chargeFullDesign = (parseInt(cfdStr.trim(), 10) || 0) / 1000000;
 
                         let voltage = 12.0;
                         try {
-                            const voltStr = await readFileAsync(`/sys/class/power_supply/${batName}/voltage_now`);
+                            const voltStr = await readFileAsync(`${this._supply}/${batName}/voltage_now`);
                             voltage = (parseInt(voltStr.trim(), 10) || 12000000) / 1000000;
                         } catch (ev) {
                             try {
-                                const voltMinStr = await readFileAsync(`/sys/class/power_supply/${batName}/voltage_min_design`);
+                                const voltMinStr = await readFileAsync(`${this._supply}/${batName}/voltage_min_design`);
                                 voltage = (parseInt(voltMinStr.trim(), 10) || 12000000) / 1000000;
                             } catch (_) { noteReadError(_); }
                         }
@@ -199,7 +258,7 @@ export class BatterySampler {
                         energyNow = chargeNow * voltage;
                         energyFull = chargeFull * voltage;
                         energyFullDesign = chargeFullDesign * voltage;
-                        const cnCurrentStr = await readFileAsync(`/sys/class/power_supply/${batName}/current_now`);
+                        const cnCurrentStr = await readFileAsync(`${this._supply}/${batName}/current_now`);
                         const currentNowUa = parseInt(cnCurrentStr.trim(), 10) || 0;
                         powerNow = Math.round(currentNowUa * voltage);
                     } catch (e2) { noteReadError(e2); }
@@ -221,6 +280,7 @@ export class BatterySampler {
 
                 return {
                     present: true,
+                    name: batName,
                     percent: percent,
                     state: status,
                     timeRemaining: Math.round(timeRemaining),

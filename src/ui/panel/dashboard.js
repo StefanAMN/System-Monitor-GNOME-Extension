@@ -116,6 +116,7 @@ export class DashboardMethods {
                 }
             }
             if (bat.present) {
+                this._updateBatteryList(bat);
                 if (this._batState) {
                     this._batState.val.text = batteryStateLabel(bat.state);
                 }
@@ -361,6 +362,7 @@ export class DashboardMethods {
         // ── GPU ──
         if (data.gpu) {
             const gpu = data.gpu;
+            this._updateGpuList(gpu);
             const sc = this._summaryCards?.gpu;
             if (sc) {
                 sc.box.visible = true;

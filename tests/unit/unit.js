@@ -27,9 +27,9 @@ import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
 import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
-import { upowerState, batteryHealth } from '../../src/lib/collectors/battery.js';
+import { upowerState, batteryHealth, combineBatteries, BatterySampler } from '../../src/lib/collectors/battery.js';
 import { _, N_, ngettext, fill, translated, setTranslations, resetTranslations } from '../../src/lib/common/i18n.js';
-import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../../src/lib/collectors/gpu.js';
+import { parseNvidiaSmi, parseNvidiaSmiAll, parseAmdSclk, intelBusyFromRc6, pickShownGpu, pciSlot, parseLspciGpus, GpuSampler } from '../../src/lib/collectors/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel, spokenValue } from '../../src/lib/common/present.js';
 
 let failed = 0;
@@ -298,6 +298,32 @@ docker0: 1 2 3
     eq(parseAmdSclk('0: 500Mhz\n'), null, 'amdgpu: no active level');
     eq(intelBusyFromRc6(1000, 1250, 1000), 75, 'intel rc6: 25% asleep = 75% busy');
     eq(intelBusyFromRc6(1000, 2000, 1000), 0, 'intel rc6: fully asleep');
+
+    // More than one battery: one reading for the top bar, each listed.
+    const bat = (name, state, energy, full, design, rate, cycles) => ({ present: true, name, state, energy, energyFull: full, energyFullDesign: design,
+        energyRate: rate, percent: energy / full * 100, health: full / design * 100, cycleCount: cycles });
+    const both = combineBatteries([bat('BAT0', 'discharging', 30, 45, 50, 6, 300), bat('BAT1', 'discharging', 10, 20, 25, 2, 40)]);
+    eq([Math.round(both.percent * 10) / 10, both.state, both.energyRate, both.timeRemaining, both.health, both.cycleCount, both.batteries.map(b => b.name)],
+        [61.5, 'discharging', 8, 18000, 86.66666666666667, 300, ['BAT0', 'BAT1']], 'batteries: combined charge, rate, time, health');
+    eq(combineBatteries([bat('BAT0', 'full', 45, 45, 50, 0, 1), bat('BAT1', 'charging', 10, 20, 25, 5, 1)]).state, 'charging', 'batteries: one charging means charging');
+    eq(combineBatteries([bat('BAT0', 'full', 45, 45, 50, 0, 1), bat('BAT1', 'full', 20, 20, 25, 0, 1)]).state, 'full', 'batteries: all full');
+    eq(combineBatteries([bat('BAT1', 'discharging', 10, 20, 25, 2, 40)]).batteries, undefined, 'batteries: one battery read as it is');
+    eq(combineBatteries([{ present: false }]), null, 'batteries: none present');
+
+    // More than one GPU: every nvidia-smi line, names by PCI slot, the one shown.
+    const two = parseNvidiaSmiAll('NVIDIA GeForce RTX 3060, 550.54.14, 37, 12, 61, 2048, 12288, 45.20, 1530, 2100, 30\nNVIDIA RTX A2000, 550.54.14, 80, 5, 70, 1024, 6144, 60.0, 1800, 2000, 40\n');
+    eq(two.map(g => `${g.model} ${g.percent}`), ['NVIDIA GeForce RTX 3060 37', 'NVIDIA RTX A2000 80'], 'nvidia-smi: every line');
+    eq([pciSlot('../../../0000:01:00.0'), pciSlot('0000:00:02.0\n'), pciSlot('nonsense')], ['01:00.0', '00:02.0', null], 'gpu: PCI slot of a device link');
+    const lspci = parseLspciGpus('00:02.0 VGA compatible controller: Intel Corporation Meteor Lake-P [Intel Arc Graphics] (rev 08)\n' +
+        '01:00.0 3D controller: NVIDIA Corporation GA107M [GeForce RTX 3050 Mobile] (rev a1)\n00:1f.3 Audio device: Intel Corporation Device 7e28\n');
+    eq([...lspci], [['00:02.0', 'Intel Meteor Lake-P [Intel Arc Graphics]'], ['01:00.0', 'NVIDIA GA107M [GeForce RTX 3050 Mobile]']], 'gpu: lspci names by slot');
+    const g = (key, percent, asleep = false) => ({ key, percent, asleep });
+    eq(pickShownGpu([g('card0', 20), g('card1', 60)], null).key, 'card1', 'gpu shown: the busiest');
+    eq(pickShownGpu([g('card0', 55), g('card1', 60)], 'card0').key, 'card0', 'gpu shown: kept while the other is not 10 points busier');
+    eq(pickShownGpu([g('card0', 40), g('card1', 60)], 'card0').key, 'card1', 'gpu shown: switches once the other is clearly busier');
+    eq(pickShownGpu([g('card0', 5), g('card1', 0, true)], 'card1').key, 'card0', 'gpu shown: an awake GPU before a sleeping one');
+    eq(pickShownGpu([g('card1', 0, true)], null).key, 'card1', 'gpu shown: all asleep, still one');
+    eq(pickShownGpu([], null), null, 'gpu shown: none');
     eq(intelBusyFromRc6(1000, 900, 1000), null, 'intel rc6: counter reset');
     eq(intelBusyFromRc6(1000, 1050, 50), null, 'intel rc6: interval too short');
 }
@@ -315,6 +341,9 @@ docker0: 1 2 3
     eq(gpuTooltip({ present: true, brand: 'NVIDIA', percent: 37, memTotal: 8e9, memPercent: 25, temp: 61 }, 'F'), 'NVIDIA: 37%\nVRAM: 25% · Temp: 142°F',
         'gpu tooltip: dedicated GPU shows memory and temperature');
     ok(/not available/.test(gpuTooltip({ present: false })), 'gpu tooltip: absent');
+    const hybrid = { present: true, key: 'card0', brand: 'Intel', percent: 30, memTotal: 0, temp: 0,
+        gpus: [{ key: 'card0', model: 'Intel Arc', percent: 30 }, { key: 'nvidia0', model: 'NVIDIA RTX 3050', percent: 0, asleep: true }, { key: 'card2', model: 'AMD Radeon', percent: 12.6 }] };
+    eq(gpuTooltip(hybrid), 'Intel: 30%\nNVIDIA RTX 3050: asleep\nAMD Radeon: 13%', 'gpu tooltip: the other GPUs, a sleeping one said so');
     // Readings a GPU does not report are null (the UI leaves the field out).
     eq(gpuReadings({ present: true, percent: 12, temp: 0, powerDraw: null, clock: null, maxClock: null, fanSpeed: null }),
         { clock: null, temp: null, fan: null, power: null }, 'gpu readings: an integrated GPU reports none of them');
@@ -621,6 +650,9 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     }, limits, unavailable);
     eq([r.cpu, r.memory, r.thermal, r.gpu, r.disk, r.pressure], [{ value: 50, threshold: 90 }, { value: 60, threshold: 90 }, null, null, null, null],
         'alerts: readings for what is missing are null, never 0');
+    // Several GPUs: the busiest awake one counts, not only the one shown.
+    const multi = alertReadings({ gpu: { present: true, percent: 40, gpus: [{ percent: 40 }, { percent: 97 }, { percent: 100, asleep: true }] } }, limits, unavailable);
+    eq(multi.gpu.value, 97, 'alert readings: the busiest awake GPU');
     const r2 = alertReadings({ dsk: { mounts: [{ percent: 97 }] }, psi: { memory: { some: 12.5, full: 1 } }, thm: { packageTemp: 85, sensors: [{}] } }, limits, unavailable);
     eq([r2.disk, r2.pressure, r2.thermal], [{ value: 97, threshold: 95 }, { value: 12.5, threshold: 10 }, { value: 85, threshold: 80 }], 'alerts: disk, pressure and temperature readings');
     eq(alertLine({ value: 97.2, since: 0 }, 95 * S, { name: 'CPU', format: v => `${Math.round(v)} %` }), 'CPU 97 % for 2 min', 'alerts: line names the metric, value and duration');
@@ -630,6 +662,49 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
 const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));
 (async () => {
+    {
+        // Two DRM cards in a sysfs fixture: an Intel iGPU, awake, and an AMD
+        // dGPU that is powered down. The sleeping card is reported asleep
+        // without its busy figure (reading it would wake a real card); once
+        // awake, it is read and, being busier, shown.
+        const sys = GLib.dir_make_tmp('rp-gpu-sys-XXXXXX');
+        const put = (path, text) => {
+            GLib.mkdir_with_parents(GLib.path_get_dirname(`${sys}/${path}`), 0o755);
+            GLib.file_set_contents(`${sys}/${path}`, text);
+        };
+        const card = (n, slot, files) => {
+            const dev = `devices/pci0000:00/0000:${slot}`;
+            for (const [name, text] of Object.entries(files)) put(`${dev}/${name}`, text);
+            GLib.mkdir_with_parents(`${sys}/class/drm/card${n}`, 0o755);
+            Gio.File.new_for_path(`${sys}/class/drm/card${n}/device`).make_symbolic_link(`../../../${dev}`, null);
+        };
+        card(0, '00:02.0', { vendor: '0x8086\n', gpu_busy_percent: '12\n', 'power/runtime_status': 'active\n' });
+        card(1, '03:00.0', { vendor: '0x1002\n', gpu_busy_percent: '99\n', mem_info_vram_used: '0\n', mem_info_vram_total: '0\n', 'power/runtime_status': 'suspended\n' });
+        const sampler = new GpuSampler(sys);
+        let r = await sampler.sample();
+        eq(r.gpus.map(x => `${x.key}:${x.brand}:${x.asleep ? 'asleep' : x.percent}`), ['card0:Intel:12', 'card1:AMD:asleep'], 'gpu fixture: both cards, the sleeping one not read');
+        eq([r.key, r.percent], ['card0', 12], 'gpu fixture: the awake card shown');
+        put('devices/pci0000:00/0000:03:00.0/power/runtime_status', 'active\n');
+        r = await sampler.sample();
+        eq([r.key, r.percent, r.gpus.length], ['card1', 99, 2], 'gpu fixture: the dGPU read once awake, and shown as the busier');
+        GLib.spawn_command_line_sync(`rm -rf ${sys}`);
+    }
+    {
+        // Two batteries in a sysfs fixture, read through the sampler.
+        const sys = GLib.dir_make_tmp('rp-bat-sys-XXXXXX');
+        const battery = (name, values) => {
+            const dir = `${sys}/class/power_supply/${name}`;
+            GLib.mkdir_with_parents(dir, 0o755);
+            for (const [file, value] of Object.entries(values)) GLib.file_set_contents(`${dir}/${file}`, `${value}\n`);
+        };
+        battery('BAT0', { capacity: 67, status: 'Discharging', cycle_count: 300, energy_now: 30e6, energy_full: 45e6, energy_full_design: 50e6, power_now: 6e6 });
+        battery('BAT1', { capacity: 50, status: 'Discharging', cycle_count: 40, energy_now: 10e6, energy_full: 20e6, energy_full_design: 25e6, power_now: 2e6 });
+        GLib.mkdir_with_parents(`${sys}/class/power_supply/AC`, 0o755);
+        const r = await new BatterySampler(sys).sample();
+        eq([Math.round(r.percent * 10) / 10, r.state, r.energyRate, r.timeRemaining, r.batteries?.map(b => `${b.name} ${b.percent}%`)],
+            [61.5, 'discharging', 8, 18000, ['BAT0 67%', 'BAT1 50%']], 'battery fixture: two batteries combined, each listed');
+        GLib.spawn_command_line_sync(`rm -rf ${sys}`);
+    }
     {
         // Ending real children: one quits on TERM, one ignores TERM and needs KILL.
         const uid = Gio.Credentials.new().get_unix_user();

@@ -784,6 +784,21 @@ async function gpuPageFollowsReadings(rp) {
     check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders with a bare reading (${gpuPlaceholders(rp).join(' | ')})`);
     await shot('gpu-bare');
 
+    // Several GPUs (a hybrid laptop): the shown one in the card, every one
+    // listed, a sleeping one said to be asleep.
+    await feed({
+        ...full, key: 'card0', gpus: [{ ...full, key: 'card0' }, { key: 'nvidia0', model: 'NVIDIA RTX 3050', percent: 0, asleep: true },
+            { key: 'card2', model: 'AMD Radeon 780M', percent: 12 }],
+    });
+    const listed = rp._gpuListRows?.map(row => `${row.lbl.text}=${row.val.text}`) ?? [];
+    check(rp._gpuAllCard.visible && listed.length === 3 && /shown above/.test(listed[0]) && listed[1] === 'NVIDIA RTX 3050=asleep' && listed[2] === 'AMD Radeon 780M=12%',
+        `gpu page: the GPUs are listed as ${listed.join(' | ') || 'nothing'}`);
+    check(/NVIDIA RTX 3050: asleep/.test(rp._tooltipTexts.gpu ?? ''), `gpu tooltip with several GPUs: '${rp._tooltipTexts.gpu}'`);
+    check(cutOffLabels(rp._gpuAllCard).length === 0, `gpu page: cut off in the list of GPUs: ${cutOffLabels(rp._gpuAllCard).join(' | ')}`);
+    await shot('gpu-several');
+    await feed(full);
+    check(!rp._gpuAllCard.visible, 'gpu page: the list of GPUs stays with one GPU');
+
     await feed({ present: false, percent: 0 });
     check(rp._gpuInactiveCard.visible && !rp._gpuHwCard.visible && !rp._gpuSparkCard.visible && !rp._gpuStatsCard.visible,
         'gpu page: without a GPU the cards of readings are still shown');
@@ -796,6 +811,43 @@ async function gpuPageFollowsReadings(rp) {
     await sleep(wait);
     check(rp._gpuHwCard.visible === !!rp._lastGpu?.present, 'gpu page: did not follow the real reading again');
     rp._settings.set_boolean('smooth-transitions', true);
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
+// Two batteries (a laptop with a second, removable one): the page lists
+// each under the figures for both together.
+async function severalBatteries(rp) {
+    rp._indicator.menu.open();
+    rp._activeTab = 'battery';
+    rp._updateTabVisibility();
+    rp._settings.set_boolean('smooth-transitions', false);
+    const wait = rp._settings.get_int('poll-interval') * 1000 + 1500;
+    const each = [
+        { name: 'BAT0', percent: 67, state: 'discharging', health: 90, cycleCount: 300 },
+        { name: 'BAT1', percent: 50, state: 'discharging', health: 80, cycleCount: 40 },
+    ];
+    rp._bat.sample = () => Promise.resolve({
+        present: true, percent: 61.5, state: 'discharging', timeRemaining: 18000, timeToEmpty: 18000, timeToFull: 0,
+        health: 86.7, cycleCount: 300, energyRate: 8, energy: 40, energyFull: 65, energyFullDesign: 75, batteries: each,
+    });
+    try {
+        await sleep(wait);
+        const rows = rp._batListRows?.map(row => `${row.lbl.text}: ${row.val.text}`) ?? [];
+        check(rp._batListCard.visible && rows.join(' | ') === 'BAT0: 67% · Discharging · health 90% | BAT1: 50% · Discharging · health 80%',
+            `battery page: the batteries are listed as ${rows.join(' | ') || 'nothing'}`);
+        check(rp._summaryCards.battery.valueLabel.text === '62%', `battery card: '${rp._summaryCards.battery.valueLabel.text}' for both batteries`);
+        check(cutOffLabels(rp._batListCard).length === 0, `battery page: cut off in the list of batteries: ${cutOffLabels(rp._batListCard).join(' | ')}`);
+        await scrollIntoView(rp, rp._batListCard);
+        await shot('battery-several');
+    } finally {
+        delete rp._bat.sample;
+        rp._settings.set_boolean('smooth-transitions', true);
+    }
+    await sleep(wait);
+    check(rp._batListCard.visible === (rp._lastBat?.batteries?.length > 1), 'battery page: did not follow the real reading again');
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
     rp._indicator.menu.close();
@@ -1321,6 +1373,7 @@ async function run() {
     await panelSizeFollows(ext.stateObj);
     await prefsWindow(ext.stateObj);
     await gpuPageFollowsReadings(ext.stateObj);
+    await severalBatteries(ext.stateObj);
     await batteryTracking(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await screenReader(ext.stateObj);
