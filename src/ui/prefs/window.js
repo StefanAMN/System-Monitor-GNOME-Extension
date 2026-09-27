@@ -12,6 +12,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import { buildPreferences, metricIcon } from './rows.js';
+import { buildBackupGroup } from './backup.js';
 import { HistorySource, buildTrackingPage } from './tracking.js';
 import { buildDiagnosticsPage } from './diagnostics.js';
 import { styleWindow } from './style.js';
@@ -45,6 +46,7 @@ export function fillWindow(window, { settings, path, historyPath, tracking: trac
     window.set_default_size(720, 760);
     styleWindow(window);
     const built = buildPreferences(page, settings, undefined, key => metricIcon(key, path));
+    buildBackupGroup(page, settings);
 
     // The mark in the header (a name would crowd the tabs); the panel's
     // back button joins it when the panel's tabs are added.
