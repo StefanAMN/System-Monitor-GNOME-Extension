@@ -113,9 +113,14 @@ export default class ResourcePulseExtension extends Extension {
         this._stageReleaseId = null;
 
         // Dropdown container
-        this._menuSection = new PopupMenu.PopupBaseMenuItem({ reactive: false, activate: false });
+        // Neither this item nor the containers below may be focusable: St
+        // never navigates inside a widget that takes focus itself, so Tab and
+        // the arrow keys would stop here instead of reaching cards and controls.
+        this._menuSection = new PopupMenu.PopupBaseMenuItem({ reactive: false, activate: false, can_focus: false });
         
-        this._popupStack = new Clutter.Actor({
+        // An St.Widget, not a bare Clutter.Actor: keyboard focus navigation
+        // (Tab, arrow keys) only descends through St widgets.
+        this._popupStack = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
             x_expand: true,
             y_expand: true
@@ -133,7 +138,6 @@ export default class ResourcePulseExtension extends Extension {
             vertical: true,
             style_class: 'resource-pulse-menu-section',
             reactive: true,
-            can_focus: true,
             x_expand: true,
             y_expand: true
         });
