@@ -8,7 +8,7 @@ import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime,
 import { RingBuffer } from '../../src/lib/engine/ringbuffer.js';
 import { RunningStats } from '../../src/lib/engine/stats.js';
 import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned } from '../../src/lib/common/settingsmodel.js';
-import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses } from '../../src/lib/collectors/process.js';
+import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses, filterGroups } from '../../src/lib/collectors/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
 import { listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
 import { parseNetDev, counterDelta, NetworkSampler } from '../../src/lib/collectors/network.js';
@@ -326,6 +326,11 @@ docker0: 1 2 3
     eq(parseAmdSclk('0: 500Mhz\n'), null, 'amdgpu: no active level');
     eq(intelBusyFromRc6(1000, 1250, 1000), 75, 'intel rc6: 25% asleep = 75% busy');
     eq(intelBusyFromRc6(1000, 2000, 1000), 0, 'intel rc6: fully asleep');
+
+    // Process search: names containing the text, any case; all when empty.
+    const procs = [{ comm: 'firefox' }, { comm: 'Isolated Web Co' }, { comm: 'gnome-shell' }, { comm: 'FireDragon' }];
+    eq([filterGroups(procs, 'fire'), filterGroups(procs, '  WEB '), filterGroups(procs, ''), filterGroups(procs, 'zzz')].map(g => g.map(p => p.comm).join()),
+        ['firefox,FireDragon', 'Isolated Web Co', 'firefox,Isolated Web Co,gnome-shell,FireDragon', ''], 'process search: matches, any case, trimmed; all when empty');
 
     // Settings backup: what a file holds, and what of one may be restored.
     const schemaKeys = {

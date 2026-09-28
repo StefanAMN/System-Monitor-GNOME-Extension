@@ -1080,6 +1080,62 @@ async function smoothGlide(rp) {
 // End stops a process that quits on request, Force quit stops one that
 // ignores the request, and Cancel leaves a process alone. The processes run
 // under their own names (symlinks to sh) so they are found in the list.
+// Process search on the CPU page, with real clicks and keys: an idle process
+// with a name of its own (never among the busiest five) is found, Backspace
+// edits the text instead of leaving the page, a name with no match says so,
+// and Escape (which the shell's menu takes) closes the menu and so ends the
+// search: it reopens with the busiest five.
+async function processSearch(rp) {
+    const dir = GLib.dir_make_tmp('rp-search-XXXXXX');
+    GLib.spawn_command_line_sync(`ln -s /bin/sh ${dir}/rpsearchidle`);
+    const idle = Gio.Subprocess.new([`${dir}/rpsearchidle`, '-c', 'sleep 600'], Gio.SubprocessFlags.NONE);
+    const type = async text => {
+        for (const ch of text) await pressKey(Clutter.unicode_to_keysym(ch.codePointAt(0)), 120);
+    };
+    const shown = () => (rp._procWidgets ?? []).filter(w => w.item.visible).map(w => w.group?.comm);
+    try {
+        rp._indicator.menu.open();
+        rp._activeTab = 'cpu';
+        rp._updateTabVisibility();
+        await sleep(2 * rp._intervalUs / 1000 + 800);
+        const search = rp._procSearch.cpu;
+        check(!shown().includes('rpsearchidle'), `search: the idle process is already among the busiest (${shown().join(', ')})`);
+        await scrollIntoView(rp, search.entry);
+        await clickActor(search.entry);
+        await type('rpsearch');
+        for (let i = 0; i < 20 && !shown().includes('rpsearchidle'); i++) await sleep(300);
+        check(search.entry.text === 'rpsearch' && shown().length > 0 && shown().every(c => c.includes('rpsearch')) && shown().includes('rpsearchidle'),
+            `search: typing 'rpsearch' (field '${search.entry.text}') lists ${shown().join(', ') || 'nothing'}`);
+        // A reading taken while the text was shorter is shown dimmed until
+        // one for the whole text arrives.
+        for (let i = 0; i < 20 && rp._procList.opacity !== 255; i++) await sleep(300);
+        check(rp._procList.opacity === 255, `search: the matches stay dimmed (opacity ${rp._procList.opacity})`);
+        await shot('cpu-search');
+
+        await pressKey(Clutter.KEY_BackSpace);
+        check(rp._activeTab === 'cpu' && search.entry.text === 'rpsearc', `search: Backspace left the field '${search.entry.text}' on the '${rp._activeTab}' page`);
+        await type('qq');
+        // The line follows the next sample of the full text.
+        for (let i = 0; i < 20 && !(search.noMatch.visible && search.noMatch.text.includes(search.entry.text)); i++) await sleep(300);
+        check(search.noMatch.visible && /rpsearcqq/.test(search.noMatch.text) && shown().length === 0,
+            `search: no match shows '${search.noMatch.visible ? search.noMatch.text : 'nothing'}', rows ${shown().join(', ')}`);
+
+        await pressKey(Clutter.KEY_Escape);
+        check(!rp._indicator.menu.isOpen && search.entry.text === '' && !search.noMatch.visible,
+            `search: Escape left the menu ${rp._indicator.menu.isOpen ? 'open' : 'closed'} with '${search.entry.text}'`);
+        rp._indicator.menu.open();
+        rp._activeTab = 'cpu';
+        rp._updateTabVisibility();
+        for (let i = 0; i < 20 && !(shown().length > 0 && !shown().includes('rpsearchidle')); i++) await sleep(300);
+        check(shown().length > 0 && !shown().includes('rpsearchidle'), `search: reopened, the busiest are back (${shown().join(', ')})`);
+    } finally {
+        idle.force_exit();
+        GLib.spawn_command_line_sync(`rm -rf ${dir}`);
+        rp._indicator.menu.close();
+        await sleep(400);
+    }
+}
+
 async function endProcesses(rp) {
     const dir = GLib.dir_make_tmp('rp-end-XXXXXX');
     const named = name => {
@@ -1380,6 +1436,7 @@ async function run() {
     await stuckCollector(ext.stateObj);
     await alertsRaise(ext.stateObj);
     await endProcesses(ext.stateObj);
+    await processSearch(ext.stateObj);
     await historyAndUsage(ext.stateObj);
     await smoothGlide(ext.stateObj);
 

@@ -714,3 +714,11 @@
 .rp-light .rp-range { color: #5e5c64; }
 .rp-light .rp-range:hover, .rp-light .rp-range:focus { background-color: rgba(0, 0, 0, 0.06); }
 .rp-light .rp-range.rp-range-on { background-color: rgba(53, 132, 228, 0.22); color: #1c71d8; }
+
+/* A process page's search field. */
+.rp-proc-filter {
+    font-size: 0.85em;
+    margin-bottom: 8px;
+    padding: 4px 10px;
+    border-radius: 8px;
+}

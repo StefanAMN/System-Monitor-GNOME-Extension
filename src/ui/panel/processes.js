@@ -33,6 +33,40 @@ export class ProcessesMethods {
         });
     }
 
+    /**
+     * A page's process search: names containing the text, instead of the
+     * busiest five; and the line said when nothing matches.
+     * @param {'cpu'|'memory'|'disk'} mode
+     */
+    _buildProcFilter(mode) {
+        this._procFilters ??= { cpu: '', memory: '', disk: '' };
+        const entry = new St.Entry({
+            style_class: 'rp-proc-filter', hint_text: _('Filter by name'), can_focus: true, x_expand: true,
+            accessible_name: _('Filter the processes by name'),
+        });
+        const noMatch = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', visible: false });
+        noMatch.clutter_text.line_wrap = true;
+        entry.clutter_text.connect('text-changed', () => {
+            this._procFilters[mode] = entry.text;
+            // The matches now, not at the next tick (not when the menu
+            // closing empties the field).
+            if (this._menuOpen) this._poll();
+        });
+        // Backspace edits the text here instead of leaving the page. Escape
+        // never arrives: the shell's menu takes it and closes the menu,
+        // which ends the search (_clearProcSearch).
+        (this._procSearch ??= {})[mode] = { entry, noMatch };
+        return { entry, noMatch };
+    }
+
+    /** A search lasts while the menu is open: closing it empties the fields. */
+    _clearProcSearch() {
+        for (const { entry, noMatch } of Object.values(this._procSearch ?? {})) {
+            entry.text = '';
+            noMatch.visible = false;
+        }
+    }
+
     /** The confirmation line under a process list. */
     _buildEndBar() {
         // The message on its own (wrapping) line, the buttons under it.

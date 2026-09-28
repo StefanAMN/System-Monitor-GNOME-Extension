@@ -70,6 +70,18 @@ export function cpuPercent(prev, cur, deltaSeconds, clkTck) {
  * member, so a group's memory is an upper bound.
  * @param {{comm: string, pid: number, cpu: number, rss: number, rssBytes: number, mem: number}[]} rows
  */
+/**
+ * The groups whose name contains `query` (case does not matter); every group
+ * when the query is empty. Applied before the top rows are taken, so a search
+ * looks at every process, not only the busiest five.
+ * @param {{comm: string}[]} groups
+ * @param {string} query
+ */
+export function filterGroups(groups, query) {
+    const q = (query ?? '').trim().toLocaleLowerCase();
+    return q ? groups.filter(g => g.comm.toLocaleLowerCase().includes(q)) : groups;
+}
+
 export function groupByName(rows) {
     const groups = new Map();
     for (const row of rows) {
@@ -235,7 +247,7 @@ export class ProcessSampler {
      * @param {object} [opts]
      * @param {boolean} [opts.io] also read disk I/O per process and sort by it
      */
-    async sample(memTotal, byMemory = false, limit = 5, maxBaselineAgeS = Infinity, { io = false } = {}) {
+    async sample(memTotal, byMemory = false, limit = 5, maxBaselineAgeS = Infinity, { io = false, filter = '' } = {}) {
         const { clkTck, pageSize } = await getSysconf();
         if (this._handle.id) return null; // a read is still in progress
         if (this._prevTime > 0 && (GLib.get_monotonic_time() - this._prevTime) / 1000000 > maxBaselineAgeS)
@@ -297,7 +309,7 @@ export class ProcessSampler {
             warmingUp,
             count: rows.length,
             ioDenied,
-            top: groups.slice(0, limit)
+            top: filterGroups(groups, filter).slice(0, limit)
         };
     }
 

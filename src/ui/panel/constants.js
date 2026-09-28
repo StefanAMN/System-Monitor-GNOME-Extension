@@ -37,6 +37,8 @@ export const NET_USAGE_SAVE_US = 5 * 60e6;
 export const GLIDE_FRAME_MS = 250;
 // Rows in each top-process list (the sampler is asked for this many).
 export const PROCESS_ROWS = 5;
+// Rows a process search shows at most (matches, busiest first).
+export const SEARCH_ROWS = 10;
 // Share of time (PSI "some", 10 s average) in which programs waited for
 // memory that raises an alert: well past the occasional reclaim stall.
 export const PRESSURE_LIMIT = 20;
