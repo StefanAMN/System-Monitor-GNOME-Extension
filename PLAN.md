@@ -228,9 +228,9 @@ Still open from the audit: GPU tab `--` values on Intel, truncated settings rows
 
 ---
 
-# Settings page redesign (2026-10-12, branch `settings-redesign`) — PLAN ONLY, awaiting owner approval
+# Settings page redesign (2026-10-12, branch `settings-redesign`) — approved by the owner 2026-10-12
 
-Owner's request: the in-menu settings page feels overcrowded and is hard to read because its rows and controls vary in size. No code has been changed for this section.
+Owner's request: the in-menu settings page feels overcrowded and is hard to read because its rows and controls vary in size. The plan below is as approved; what was built, and where it deviates, is under "State" at the end of this section.
 
 ## What is wrong today (dark-settings screenshot, 380 px panel)
 
@@ -319,8 +319,36 @@ Seen in the same screenshots, smaller than the settings problem:
 - `threshold-*` values that are not a multiple of the step (set from preferences) still clamp to the schema range.
 - No battery / no RAPL / no GPU: rows that do not apply are hidden, not disabled with a placeholder.
 
-## Decisions needed from the owner
+## Owner's decisions (2026-10-12)
 
-1. Keep every setting in the menu (this plan), or keep only the top-bar and unit settings there and send thresholds, interval and the RAPL fix to the preferences window behind a "More settings…" row. Recommendation: keep everything, as planned above; the page already drops to 1.5 panel heights.
-2. S5 (preferences window from the same model): include or leave for later. Recommendation: later.
-3. S6 (main panel items): which, if any. Recommendation: the even card grid and the GPU rows.
+1. Every setting stays in the menu.
+2. S5 (preferences window from the same model): yes.
+3. S6 (main panel): the owner answered "CPU, Memory, Power, Thermal", which does not map onto the four items listed above. Not started; asked again.
+
+## State (2026-10-12)
+
+Done and committed on `settings-redesign` (not pushed):
+
+| # | Result | Proof that was run |
+|---|--------|--------------------|
+| S0 | Baseline screenshots taken before any change (`test(ui): screenshot the whole settings page`) | compared by eye with the result |
+| S1 | `lib/settingsmodel.js` | unit: key types, accepted choices, ranges and steps against the schema; 216 unit checks pass |
+| S2 | `ui/settings.js`: `SettingRow`, `SwitchButton`, `SegmentedControl`, `Stepper`, `ActionButton`, `PinTile`, `Note`; CSS classes `rp-set-*`, no inline style on the page | `test-ui`, real pointer: pin tile, switch (knob position checked), segment, stepper (button goes insensitive at the limit), Reset; a change made behind the page's back is followed |
+| S3 | Page rebuilt: 4 sections, 11 rows (12 with the power row) | `test-ui`: rows all 40 px, controls all 28 px, one control column (148 px), 8 equal tiles 8 px apart, no ellipsized label among > 40 at 380 px and at the 360 px minimum, page 821 px (861 px with the power row) instead of about 1150 px |
+| S4 | Keyboard | `test-ui`, real key events: Down / Tab enter the panel from the top-bar button, Tab reaches all 29 controls, focused control scrolls into view, Space / Return on a switch, Left / Right on a choice and on a stepper |
+| S5 | `ui/prefsrows.js`, `prefs.js` reduced to the header button | `tests/ui-driver/prefs-check.js`: 65 checks on real GTK rows over a memory-backed schema, run by the driver as a client of the sandboxed shell; the real window is opened and screenshotted (its content is checked by eye only) |
+
+Deviations from the plan above, and things found on the way:
+
+- Rows are 40 px, not 44 px, and the control column 148 px, not 132 px ("% + time" did not fit two equal segments of 66 px).
+- The switch is drawn by the extension (`SwitchButton`), not `PopupMenu.Switch`: the shell's switch takes the system accent (orange on Ubuntu) next to this page's blue controls, and brings glyphs the icon check cannot resolve.
+- `lib/power.js` now reports `raplBlocked` (counters exist, reading denied) and has `forgetProbe()`; the power row needs the first, and the second makes the fix show at once instead of after the 60 s probe cache. Unit-tested against a fixture directory.
+- Found: the scroll offset carried over from one page to the next (`fix(ui): open every page at its top`).
+- Found: keyboard focus could not get into the panel at all. The menu item and the page container were focusable themselves and St does not navigate inside a focusable widget; the stacking container was a bare `Clutter.Actor`. Two attempts at the Tab test failed before the cause was looked for with a focus trace instead of guessed (`fix(ui): let keyboard focus into the panel`). This also makes the overview cards reachable, which the earlier "cards open with Return / Space" check had only proved for a card that was given focus by the test.
+- The old settings CSS (`resource-pulse-settings-*`, `-setting-*`, `-toggle-btn`, `-stepper-btn`, `-action-btn`, `-status-label`) is removed.
+
+Not executed:
+
+- The second click of the power row (it starts `pkexec`); the first click, the warning and the row's appearing and disappearing are tested with a stubbed reading.
+- A machine whose energy counters really are blocked (this one has the fix applied); the collector's side is covered by the fixture test only.
+- Preferences window content beyond the 65 row checks: no pointer drives the real window.
