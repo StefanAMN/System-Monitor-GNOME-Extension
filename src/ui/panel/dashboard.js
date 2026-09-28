@@ -72,7 +72,10 @@ export class DashboardMethods {
             if (this._cpuDetailsFreq && cpu.frequency) this._cpuDetailsFreq.text = cpu.frequency;
             if (this._cpuDetailsUptime) this._cpuDetailsUptime.text = formatUptime(cpu.uptime);
 
-            if (cpu.cores) this._updateCpuCoresUI(cpu.cores, cpu.coreFreqs);
+            // Per reading, not per glide frame: repainting a dozen per-core
+            // bars four times a second took the CPU page from +3 % of a core
+            // to +5.5 %, over its 5 % budget. The total and its chart glide.
+            if (cpu.cores && !frame) this._updateCpuCoresUI(cpu.cores, cpu.coreFreqs);
         }
 
         // ── Memory ──

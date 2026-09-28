@@ -205,6 +205,14 @@ async function overhead() {
     const cpuTab = await measureCpu(WINDOW_S) - base;
     report(`menu open on CPU tab (process sampler running): +${cpuTab.toFixed(2)}% (budget ${BUDGET_OPEN}%)`);
 
+    // A search on that page: one letter matches many processes, so up to
+    // ten rows instead of five.
+    ext._procSearch.cpu.entry.text = 'e';
+    await sleep(3000);
+    const searching = await measureCpu(WINDOW_S) - base;
+    report(`menu open on CPU tab, searching: +${searching.toFixed(2)}% (budget ${BUDGET_OPEN}%)`);
+    ext._procSearch.cpu.entry.text = '';
+
     showTab(ext, 'overview');
     ext._indicator.menu.close();
     await sleep(1000);
@@ -228,6 +236,7 @@ async function overhead() {
     check(closed <= BUDGET_CLOSED, `menu-closed overhead ${closed.toFixed(2)}% exceeds ${BUDGET_CLOSED}%`);
     check(open <= BUDGET_OPEN, `menu-open overhead ${open.toFixed(2)}% exceeds ${BUDGET_OPEN}%`);
     check(cpuTab <= BUDGET_OPEN, `CPU-tab overhead ${cpuTab.toFixed(2)}% exceeds ${BUDGET_OPEN}%`);
+    check(searching <= BUDGET_OPEN, `CPU-tab overhead while searching ${searching.toFixed(2)}% exceeds ${BUDGET_OPEN}%`);
 }
 
 async function churnRound(ext) {
