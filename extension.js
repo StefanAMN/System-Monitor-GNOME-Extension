@@ -849,7 +849,25 @@ export default class ResourcePulseExtension extends Extension {
         panelBox.add_child(this._powerFixNote);
         this._powerFixArmed = false;
 
+        // The page is longer than the panel: keyboard focus pulls the
+        // focused control into view.
+        const follow = actor => {
+            if (actor.can_focus) actor.connect('key-focus-in', () => this._scrollIntoView(actor));
+            actor.get_children().forEach(follow);
+        };
+        follow(this._settingsPage);
+
         this._menuContainer.add_child(this._settingsPage);
+    }
+
+    _scrollIntoView(actor) {
+        const adj = this._scrollView?.get_vadjustment();
+        if (!adj) return;
+        const margin = 12;
+        const top = actor.get_transformed_position()[1] - this._scrollView.get_transformed_position()[1];
+        const bottom = top + actor.height;
+        if (top < margin) adj.set_value(adj.value + top - margin);
+        else if (bottom > adj.page_size - margin) adj.set_value(adj.value + bottom - adj.page_size + margin);
     }
 
     _addSettingsSection(title, hint = null) {

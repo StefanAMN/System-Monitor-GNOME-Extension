@@ -476,7 +476,7 @@ async function stepperClamps(rp) {
 // A focused overview card opens its page on Return and on Space, sent as
 // real key events through the compositor.
 let keyboard = null;
-async function pressKey(keyval) {
+async function pressKey(keyval, settle = 600) {
     if (!keyboard) {
         keyboard = Clutter.get_default_backend().get_default_seat()
             .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
@@ -484,7 +484,87 @@ async function pressKey(keyval) {
     keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.PRESSED);
     await sleep(60);
     keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.RELEASED);
-    await sleep(600);
+    await sleep(settle);
+}
+
+// The settings page without a pointer: Tab reaches every control, Space
+// flips a switch, Left / Right change a choice or a number.
+async function settingsKeyboard(rp) {
+    const s = rp._settings;
+    const ctl = key => rp._settingControls[key];
+
+    // From the top-bar button the keyboard must get into the panel at all.
+    await clickActor(rp._indicator);
+    check(rp._indicator.menu.isOpen, 'keyboard: the panel button did not open the menu');
+    await pressKey(Clutter.KEY_Down);
+    const entered = global.stage.get_key_focus();
+    check(entered !== rp._menuSection && rp._menuContainer.contains(entered),
+        `keyboard: Down from the panel button focused ${entered?.constructor.name}.${entered?.style_class}, not something in the panel`);
+    await pressKey(Clutter.KEY_Tab);
+    const next = global.stage.get_key_focus();
+    check(next !== entered && rp._menuContainer.contains(next), 'keyboard: Tab did not move on inside the panel');
+    await openSettings(rp);
+
+    const focusable = [];
+    eachDescendant(rp._settingsPage, actor => {
+        if (actor.can_focus && actor.is_mapped()) focusable.push(actor);
+    });
+    check(focusable.length >= 28, `keyboard: only ${focusable.length} focusable controls on the settings page`);
+    focusable[0].grab_key_focus();
+    const reached = new Set([focusable[0]]);
+    for (let i = 0; i < focusable.length + 4; i++) {
+        await pressKey(Clutter.KEY_Tab, 150);
+        reached.add(global.stage.get_key_focus());
+    }
+    const missed = focusable.filter(actor => !reached.has(actor));
+    check(missed.length === 0, `keyboard: Tab never reached ${missed.length} of ${focusable.length} controls (${missed.slice(0, 4).map(a => a.style_class).join(', ')})`);
+
+    // The last control is below the fold; focusing it must bring it into view.
+    rp._scrollView.get_vadjustment().set_value(0);
+    const last = rp._sizeRow.control;
+    last.grab_key_focus();
+    await sleep(300);
+    const viewTop = rp._scrollView.get_transformed_position()[1];
+    const lastTop = last.get_transformed_position()[1];
+    check(lastTop >= viewTop && lastTop + last.height <= viewTop + rp._scrollView.height,
+        `keyboard: the focused control is outside the view (${Math.round(lastTop - viewTop)} of ${Math.round(rp._scrollView.height)})`);
+    await shot('settings-focus');
+
+    const tooltips = ctl('show-tooltips');
+    s.set_boolean('show-tooltips', true);
+    tooltips.grab_key_focus();
+    await pressKey(Clutter.KEY_space);
+    check(!s.get_boolean('show-tooltips') && !tooltips.state, 'keyboard: Space did not switch tooltips off');
+    await pressKey(Clutter.KEY_Return);
+    check(s.get_boolean('show-tooltips') && tooltips.state, 'keyboard: Return did not switch tooltips back on');
+
+    const net = ctl('network-top-format');
+    s.set_string('network-top-format', 'download');
+    net.buttons.get('download').grab_key_focus();
+    await pressKey(Clutter.KEY_Right);
+    check(s.get_string('network-top-format') === 'upload' && global.stage.get_key_focus() === net.buttons.get('upload'),
+        `keyboard: Right on a choice gave '${s.get_string('network-top-format')}'`);
+    await pressKey(Clutter.KEY_Right);
+    await pressKey(Clutter.KEY_Right);
+    check(s.get_string('network-top-format') === 'both', `keyboard: Right past the last choice gave '${s.get_string('network-top-format')}'`);
+    await pressKey(Clutter.KEY_Left);
+    check(s.get_string('network-top-format') === 'upload', `keyboard: Left on a choice gave '${s.get_string('network-top-format')}'`);
+
+    const mem = ctl('threshold-mem');
+    s.set_int('threshold-mem', 90);
+    mem.incButton.grab_key_focus();
+    await pressKey(Clutter.KEY_Left);
+    check(s.get_int('threshold-mem') === 85 && mem.valueLabel.text === '85%', `keyboard: Left on a stepper gave ${s.get_int('threshold-mem')}`);
+    await pressKey(Clutter.KEY_Right);
+    check(s.get_int('threshold-mem') === 90, `keyboard: Right on a stepper gave ${s.get_int('threshold-mem')}`);
+    check(rp._activeTab === 'settings', `keyboard: arrow keys left the settings page for '${rp._activeTab}'`);
+
+    s.reset('network-top-format');
+    s.reset('threshold-mem');
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
 }
 
 async function keyboardOpensCards(rp) {
@@ -670,6 +750,7 @@ async function run() {
 
     await settingsControls(ext.stateObj);
     await powerRowWhenBlocked(ext.stateObj);
+    await settingsKeyboard(ext.stateObj);
     await stepperClamps(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await thresholdFollowsUnit(ext.stateObj);
