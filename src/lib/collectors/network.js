@@ -44,6 +44,25 @@ export class NetworkSampler {
         this._seq = 0;
         this._sessionRx = 0;
         this._sessionTx = 0;
+        // Counters saved before a disable: what moved meanwhile is counted
+        // into the session totals at the first sample (restoreSession).
+        this._carried = null;
+    }
+
+    /** The session totals and the counters they stopped at, for sessiontotals.js. */
+    sessionTotals() {
+        const counters = [];
+        for (const [iface, prev] of this._prevStats) {
+            if (this._isVirtualCache.get(iface) === false) counters.push({ iface, rxBytes: prev.rxBytes, txBytes: prev.txBytes });
+        }
+        return { rx: this._sessionRx, tx: this._sessionTx, counters };
+    }
+
+    /** Take back the totals of this session from before a disable (the screen lock). */
+    restoreSession({ rx, tx, counters }) {
+        this._sessionRx += rx;
+        this._sessionTx += tx;
+        this._carried = new Map(counters.map(c => [c.iface, c]));
     }
 
     async _checkIsVirtual(iface) {
@@ -75,6 +94,12 @@ export class NetworkSampler {
                 const isVirtual = await this._checkIsVirtual(iface);
 
                 const prev = this._prevStats.get(iface);
+                const carried = !prev && !isVirtual ? this._carried?.get(iface) : null;
+                if (carried) {
+                    // Traffic while the extension was disabled (the screen lock).
+                    this._sessionRx += counterDelta(rxBytes, carried.rxBytes);
+                    this._sessionTx += counterDelta(txBytes, carried.txBytes);
+                }
                 if (prev && deltaTime > 0) {
                     const deltaRx = counterDelta(rxBytes, prev.rxBytes);
                     const deltaTx = counterDelta(txBytes, prev.txBytes);
@@ -103,6 +128,7 @@ export class NetworkSampler {
                 }
             }
 
+            this._carried = null;
             // Interfaces come and go (containers, VPNs); forget the ones that left.
             for (const [iface, prev] of this._prevStats) {
                 if (prev.seen !== seq) {

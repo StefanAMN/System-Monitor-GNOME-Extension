@@ -1397,7 +1397,12 @@ async function run() {
     ext.stateObj._indicator.menu.close();
     await sleep(300);
 
-    // Same path the screen lock takes.
+    // Same path the screen lock takes. The session figures (network totals,
+    // power average and peak) come through it: a peak no real reading here
+    // would reach is planted to recognise them.
+    const before = ext.stateObj;
+    before._pwrStats.add(123, GLib.get_monotonic_time());
+    const kept = { rx: before._net.sessionTotals().rx, peak: before._pwrStats.peak, count: before._pwrStats.count };
     Main.extensionManager.disableExtension(TARGET);
     await sleep(500);
     const t0 = GLib.get_monotonic_time();
@@ -1407,6 +1412,9 @@ async function run() {
     await sleep(1500);
     ext = Main.extensionManager.lookup(TARGET);
     check(ext?.stateObj?._indicator, 'target extension did not re-enable');
+    const back = { rx: ext.stateObj._net.sessionTotals().rx, peak: ext.stateObj._pwrStats.peak, count: ext.stateObj._pwrStats.count };
+    check(back.peak === 123 && back.count >= kept.count && back.rx >= kept.rx,
+        `session figures through disable/enable: ${JSON.stringify(kept)} -> ${JSON.stringify(back)}`);
 
     await cycleTabs(ext.stateObj, 2);
     await clickThrough(ext.stateObj, 'after re-enable');

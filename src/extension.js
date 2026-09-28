@@ -26,6 +26,7 @@ import { PressureSampler } from './lib/collectors/pressure.js';
 import { BucketSeries, RANGES } from './lib/engine/longhistory.js';
 import { loadNetUsage, netUsagePath, readBootId } from './lib/engine/netusage.js';
 import { RunningStats } from './lib/engine/stats.js';
+import { currentSessionIdentity, loadSessionState, saveSessionState, sessionStatePath } from './lib/engine/sessiontotals.js';
 import { HISTORY_CAPACITY, HISTORY_KEYS } from './ui/panel/constants.js';
 import { installMethods } from './ui/panel/mixins.js';
 import { setTranslations, resetTranslations, _ } from './lib/common/i18n.js';
@@ -90,6 +91,16 @@ export default class ResourcePulseExtension extends Extension {
         this._netUsageDirty = false;
         this._netUsageSavedAt = GLib.get_monotonic_time();
         this._bootId = readBootId();
+        {
+            // Session figures from before the screen lock (sessiontotals.js).
+            this._session = currentSessionIdentity(this._bootId);
+            const token = this._sessionToken = {};
+            loadSessionState(sessionStatePath(), this._session).then(saved => {
+                if (!saved || this._sessionToken !== token) return;
+                this._net.restoreSession(saved.net);
+                this._pwrStats.restore(saved.power);
+            });
+        }
         {
             // A token, not _gen: _gen is bumped further down in enable().
             const token = this._netUsageToken = {};
@@ -457,6 +468,15 @@ export default class ResourcePulseExtension extends Extension {
         this._netIfaceRows = null;
         this._thmSensorRows = null;
         this._thmFanRows = null;
+        // Carried to the next enable() of this session (the screen lock).
+        if (this._net && this._pwrStats && this._session) {
+            try {
+                saveSessionState(sessionStatePath(), this._session, { net: this._net.sessionTotals(), power: this._pwrStats.toJSON() });
+            } catch (e) {
+                console.warn(`ResourcePulse: cannot keep the session figures: ${e.message}`);
+            }
+        }
+        this._sessionToken = null;
         this._pwrStats = null;
         this._lastCpu = this._lastMem = this._lastBat = this._lastDsk = null;
         this._lastNet = this._lastThm = this._lastGpu = this._lastPwr = null;
