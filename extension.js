@@ -24,6 +24,8 @@ import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visib
 import { RingBuffer } from './lib/ringbuffer.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
+import { SettingRow, SwitchButton, SegmentedControl, Stepper, ActionButton, PinTile, Note } from './ui/settings.js';
+import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned } from './lib/settingsmodel.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
 
 // ─── Polling / history constants ─────────────────────────────────────────────
@@ -257,6 +259,8 @@ export default class ResourcePulseExtension extends Extension {
         this._netFmtId = this._settings.connect('changed::network-top-format', () => { this._rebuildTopBar(); this._poll(); });
         this._tooltipsId = this._settings.connect('changed::show-tooltips', () => this._hideTooltip());
         this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
+        // Whoever changes a setting (this menu, the preferences window, gsettings), the page follows.
+        this._settingsUiId = this._settings.connect('changed', () => this._refreshSettingsUI());
         this._openMenuId = this._settings.connect('changed::action-open-menu', () => {
             if (this._settings.get_boolean('action-open-menu')) {
                 this._settings.set_boolean('action-open-menu', false);
@@ -286,6 +290,7 @@ export default class ResourcePulseExtension extends Extension {
         if (this._netFmtId) this._settings.disconnect(this._netFmtId);
         if (this._tooltipsId) this._settings.disconnect(this._tooltipsId);
         if (this._pollId) this._settings.disconnect(this._pollId);
+        if (this._settingsUiId) this._settings.disconnect(this._settingsUiId);
         if (this._openMenuId) this._settings.disconnect(this._openMenuId);
 
         this._gen++;
@@ -340,6 +345,12 @@ export default class ResourcePulseExtension extends Extension {
             this._settingsPage.destroy();
             this._settingsPage = null;
         }
+        this._settingRows = null;
+        this._settingControls = null;
+        this._pinTiles = null;
+        this._sizeRow = null;
+        this._powerRow = null;
+        this._powerFixNote = null;
         this._resizeHandles = {};
 
         for (const [actor, id] of this._fitSignals ?? []) actor.disconnect(id);
@@ -569,9 +580,6 @@ export default class ResourcePulseExtension extends Extension {
                 this._menuSection.height = -1;
                 this._menuSection.style = `width: ${defaultWidth}px;`;
             }
-            if (this._settingsDimensionsLabel) {
-                this._settingsDimensionsLabel.text = `Auto Dynamic: ${defaultWidth} × auto px`;
-            }
         }
     }
 
@@ -622,9 +630,6 @@ export default class ResourcePulseExtension extends Extension {
             this._menuSection.width = w;
             this._menuSection.height = h;
             this._menuSection.style = `width: ${w}px; height: ${h}px; min-width: ${w}px; min-height: ${h}px;`;
-        }
-        if (this._settingsDimensionsLabel) {
-            this._settingsDimensionsLabel.text = `Custom: ${w} × ${h} px (Drag corners to resize)`;
         }
     }
 
@@ -789,6 +794,7 @@ export default class ResourcePulseExtension extends Extension {
             this._activeTab = 'settings';
         }
         this._ensureSettingsPage();
+        this._disarmPowerFix();
         this._refreshSettingsUI();
         this._updateTabVisibility();
     }
@@ -796,481 +802,204 @@ export default class ResourcePulseExtension extends Extension {
     _buildSettingsPage() {
         this._settingsPage = new St.BoxLayout({
             vertical: true,
-            style_class: 'resource-pulse-settings-page',
+            style_class: 'rp-set-page',
             x_expand: true,
             y_expand: true,
             visible: false
         });
 
-        // 1. Header
-        const header = new St.BoxLayout({ style: 'spacing: 8px; margin-bottom: 14px;', y_align: Clutter.ActorAlign.CENTER, x_expand: true });
-        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true });
-        const backIcon = new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
-        backBtn.add_child(backIcon);
+        const header = new St.BoxLayout({ style_class: 'rp-set-header', x_expand: true });
+        const backBtn = new St.Button({ style_class: 'rp-chip-bg rp-set-back', can_focus: true, y_align: Clutter.ActorAlign.CENTER });
+        backBtn.set_child(new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'rp-fg rp-set-back-icon' }));
         backBtn.connect('clicked', () => {
             this._activeTab = this._previousTab || 'overview';
             this._updateTabVisibility();
         });
         this._addClickAnimations(backBtn);
         header.add_child(backBtn);
-
-        const titleBox = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
-        titleBox.add_child(new St.Icon({ icon_name: 'preferences-system-symbolic', style_class: 'rp-c-cpu', style: 'icon-size: 18px;' }));
-        titleBox.add_child(new St.Label({ text: 'Settings & Preferences', style_class: 'rp-fg', style: 'font-size: 1.1em; font-weight: bold;' }));
-        header.add_child(titleBox);
+        header.add_child(new St.Label({ text: 'Settings', style_class: 'rp-fg rp-set-heading', y_align: Clutter.ActorAlign.CENTER }));
         this._settingsPage.add_child(header);
 
-        // 2. Card: Pinned Top Bar Metrics
-        const pinCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
-        pinCard.add_child(new St.Label({ text: 'PINNED TOP BAR METRICS', style_class: 'resource-pulse-settings-card-title' }));
-        pinCard.add_child(new St.Label({ text: 'Choose which metrics display in the GNOME top bar', style_class: 'rp-fg-muted', style: 'font-size: 0.75em; margin-bottom: 10px;' }));
+        // Rows, controls and pin tiles by settings key; _refreshSettingsUI()
+        // is the only place that writes a stored value into them.
+        this._settingRows = {};
+        this._settingControls = {};
+        this._pinTiles = {};
+        for (const section of SETTINGS_SECTIONS) {
+            const box = this._addSettingsSection(section.title, section.hint);
+            for (const row of section.rows)
+                box.add_child(row.kind === 'pins' ? this._buildPinGrid(row) : this._buildSettingRow(row));
+        }
 
-        this._pinButtons = {};
-        const availableMetrics = [
-            { key: 'cpu', label: 'CPU Usage' },
-            { key: 'memory', label: 'Memory' },
-            { key: 'battery', label: 'Battery' },
-            { key: 'power', label: 'Power Draw' },
-            { key: 'disk', label: 'Disk Space' },
-            { key: 'network', label: 'Network' },
-            { key: 'thermal', label: 'Thermal' },
-            { key: 'gpu', label: 'GPU' }
-        ];
+        // Not settings but things to do with the panel itself.
+        const panelBox = this._addSettingsSection('Panel', 'drag a bottom corner to resize');
+        this._sizeRow = new SettingRow('Size', new ActionButton('Reset', () => this._resetMenuDimensions()));
+        panelBox.add_child(this._sizeRow);
 
-        const pinGrid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
-        const pinGridWidget = new St.Widget({ layout_manager: pinGrid, x_expand: true });
-
-        availableMetrics.forEach((m, idx) => {
-            const btn = new St.Button({
-                style_class: 'resource-pulse-toggle-btn',
-                reactive: true,
-                can_focus: true,
-                x_expand: true,
-                margin_right: 4,
-                margin_bottom: 6
-            });
-            const bBox = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
-            const bIcon = this._setMetricIcon(new St.Icon({ style: 'icon-size: 14px;' }), m.key);
-            const bLbl = new St.Label({ text: m.label, style: 'font-size: 0.85em;' });
-            bBox.add_child(bIcon);
-            bBox.add_child(bLbl);
-            btn.add_child(bBox);
-
-            btn.connect('clicked', () => {
-                let current = this._pinnedMetrics();
-                if (current.includes(m.key)) {
-                    current = current.filter(k => k !== m.key);
-                } else {
-                    current.push(m.key);
-                }
-                this._settings.set_strv('pinned-metrics', current);
-                this._updatePinButtonState(m.key, current.includes(m.key));
-            });
-            this._addClickAnimations(btn);
-
-            pinGrid.attach(btn, idx % 2, Math.floor(idx / 2), 1, 1);
-            this._pinButtons[m.key] = btn;
-        });
-
-        pinCard.add_child(pinGridWidget);
-        this._settingsPage.add_child(pinCard);
-
-        // 3. Card: General Settings
-        const genCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
-        genCard.add_child(new St.Label({ text: 'GENERAL OPTIONS', style_class: 'resource-pulse-settings-card-title' }));
-
-        // 3.1 Poll Interval Row
-        const pollRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const pollInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        pollInfo.add_child(new St.Label({ text: 'Update Interval', style_class: 'resource-pulse-setting-label' }));
-        pollInfo.add_child(new St.Label({ text: 'Frequency of data sampling (1 to 10 seconds)', style_class: 'resource-pulse-setting-desc' }));
-        pollRow.add_child(pollInfo);
-
-        const pollControls = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
-        const pollDecBtn = new St.Button({ label: '−', style_class: 'resource-pulse-stepper-btn', reactive: true });
-        this._pollValLabel = new St.Label({ text: '2s', style: 'font-size: 0.9em; font-weight: bold; min-width: 32px; text-align: center;' });
-        const pollIncBtn = new St.Button({ label: '+', style_class: 'resource-pulse-stepper-btn', reactive: true });
-        
-        pollDecBtn.connect('clicked', () => {
-            const cur = this._settings.get_int('poll-interval') || 2;
-            if (cur > 1) {
-                this._settings.set_int('poll-interval', cur - 1);
-                this._pollValLabel.text = `${cur - 1}s`;
-            }
-        });
-        pollIncBtn.connect('clicked', () => {
-            const cur = this._settings.get_int('poll-interval') || 2;
-            if (cur < 10) {
-                this._settings.set_int('poll-interval', cur + 1);
-                this._pollValLabel.text = `${cur + 1}s`;
-            }
-        });
-        pollControls.add_child(pollDecBtn);
-        pollControls.add_child(this._pollValLabel);
-        pollControls.add_child(pollIncBtn);
-        pollRow.add_child(pollControls);
-        genCard.add_child(pollRow);
-
-        // 3.2 Compact Mode Row
-        const compactRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const compactInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        compactInfo.add_child(new St.Label({ text: 'Compact Top Bar Mode', style_class: 'resource-pulse-setting-label' }));
-        compactInfo.add_child(new St.Label({ text: 'Show icons only, hiding text labels', style_class: 'resource-pulse-setting-desc' }));
-        compactRow.add_child(compactInfo);
-
-        this._compactBtn = new St.Button({ style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._compactBtn.connect('clicked', () => {
-            const val = !this._settings.get_boolean('compact-label');
-            this._settings.set_boolean('compact-label', val);
-            this._updateToggleBtn(this._compactBtn, val);
-        });
-        compactRow.add_child(this._compactBtn);
-        genCard.add_child(compactRow);
-
-        // 3.3 Hover Tooltips Row
-        const tooltipRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const tooltipInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        tooltipInfo.add_child(new St.Label({ text: 'Hover Tooltips', style_class: 'resource-pulse-setting-label' }));
-        tooltipInfo.add_child(new St.Label({ text: 'Show rich overlays on top bar hover', style_class: 'resource-pulse-setting-desc' }));
-        tooltipRow.add_child(tooltipInfo);
-
-        this._tooltipBtn = new St.Button({ style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._tooltipBtn.connect('clicked', () => {
-            const val = !this._settings.get_boolean('show-tooltips');
-            this._settings.set_boolean('show-tooltips', val);
-            this._updateToggleBtn(this._tooltipBtn, val);
-        });
-        tooltipRow.add_child(this._tooltipBtn);
-        genCard.add_child(tooltipRow);
-
-        // 3.4 Temperature Unit Row
-        const tempRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const tempInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        tempInfo.add_child(new St.Label({ text: 'Temperature Unit', style_class: 'resource-pulse-setting-label' }));
-        tempRow.add_child(tempInfo);
-
-        const tempBox = new St.BoxLayout({ style: 'spacing: 4px;' });
-        this._tempCBtn = new St.Button({ label: '°C', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._tempFBtn = new St.Button({ label: '°F', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._tempCBtn.connect('clicked', () => {
-            this._settings.set_string('unit-temp', 'C');
-            this._refreshSettingsUI();
-        });
-        this._tempFBtn.connect('clicked', () => {
-            this._settings.set_string('unit-temp', 'F');
-            this._refreshSettingsUI();
-        });
-        tempBox.add_child(this._tempCBtn);
-        tempBox.add_child(this._tempFBtn);
-        tempRow.add_child(tempBox);
-        genCard.add_child(tempRow);
-
-        // 3.5 Memory Unit Row
-        const memRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const memInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        memInfo.add_child(new St.Label({ text: 'Memory Unit', style_class: 'resource-pulse-setting-label' }));
-        memRow.add_child(memInfo);
-
-        const memBox = new St.BoxLayout({ style: 'spacing: 4px;' });
-        this._memGbBtn = new St.Button({ label: 'GB', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._memGibBtn = new St.Button({ label: 'GiB', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._memGbBtn.connect('clicked', () => {
-            this._settings.set_string('unit-mem', 'GB');
-            this._refreshSettingsUI();
-        });
-        this._memGibBtn.connect('clicked', () => {
-            this._settings.set_string('unit-mem', 'GiB');
-            this._refreshSettingsUI();
-        });
-        memBox.add_child(this._memGbBtn);
-        memBox.add_child(this._memGibBtn);
-        memRow.add_child(memBox);
-        genCard.add_child(memRow);
-
-        // 3.6 Battery Format Row
-        const batRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const batInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        batInfo.add_child(new St.Label({ text: 'Battery Top Bar Format', style_class: 'resource-pulse-setting-label' }));
-        batRow.add_child(batInfo);
-
-        const batBox = new St.BoxLayout({ style: 'spacing: 4px;' });
-        this._batPctBtn = new St.Button({ label: '% Only', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._batTimeBtn = new St.Button({ label: '% + Time', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._batPctBtn.connect('clicked', () => {
-            this._settings.set_string('battery-top-format', 'percent');
-            this._refreshSettingsUI();
-        });
-        this._batTimeBtn.connect('clicked', () => {
-            this._settings.set_string('battery-top-format', 'percent-time');
-            this._refreshSettingsUI();
-        });
-        batBox.add_child(this._batPctBtn);
-        batBox.add_child(this._batTimeBtn);
-        batRow.add_child(batBox);
-        genCard.add_child(batRow);
-
-        // 3.7 Network Format Row
-        const netRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const netInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        netInfo.add_child(new St.Label({ text: 'Network Top Bar Format', style_class: 'resource-pulse-setting-label' }));
-        netRow.add_child(netInfo);
-
-        const netBox = new St.BoxLayout({ style: 'spacing: 4px;' });
-        this._netDownBtn = new St.Button({ label: '↓ Down', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._netUpBtn = new St.Button({ label: '↑ Up', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._netBothBtn = new St.Button({ label: '↓↑ Both', style_class: 'resource-pulse-toggle-btn', reactive: true });
-        this._netDownBtn.connect('clicked', () => {
-            this._settings.set_string('network-top-format', 'download');
-            this._refreshSettingsUI();
-        });
-        this._netUpBtn.connect('clicked', () => {
-            this._settings.set_string('network-top-format', 'upload');
-            this._refreshSettingsUI();
-        });
-        this._netBothBtn.connect('clicked', () => {
-            this._settings.set_string('network-top-format', 'both');
-            this._refreshSettingsUI();
-        });
-        netBox.add_child(this._netDownBtn);
-        netBox.add_child(this._netUpBtn);
-        netBox.add_child(this._netBothBtn);
-        netRow.add_child(netBox);
-        genCard.add_child(netRow);
-
-        this._settingsPage.add_child(genCard);
-
-        // 4. Card: Warning Thresholds
-        const alertCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
-        alertCard.add_child(new St.Label({ text: 'ALERT THRESHOLDS', style_class: 'resource-pulse-settings-card-title' }));
-        alertCard.add_child(new St.Label({ text: 'Values exceeding threshold will display in warning colors', style_class: 'rp-fg-muted', style: 'font-size: 0.75em; margin-bottom: 8px;' }));
-
-        // 4.1 CPU Threshold
-        const cpuThreshRow = this._buildStepperRow('CPU Alert Threshold', 50, 100, 5, 'threshold-cpu', '%');
-        this._cpuThreshLbl = cpuThreshRow.valLbl;
-        this._cpuThreshInc = cpuThreshRow.incBtn;
-        alertCard.add_child(cpuThreshRow.row);
-
-        // 4.2 Mem Threshold
-        const memThreshRow = this._buildStepperRow('Memory Alert Threshold', 50, 100, 5, 'threshold-mem', '%');
-        this._memThreshLbl = memThreshRow.valLbl;
-        alertCard.add_child(memThreshRow.row);
-
-        // 4.3 Temp Threshold
-        // Stored in °C; shown in the unit the rest of the UI uses.
-        const tempThreshRow = this._buildStepperRow('Temperature Alert Threshold', 40, 100, 5, 'threshold-temp',
-            v => formatTemp(v, this._settings.get_string('unit-temp')));
-        this._tempThreshLbl = tempThreshRow.valLbl;
-        this._tempThreshInc = tempThreshRow.incBtn;
-        alertCard.add_child(tempThreshRow.row);
-
-        this._settingsPage.add_child(alertCard);
-
-        // 5. Card: Permissions & System Troubleshooting
-        const permCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
-        permCard.add_child(new St.Label({ text: 'PERMISSIONS & TROUBLESHOOTING', style_class: 'resource-pulse-settings-card-title' }));
-
-        const permRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const permInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        permInfo.add_child(new St.Label({ text: 'Enable CPU Power Monitoring', style_class: 'resource-pulse-setting-label' }));
-        permInfo.add_child(new St.Label({ text: 'Fixes 0W reading by granting read permission to RAPL sensors (Requires Admin)', style_class: 'resource-pulse-setting-desc' }));
-        const permWarn = new St.Label({ text: RAPL_FIX_WARNING, style_class: 'resource-pulse-setting-desc' });
-        permWarn.clutter_text.line_wrap = true;
-        permInfo.add_child(permWarn);
-        this._settingsPowerFixStatus = new St.Label({ text: '', style_class: 'resource-pulse-status-label', visible: false });
-        this._settingsPowerFixStatus.style = 'margin-top: 4px;';
-        permInfo.add_child(this._settingsPowerFixStatus);
-        permRow.add_child(permInfo);
-
-        this._powerFixBtn = new St.Button({ label: 'Fix Permissions', style_class: 'resource-pulse-action-btn', reactive: true });
-        this._powerFixBtn.connect('clicked', () => {
-            this._runPowerFix(this._settingsPowerFixStatus, this._powerFixBtn);
-        });
-        permRow.add_child(this._powerFixBtn);
-        permCard.add_child(permRow);
-        this._settingsPage.add_child(permCard);
-
-        // 6. Card: Window Sizing & Reset
-        const sizeCard = new St.BoxLayout({ vertical: true, style_class: 'resource-pulse-settings-card' });
-        sizeCard.add_child(new St.Label({ text: 'PANEL RESIZING', style_class: 'resource-pulse-settings-card-title' }));
-
-        const sizeRow = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const sizeInfo = new St.BoxLayout({ vertical: true, x_expand: true });
-        sizeInfo.add_child(new St.Label({ text: 'Window Dimensions', style_class: 'resource-pulse-setting-label' }));
-        this._settingsDimensionsLabel = new St.Label({ text: 'Drag any corner to resize the panel', style_class: 'resource-pulse-setting-desc' });
-        sizeInfo.add_child(this._settingsDimensionsLabel);
-        sizeRow.add_child(sizeInfo);
-
-        const resetSizeBtn = new St.Button({ label: 'Reset Size', style_class: 'resource-pulse-action-btn', reactive: true });
-        resetSizeBtn.connect('clicked', () => {
-            this._resetMenuDimensions();
-        });
-        sizeRow.add_child(resetSizeBtn);
-        sizeCard.add_child(sizeRow);
-        this._settingsPage.add_child(sizeCard);
+        // Offered only while the kernel withholds the energy counters.
+        this._powerRow = new SettingRow('CPU power', new ActionButton('Enable', () => this._onPowerFixClicked()));
+        this._powerRow.asideLabel.text = 'not readable';
+        this._powerRow.visible = false;
+        panelBox.add_child(this._powerRow);
+        this._powerFixNote = new Note();
+        panelBox.add_child(this._powerFixNote);
+        this._powerFixArmed = false;
 
         this._menuContainer.add_child(this._settingsPage);
     }
 
-    /** @param {string|function(number): string} unit suffix, or a formatter for the stored value */
-    _buildStepperRow(labelText, min, max, step, settingKey, unit) {
-        const format = typeof unit === 'function' ? unit : v => `${v}${unit}`;
-        const row = new St.BoxLayout({ style_class: 'resource-pulse-setting-row', y_align: Clutter.ActorAlign.CENTER });
-        const info = new St.BoxLayout({ vertical: true, x_expand: true });
-        info.add_child(new St.Label({ text: labelText, style_class: 'resource-pulse-setting-label' }));
-        row.add_child(info);
-
-        const controls = new St.BoxLayout({ style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
-        const decBtn = new St.Button({ label: '−', style_class: 'resource-pulse-stepper-btn', reactive: true });
-        const valLbl = new St.Label({ text: format(this._settings.get_int(settingKey)), style: 'font-size: 0.9em; font-weight: bold; min-width: 44px; text-align: center;' });
-        const incBtn = new St.Button({ label: '+', style_class: 'resource-pulse-stepper-btn', reactive: true });
-
-        // Preferences step by 1, so the stored value need not be a multiple
-        // of `step`: clamp to the schema range (GSettings rejects anything
-        // outside it) and show what was actually stored.
-        const stepBy = (delta) => {
-            const cur = this._settings.get_int(settingKey);
-            const next = Math.max(min, Math.min(max, cur + delta));
-            if (next !== cur) this._settings.set_int(settingKey, next);
-            valLbl.text = format(this._settings.get_int(settingKey));
-        };
-        decBtn.connect('clicked', () => stepBy(-step));
-        incBtn.connect('clicked', () => stepBy(step));
-
-        controls.add_child(decBtn);
-        controls.add_child(valLbl);
-        controls.add_child(incBtn);
-        row.add_child(controls);
-        return { row, valLbl, incBtn, decBtn };
+    _addSettingsSection(title, hint = null) {
+        if (this._settingsPage.get_n_children() > 1)
+            this._settingsPage.add_child(new St.Widget({ style_class: 'rp-set-separator', x_expand: true }));
+        const box = new St.BoxLayout({ vertical: true, style_class: 'rp-set-section', x_expand: true });
+        const head = new St.BoxLayout({ style_class: 'rp-set-section-head', x_expand: true });
+        head.add_child(new St.Label({ text: title.toUpperCase(), style_class: 'rp-set-section-title', y_align: Clutter.ActorAlign.CENTER }));
+        if (hint)
+            head.add_child(new St.Label({ text: `·  ${hint}`, style_class: 'rp-set-hint', y_align: Clutter.ActorAlign.CENTER }));
+        box.add_child(head);
+        this._settingsPage.add_child(box);
+        return box;
     }
 
-    _updateToggleBtn(btn, active) {
-        if (!btn) return;
-        btn.label = active ? 'ON' : 'OFF';
-        if (active) {
-            btn.add_style_class_name('active');
+    _buildSettingRow(row) {
+        let control;
+        if (row.kind === 'switch') {
+            control = new SwitchButton(state => this._settings.set_boolean(row.key, state));
+        } else if (row.kind === 'choice') {
+            control = new SegmentedControl(row.choices, value => this._settings.set_string(row.key, value));
         } else {
-            btn.remove_style_class_name('active');
+            // The stored value need not be a multiple of the step (the
+            // preferences window accepts any value in range).
+            control = new Stepper(direction => {
+                const current = this._settings.get_int(row.key);
+                const next = stepSettingValue(row, current, direction);
+                if (next !== current) this._settings.set_int(row.key, next);
+            });
         }
+        this._settingControls[row.key] = control;
+        this._settingRows[row.key] = new SettingRow(row.title, control);
+        return this._settingRows[row.key];
     }
 
-    _updatePinButtonState(key, isPinned) {
-        const btn = this._pinButtons?.[key];
-        if (!btn) return;
-        if (isPinned) {
-            btn.add_style_class_name('active');
-        } else {
-            btn.remove_style_class_name('active');
-        }
+    _buildPinGrid(row) {
+        const box = new St.BoxLayout({ vertical: true, style_class: 'rp-set-pins', x_expand: true });
+        const caption = new St.BoxLayout({ style_class: 'rp-set-caption', x_expand: true });
+        caption.add_child(new St.Label({ text: row.title, style_class: 'rp-set-title', x_expand: true, y_align: Clutter.ActorAlign.CENTER }));
+        caption.add_child(new St.Label({ text: row.hint, style_class: 'rp-set-aside', y_align: Clutter.ActorAlign.CENTER }));
+        box.add_child(caption);
+
+        const layout = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: true, column_spacing: 8, row_spacing: 8 });
+        const grid = new St.Widget({ layout_manager: layout, x_expand: true });
+        METRICS.forEach(({ key, name }, index) => {
+            const icon = this._setMetricIcon(new St.Icon({ style_class: 'rp-set-tile-icon' }), key);
+            const tile = new PinTile(icon, name, () =>
+                this._settings.set_strv(row.key, togglePinned(this._pinnedMetrics(), key)));
+            layout.attach(tile, index % 2, Math.floor(index / 2), 1, 1);
+            this._pinTiles[key] = tile;
+        });
+        box.add_child(grid);
+        return box;
     }
 
-    _updateChipActive(btn, active) {
-        if (!btn) return;
-        if (active) {
-            btn.add_style_class_name('active');
-        } else {
-            btn.remove_style_class_name('active');
-        }
-    }
-
+    /** Write every stored value into its control. Runs when the page opens and when a setting changes, never per sample. */
     _refreshSettingsUI() {
         if (!this._settings || !this._settingsPage) return;
 
-        // Pinned
-        const pinned = this._pinnedMetrics();
-        for (const key of Object.keys(this._pinButtons || {})) {
-            this._updatePinButtonState(key, pinned.includes(key));
-        }
+        const positions = pinPositions(this._pinnedMetrics());
+        for (const key in this._pinTiles) this._pinTiles[key].setPosition(positions[key]);
 
-        // Poll interval
-        if (this._pollValLabel) {
-            this._pollValLabel.text = `${this._settings.get_int('poll-interval') || 2}s`;
-        }
-
-        // Compact & tooltips
-        this._updateToggleBtn(this._compactBtn, this._settings.get_boolean('compact-label'));
-        this._updateToggleBtn(this._tooltipBtn, this._settings.get_boolean('show-tooltips'));
-
-        // Temp unit
-        const tempUnit = this._settings.get_string('unit-temp') || 'C';
-        this._updateChipActive(this._tempCBtn, tempUnit === 'C');
-        this._updateChipActive(this._tempFBtn, tempUnit === 'F');
-
-        // Mem unit
-        const memUnit = this._settings.get_string('unit-mem') || 'GB';
-        this._updateChipActive(this._memGbBtn, memUnit === 'GB');
-        this._updateChipActive(this._memGibBtn, memUnit === 'GiB');
-
-        // Battery format
-        const batFmt = this._settings.get_string('battery-top-format') || 'percent';
-        this._updateChipActive(this._batPctBtn, batFmt === 'percent');
-        this._updateChipActive(this._batTimeBtn, batFmt === 'percent-time');
-
-        // Network format
-        const netFmt = this._settings.get_string('network-top-format') || 'download';
-        this._updateChipActive(this._netDownBtn, netFmt === 'download');
-        this._updateChipActive(this._netUpBtn, netFmt === 'upload');
-        this._updateChipActive(this._netBothBtn, netFmt === 'both');
-
-        // Thresholds
-        if (this._cpuThreshLbl) this._cpuThreshLbl.text = `${this._settings.get_int('threshold-cpu')}%`;
-        if (this._memThreshLbl) this._memThreshLbl.text = `${this._settings.get_int('threshold-mem')}%`;
-        if (this._tempThreshLbl) this._tempThreshLbl.text = formatTemp(this._settings.get_int('threshold-temp'), this._settings.get_string('unit-temp'));
-
-        // Dimensions
-        const customW = this._settings.get_int('menu-custom-width') || 0;
-        const customH = this._settings.get_int('menu-custom-height') || 0;
-        if (this._settingsDimensionsLabel) {
-            if (customW > 0 && customH > 0) {
-                this._settingsDimensionsLabel.text = `Custom Size: ${customW} × ${customH} px (Drag corners to resize)`;
+        const tempUnit = this._settings.get_string('unit-temp');
+        for (const row of allSettingRows()) {
+            const control = this._settingControls[row.key];
+            if (!control) continue;
+            if (row.kind === 'switch') {
+                control.setState(this._settings.get_boolean(row.key));
+            } else if (row.kind === 'choice') {
+                control.setValue(this._settings.get_string(row.key));
             } else {
-                this._settingsDimensionsLabel.text = `Auto Dynamic: ${this._currentWidth || 420} × auto px`;
+                const value = this._settings.get_int(row.key);
+                control.setText(formatSettingValue(row, value, tempUnit));
+                control.setLimits(value > row.min, value < row.max);
             }
         }
+
+        const customW = this._settings.get_int('menu-custom-width');
+        const customH = this._settings.get_int('menu-custom-height');
+        const custom = customW > 0 && customH > 0;
+        this._sizeRow.asideLabel.text = custom ? `${customW} × ${customH}` : 'automatic';
+        this._sizeRow.control.reactive = custom;
+
+        this._refreshHardwareRows();
     }
 
-    _runPowerFix(statusLabel = null, button = null) {
-        const gen = this._gen;
-        if (button) button.reactive = false;
-        if (statusLabel) {
-            statusLabel.text = 'Requesting administrator permission...';
-            statusLabel.style = 'color: #3584e4;';
-            statusLabel.visible = true;
+    /** Rows that only apply to hardware this machine has (or lacks). */
+    _refreshHardwareRows() {
+        if (!this._settingsPage) return;
+        const bat = this._lastData?.bat;
+        const batRow = this._settingRows['battery-top-format'];
+        if (bat && batRow.visible !== !!bat.present) batRow.visible = !!bat.present;
+        const blocked = !!this._lastPwr?.raplBlocked;
+        if (this._powerRow.visible !== blocked) this._powerRow.visible = blocked;
+    }
+
+    _setPowerFixNote(text, state = null) {
+        const note = this._powerFixNote;
+        if (!note) return;
+        note.text = text;
+        for (const name of ['ok', 'error']) {
+            if (name === state) note.add_style_class_name(name);
+            else note.remove_style_class_name(name);
         }
+        note.visible = text.length > 0;
+    }
+
+    _disarmPowerFix() {
+        this._powerFixArmed = false;
+        if (!this._powerRow) return;
+        this._powerRow.control.label = 'Enable';
+        this._setPowerFixNote('');
+    }
+
+    /** First click explains what the fix does, the second one runs it. */
+    _onPowerFixClicked() {
+        if (!this._powerFixArmed) {
+            this._powerFixArmed = true;
+            this._powerRow.control.label = 'Confirm';
+            this._setPowerFixNote(`Asks for an administrator password. ${RAPL_FIX_WARNING}`);
+            return;
+        }
+        this._powerFixArmed = false;
+        this._powerRow.control.label = 'Enable';
+        this._runPowerFix();
+    }
+
+    _runPowerFix() {
+        const gen = this._gen;
+        const button = this._powerRow.control;
+        const done = (text, state) => {
+            if (gen !== this._gen) return;
+            button.reactive = true;
+            this._setPowerFixNote(text, state);
+        };
+        button.reactive = false;
+        this._setPowerFixNote('Requesting administrator permission…');
         try {
             const proc = Gio.Subprocess.new(RAPL_FIX_ARGV, Gio.SubprocessFlags.NONE);
             proc.wait_check_async(null, (obj, res) => {
-                let failure = null;
                 try {
                     obj.wait_check_finish(res);
                 } catch (e) {
-                    failure = e;
+                    done(`Failed: ${e.message}`, 'error');
+                    return;
                 }
                 if (gen !== this._gen) return;
-                try {
-                    if (failure) throw failure;
-                    if (statusLabel) {
-                        statusLabel.text = '✓ RAPL permissions successfully updated!';
-                        statusLabel.style = 'color: #2ec27e;';
-                        statusLabel.visible = true;
-                    }
-                    if (button) button.reactive = true;
-                    this._poll();
-                } catch (e) {
-                    if (statusLabel) {
-                        statusLabel.text = `Failed: ${e.message}`;
-                        statusLabel.style = 'color: #e01b24;';
-                        statusLabel.visible = true;
-                    }
-                    if (button) button.reactive = true;
-                }
+                done('CPU power is now readable.', 'ok');
+                // The cached probe still says "blocked": look again now.
+                this._pwr.forgetProbe();
+                this._poll();
             });
         } catch (e) {
-            if (statusLabel) {
-                statusLabel.text = `Error: ${e.message}`;
-                statusLabel.style = 'color: #e01b24;';
-                statusLabel.visible = true;
-            }
-            if (button) button.reactive = true;
+            done(`Failed: ${e.message}`, 'error');
         }
     }
 
@@ -3455,6 +3184,8 @@ export default class ResourcePulseExtension extends Extension {
         // ── Power ──
         if (data.pwr) {
             const pwr = data.pwr;
+            // The permission row of the settings page comes and goes with this.
+            this._refreshHardwareRows();
             const hasDraw = pwr.raplSupported || pwr.systemPower !== null;
             const sc = this._summaryCards?.power;
             

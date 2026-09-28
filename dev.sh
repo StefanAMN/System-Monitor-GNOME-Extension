@@ -377,7 +377,7 @@ cmd_test_ui() {
     compile_schemas
 
     local SANDBOX LOG BAD
-    run_driver ui-driver rp-ui-driver@resource-pulse.test 150
+    run_driver ui-driver rp-ui-driver@resource-pulse.test 300
 
     if driver_passed; then
         log_success "UI test passed${RP_KEEP:+ (screenshots: $SANDBOX/shots)}"

@@ -131,7 +131,6 @@ async function cycleTabs(rp, pass, tag = null) {
     for (const tab of TABS) {
         rp._activeTab = tab;
         rp._updateTabVisibility();
-        if (tab === 'settings') rp._refreshSettingsUI();
         // Overlapping calls on purpose: the poll guard must absorb them.
         rp._poll();
         rp._poll();
@@ -269,6 +268,182 @@ function checkIcons(rp, label) {
     check(missing.length === 0, `${label}: icons the theme cannot supply: ${[...new Set(missing)].join(', ')}`);
 }
 
+function eachDescendant(actor, visit) {
+    visit(actor);
+    actor.get_children().forEach(child => eachDescendant(child, visit));
+}
+
+async function openSettings(rp) {
+    rp._indicator.menu.open();
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    await sleep(500);
+    await clickActor(rp._overviewMenuBtn);
+    check(rp._activeTab === 'settings', `settings: the menu button left the tab at '${rp._activeTab}'`);
+    await sleep(500);
+}
+
+async function scrollTo(rp, actor) {
+    ensureActorVisibleInScrollView(rp._scrollView, actor);
+    await sleep(500);
+}
+
+// What made the old page hard to read, as assertions: every row has the
+// same height, every control sits in the same column, nothing is cut off.
+function settingsLayout(rp, label) {
+    const page = rp._settingsPage;
+    const rows = [...Object.values(rp._settingRows), rp._sizeRow, rp._powerRow].filter(row => row.visible);
+    check(rows.length >= 10, `${label}: only ${rows.length} setting rows are visible`);
+
+    const heights = new Set(rows.map(row => Math.round(row.height)));
+    check(heights.size === 1, `${label}: setting rows are ${[...heights].join(' / ')} px high`);
+
+    const columns = new Set(rows.map(row => {
+        const [x] = row.controlBin.get_transformed_position();
+        return `${Math.round(x)}+${Math.round(row.controlBin.width)}`;
+    }));
+    check(columns.size === 1, `${label}: control columns differ (${[...columns].join(', ')})`);
+
+    const isSwitch = control => 'state' in control;
+    for (const row of rows) {
+        const [binX] = row.controlBin.get_transformed_position();
+        const [x] = row.control.get_transformed_position();
+        const name = row.titleLabel.text;
+        check(Math.round(x + row.control.width) === Math.round(binX + row.controlBin.width),
+            `${label}: control of '${name}' does not end at the column's right edge`);
+        if (!isSwitch(row.control)) {
+            check(Math.round(x) === Math.round(binX), `${label}: control of '${name}' does not fill the column`);
+        }
+    }
+    const controlHeights = new Set(rows.filter(row => !isSwitch(row.control)).map(row => Math.round(row.control.height)));
+    check(controlHeights.size === 1, `${label}: controls are ${[...controlHeights].join(' / ')} px high`);
+
+    const tiles = Object.values(rp._pinTiles);
+    const tileSizes = new Set(tiles.map(tile => `${Math.round(tile.width)}x${Math.round(tile.height)}`));
+    check(tiles.length === 8 && tileSizes.size === 1, `${label}: pin tiles differ in size (${[...tileSizes].join(', ')})`);
+    const gap = tiles[1].get_transformed_position()[0] - (tiles[0].get_transformed_position()[0] + tiles[0].width);
+    check(Math.round(gap) === 8, `${label}: pin tiles are ${gap}px apart`);
+
+    const cut = [];
+    let labels = 0;
+    eachDescendant(page, actor => {
+        if (!(actor instanceof St.Label) || !actor.is_mapped()) return;
+        labels++;
+        if (actor.clutter_text.get_layout().is_ellipsized()) cut.push(actor.text);
+    });
+    check(labels > 40, `${label}: only ${labels} labels found on the settings page, the walk is broken`);
+    check(cut.length === 0, `${label}: cut-off text on the settings page: ${cut.join(' | ')}`);
+
+    const [, natural] = page.get_preferred_height(page.width);
+    check(natural <= 900, `${label}: the settings page is ${natural}px long`);
+    console.log(`RP-UITEST ${label}: rows ${[...heights][0]}px, controls ${[...controlHeights][0]}px, column ${[...columns][0]}, page ${Math.round(natural)}px at ${Math.round(page.width)}px`);
+}
+
+// One of each control, clicked with the real pointer, plus a change made
+// behind the page's back.
+async function settingsControls(rp) {
+    const s = rp._settings;
+    const ctl = key => rp._settingControls[key];
+    s.set_strv('pinned-metrics', ['cpu', 'memory']);
+    await openSettings(rp);
+    settingsLayout(rp, 'settings layout (default width)');
+
+    await scrollTo(rp, rp._pinTiles.gpu);
+    await clickActor(rp._pinTiles.gpu);
+    check(s.get_strv('pinned-metrics').join() === 'cpu,memory,gpu', `pin tile: pinned is ${s.get_strv('pinned-metrics')}`);
+    check(rp._pinTiles.gpu.badge.text === '3' && rp._pinTiles.gpu.has_style_class_name('active'), 'pin tile: gpu is not marked as third');
+    check('gpu' in rp._topBarWidgets, 'pin tile: gpu did not reach the top bar');
+    await clickActor(rp._pinTiles.cpu);
+    check(s.get_strv('pinned-metrics').join() === 'memory,gpu', `pin tile: after unpinning cpu the list is ${s.get_strv('pinned-metrics')}`);
+    check(rp._pinTiles.cpu.pinPosition === 0 && !rp._pinTiles.cpu.has_style_class_name('active') &&
+        rp._pinTiles.memory.badge.text === '1' && rp._pinTiles.gpu.badge.text === '2', 'pin tile: positions did not move up');
+
+    const compact = ctl('compact-label');
+    await scrollTo(rp, compact);
+    // Where the knob sits inside the track: 0 at the left end, 1 at the right.
+    const knobAt = () => (compact.knob.get_transformed_position()[0] - compact.get_transformed_position()[0]) /
+        (compact.width - compact.knob.width);
+    check(knobAt() < 0.25, `switch: knob of a switched-off setting sits at ${knobAt().toFixed(2)}`);
+    await clickActor(compact);
+    check(s.get_boolean('compact-label') && compact.state, 'switch: click did not turn compact mode on');
+    check(knobAt() > 0.75 && compact.has_style_class_name('active'), `switch: knob of a switched-on setting sits at ${knobAt().toFixed(2)}`);
+    await clickActor(compact);
+    check(!s.get_boolean('compact-label') && !compact.state, 'switch: second click did not turn compact mode off');
+    check(knobAt() < 0.25 && !compact.has_style_class_name('active'), `switch: knob did not return (${knobAt().toFixed(2)})`);
+
+    const mem = ctl('unit-mem');
+    await scrollTo(rp, mem);
+    await clickActor(mem.buttons.get('GiB'));
+    check(s.get_string('unit-mem') === 'GiB' && mem.buttons.get('GiB').has_style_class_name('active') &&
+        !mem.buttons.get('GB').has_style_class_name('active'), `segments: unit-mem is '${s.get_string('unit-mem')}' after clicking GiB`);
+    // Changed from outside (preferences window, gsettings): the page follows.
+    s.set_string('unit-mem', 'GB');
+    await sleep(300);
+    check(mem.value === 'GB' && mem.buttons.get('GB').has_style_class_name('active'), 'segments: the page did not follow an outside change');
+
+    const poll = ctl('poll-interval');
+    s.set_int('poll-interval', 2);
+    await scrollTo(rp, poll);
+    await clickActor(poll.decButton);
+    check(s.get_int('poll-interval') === 1 && poll.valueLabel.text === '1 s' && !poll.decButton.reactive,
+        `stepper: − left the interval at ${s.get_int('poll-interval')} ('${poll.valueLabel.text}')`);
+    await clickActor(poll.incButton);
+    check(s.get_int('poll-interval') === 2 && poll.decButton.reactive, `stepper: + left the interval at ${s.get_int('poll-interval')}`);
+
+    // The narrowest panel a user can drag to; then the Reset row, clicked.
+    s.set_int('menu-custom-width', 360);
+    s.set_int('menu-custom-height', 576);
+    rp._updateMenuDimensions();
+    await sleep(800);
+    settingsLayout(rp, 'settings layout (minimum width)');
+    await shot('settings-min-width');
+    const reset = rp._sizeRow.control;
+    check(rp._sizeRow.asideLabel.text === '360 × 576' && reset.reactive, `size row: shows '${rp._sizeRow.asideLabel.text}' for a custom 360 × 576`);
+    await scrollTo(rp, reset);
+    await clickActor(reset);
+    check(s.get_int('menu-custom-width') === 0 && rp._sizeRow.asideLabel.text === 'automatic' && !reset.reactive,
+        `size row: after Reset width is ${s.get_int('menu-custom-width')}, label '${rp._sizeRow.asideLabel.text}'`);
+
+    s.set_strv('pinned-metrics', ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu']);
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
+// The permission row is offered only while the collector reports counters
+// it may not read, and its first click only explains.
+async function powerRowWhenBlocked(rp) {
+    await openSettings(rp);
+    const interval = rp._settings.get_int('poll-interval') * 1000;
+    check(rp._powerRow.visible === !!rp._lastPwr?.raplBlocked,
+        `power row: visible is ${rp._powerRow.visible} while raplBlocked is ${rp._lastPwr?.raplBlocked}`);
+    rp._pwr.sample = () => Promise.resolve({ raplSupported: false, raplBlocked: true, packagePower: null, systemPower: null });
+    await sleep(interval + 1500);
+    check(rp._powerRow.visible && !rp._powerFixNote.visible, 'power row: not offered while the counters are blocked');
+    settingsLayout(rp, 'settings layout (with the power row)');
+    const enable = rp._powerRow.control;
+    await scrollTo(rp, enable);
+    await clickActor(enable);
+    check(rp._powerFixArmed && enable.label === 'Confirm' && rp._powerFixNote.visible && rp._powerFixNote.text.includes('administrator'),
+        `power row: first click did not ask for confirmation (button '${enable.label}')`);
+    await scrollTo(rp, rp._powerFixNote);
+    const lines = rp._powerFixNote.clutter_text.get_layout().get_line_count();
+    check(lines > 1 && !rp._powerFixNote.clutter_text.get_layout().is_ellipsized(), `power row: the warning is on ${lines} line(s)`);
+    await shot('settings-power-row');
+    // The second click would start pkexec; it is not sent.
+    rp._disarmPowerFix();
+    check(!rp._powerFixNote.visible && enable.label === 'Enable', 'power row: disarming left the warning up');
+    delete rp._pwr.sample;
+    await sleep(interval + 1500);
+    check(rp._powerRow.visible === !!rp._lastPwr?.raplBlocked, 'power row: did not follow the real reading again');
+    console.log(`RP-UITEST power row: energy counters on this machine are ${rp._lastPwr?.raplBlocked ? 'blocked' : rp._lastPwr?.raplSupported ? 'readable' : 'absent'}`);
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
 // The in-menu steppers move in steps of 5 while preferences move in steps
 // of 1: from 98 % the next step must land on the schema maximum, and the
 // label must show the stored value, not the rejected one.
@@ -277,16 +452,20 @@ async function stepperClamps(rp) {
     rp._indicator.menu.open();
     rp._activeTab = 'settings';
     rp._updateTabVisibility();
-    rp._refreshSettingsUI();
     await sleep(600);
-    ensureActorVisibleInScrollView(rp._scrollView, rp._cpuThreshInc);
+    const stepper = rp._settingControls['threshold-cpu'];
+    check(stepper.valueLabel.text === '98%', `stepper: shows '${stepper.valueLabel.text}' for a stored 98`);
+    ensureActorVisibleInScrollView(rp._scrollView, stepper);
     await sleep(600);
-    for (const round of [1, 2]) {
-        await clickActor(rp._cpuThreshInc);
-        const stored = rp._settings.get_int('threshold-cpu');
-        check(stored === 100, `stepper click ${round}: threshold-cpu is ${stored}, expected 100`);
-        check(rp._cpuThreshLbl.text === '100%', `stepper click ${round}: label shows '${rp._cpuThreshLbl.text}' for a stored 100`);
-    }
+    await clickActor(stepper.incButton);
+    const stored = rp._settings.get_int('threshold-cpu');
+    check(stored === 100, `stepper: + from 98 stored ${stored}, expected 100`);
+    check(stepper.valueLabel.text === '100%', `stepper: label shows '${stepper.valueLabel.text}' for a stored 100`);
+    // At the maximum the + button is switched off instead of doing nothing.
+    check(!stepper.incButton.reactive && stepper.decButton.reactive, 'stepper: + is still active at the maximum');
+    await clickActor(stepper.decButton);
+    check(rp._settings.get_int('threshold-cpu') === 95 && stepper.incButton.reactive,
+        `stepper: − from 100 stored ${rp._settings.get_int('threshold-cpu')}`);
     rp._settings.reset('threshold-cpu');
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
@@ -334,18 +513,18 @@ async function thresholdFollowsUnit(rp) {
     rp._indicator.menu.open();
     rp._activeTab = 'settings';
     rp._updateTabVisibility();
-    rp._refreshSettingsUI();
     await sleep(600);
-    check(rp._tempThreshLbl.text === '176°F', `threshold: 80 °C shown as '${rp._tempThreshLbl.text}' with °F selected`);
-    ensureActorVisibleInScrollView(rp._scrollView, rp._tempThreshInc);
+    const temp = rp._settingControls['threshold-temp'];
+    check(temp.valueLabel.text === '176°F', `threshold: 80 °C shown as '${temp.valueLabel.text}' with °F selected`);
+    ensureActorVisibleInScrollView(rp._scrollView, temp.incButton);
     await sleep(600);
-    await clickActor(rp._tempThreshInc);
-    check(rp._settings.get_int('threshold-temp') === 85 && rp._tempThreshLbl.text === '185°F',
-        `threshold: after + stored ${rp._settings.get_int('threshold-temp')}, label '${rp._tempThreshLbl.text}'`);
+    await clickActor(temp.incButton);
+    check(rp._settings.get_int('threshold-temp') === 85 && temp.valueLabel.text === '185°F',
+        `threshold: after + stored ${rp._settings.get_int('threshold-temp')}, label '${temp.valueLabel.text}'`);
     rp._settings.reset('threshold-temp');
     rp._settings.reset('unit-temp');
-    rp._refreshSettingsUI();
-    check(rp._tempThreshLbl.text === '80°C', `threshold: back in °C shows '${rp._tempThreshLbl.text}'`);
+    await sleep(200);
+    check(temp.valueLabel.text === '80°C', `threshold: back in °C shows '${temp.valueLabel.text}'`);
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
     rp._indicator.menu.close();
@@ -489,6 +668,8 @@ async function run() {
         await sleep(500);
     }
 
+    await settingsControls(ext.stateObj);
+    await powerRowWhenBlocked(ext.stateObj);
     await stepperClamps(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await thresholdFollowsUnit(ext.stateObj);
