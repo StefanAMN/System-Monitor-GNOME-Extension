@@ -10,7 +10,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **Light and Dark**: The dashboard follows the shell's style variant; all colours live in `stylesheet.css` (`.rp-light` overrides).
 - **Honest Readouts**: Metrics the machine cannot provide read `n/a` with the reason in the tooltip; "Disk %" always means space used on `/`.
 - **One Set of Settings, Two Places**: The panel's settings page (⋮ on the overview) and the Libadwaita preferences window are built from the same list (`lib/settingsmodel.js`): pinned metrics and their order, compact mode, tooltips, battery and network format, update interval (1–10 s), temperature and memory units, warning thresholds.
-- **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and controls, Return or Space activates, Left / Right change a choice or a number, Escape goes back.
+- **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and controls, Return or Space activates, Left / Right change a choice or a number, Backspace goes back a page, Escape closes the panel.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
 ## File Structure
