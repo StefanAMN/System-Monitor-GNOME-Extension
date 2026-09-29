@@ -40,6 +40,8 @@ const POLL_DEADLINE_MS = 3000;
 // Free panel space required beyond a hidden top-bar label's own width before
 // it is shown again, so a value changing width cannot make it flap.
 const TOP_BAR_FIT_MARGIN_PX = 16;
+// Height of the trend graph / detail line of an overview card.
+const CARD_SLOT_HEIGHT = 22;
 const METRIC_NAMES = {
     cpu: 'CPU', memory: 'Memory', battery: 'Battery', power: 'Power',
     disk: 'Disk', network: 'Network', thermal: 'Temperature', gpu: 'GPU'
@@ -1727,6 +1729,48 @@ export default class ResourcePulseExtension extends Extension {
         }
     }
 
+    _buildMetricCard({ key, label, color, placeholder = '--', spark = null }) {
+        const [r, g, b] = color;
+        const box = new St.BoxLayout({
+            style_class: `resource-pulse-metric-card tint-${key}`,
+            vertical: true, reactive: true, can_focus: true, x_expand: true
+        });
+
+        const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
+        head.add_child(this._setMetricIcon(new St.Icon({ style_class: `rp-c-${key}`, style: 'icon-size: 16px;' }), key));
+        head.add_child(new St.Label({ text: label, style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
+        head.add_child(new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' }));
+        box.add_child(head);
+
+        const valueLabel = new St.Label({ text: placeholder, style_class: 'rp-fg', style: 'font-size: 1.7em; font-weight: bold;' });
+        box.add_child(valueLabel);
+
+        // The slot keeps its height whether it holds a graph, a line of
+        // text or (a metric with nothing to add) nothing visible at all.
+        const slot = new St.Bin({ style_class: 'rp-card-slot', x_expand: true, height: CARD_SLOT_HEIGHT });
+        let sparkline = null;
+        let subLabel = null;
+        if (spark) {
+            sparkline = this._newSparkline(spark, CARD_SLOT_HEIGHT, { color: [r, g, b, 1.0], fillOpacity: 0.15 });
+            sparkline.x_expand = true;
+            slot.set_child(sparkline);
+        } else {
+            // x_expand: a bin centres a child that does not expand.
+            subLabel = new St.Label({
+                text: '', style_class: 'rp-fg-muted rp-card-detail',
+                x_expand: true, x_align: Clutter.ActorAlign.START, y_align: Clutter.ActorAlign.CENTER
+            });
+            slot.set_child(subLabel);
+        }
+        box.add_child(slot);
+
+        const pbar = new ProgressBar(4, r, g, b);
+        box.add_child(pbar);
+
+        this._makeCardDraggable(box, key);
+        return { box, valueLabel, subLabel, pbar, spark: sparkline };
+    }
+
     _attachCardsToGrid(order) {
         if (!this._overviewGrid || !this._overviewGridLayout || !this._summaryCards) return;
 
@@ -2275,105 +2319,22 @@ export default class ResourcePulseExtension extends Extension {
 
         this._summaryCards = {};
 
-        // 1. CPU Card
-        const cpuCard = new St.BoxLayout({
-            style_class: 'resource-pulse-metric-card tint-cpu',
-            vertical: true, reactive: true, can_focus: true, x_expand: true
-        });
-        const cpuHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-        const cpuIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-cpu', style: 'icon-size: 16px;' }), 'cpu');
-        cpuHead.add_child(cpuIcon);
-        cpuHead.add_child(new St.Label({ text: 'CPU', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
-        const cpuGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
-        cpuHead.add_child(cpuGrip);
-        cpuCard.add_child(cpuHead);
-        const cpuVal = new St.Label({ text: '--%', style_class: 'rp-fg', style: 'font-size: 1.7em; font-weight: bold;' });
-        cpuCard.add_child(cpuVal);
-        const cpuSpark = this._newSparkline('cpu', 30, { color: [0.208, 0.518, 0.894, 1.0], fillOpacity: 0.15 });
-        cpuSpark.x_expand = true;
-        cpuCard.add_child(cpuSpark);
-        const cpuBar = new ProgressBar(4, 0.208, 0.518, 0.894);
-        cpuCard.add_child(cpuBar);
-        this._makeCardDraggable(cpuCard, 'cpu');
-        this._summaryCards['cpu'] = { box: cpuCard, valueLabel: cpuVal, pbar: cpuBar, spark: cpuSpark };
-
-        // 2. Memory Card
-        const memCard = new St.BoxLayout({
-            style_class: 'resource-pulse-metric-card tint-memory',
-            vertical: true, reactive: true, can_focus: true, x_expand: true
-        });
-        const memHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-        const memIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-memory', style: 'icon-size: 16px;' }), 'memory');
-        memHead.add_child(memIcon);
-        memHead.add_child(new St.Label({ text: 'Memory', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
-        const memGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
-        memHead.add_child(memGrip);
-        memCard.add_child(memHead);
-        const memVal = new St.Label({ text: '--%', style_class: 'rp-fg', style: 'font-size: 1.7em; font-weight: bold;' });
-        memCard.add_child(memVal);
-        const memSpark = this._newSparkline('mem', 30, { color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.15 });
-        memSpark.x_expand = true;
-        memCard.add_child(memSpark);
-        const memBar = new ProgressBar(4, 0.569, 0.255, 0.675);
-        memCard.add_child(memBar);
-        this._makeCardDraggable(memCard, 'memory');
-        this._summaryCards['memory'] = { box: memCard, valueLabel: memVal, pbar: memBar, spark: memSpark };
-
-        // 3. Battery Card
-        const batCard = new St.BoxLayout({
-            style_class: 'resource-pulse-metric-card tint-battery',
-            vertical: true, reactive: true, can_focus: true, x_expand: true
-        });
-        const batHead = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-        const batIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-battery', style: 'icon-size: 16px;' }), 'battery');
-        batHead.add_child(batIcon);
-        batHead.add_child(new St.Label({ text: 'Battery', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
-        const batGrip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
-        batHead.add_child(batGrip);
-        batCard.add_child(batHead);
-        const batVal = new St.Label({ text: '--%', style_class: 'rp-fg', style: 'font-size: 1.7em; font-weight: bold;' });
-        batCard.add_child(batVal);
-        const batStatus = new St.Label({ text: 'Discharging', style_class: 'rp-fg-muted', style: 'font-size: 0.75em; margin-bottom: 4px;' });
-        batCard.add_child(batStatus);
-        const batBar = new ProgressBar(4, 0.18, 0.76, 0.494);
-        batCard.add_child(batBar);
-        this._makeCardDraggable(batCard, 'battery');
-        this._summaryCards['battery'] = { box: batCard, valueLabel: batVal, pbar: batBar, statusLbl: batStatus };
-
-        // 4. Secondary Metrics (Disk, Network, Thermal, Power, GPU)
-        const secondaryMetrics = [
-            { key: 'disk', label: 'Disk', r: 0.96, g: 0.83, b: 0.18 },
-            { key: 'network', label: 'Network', r: 0.88, g: 0.11, b: 0.14 },
-            { key: 'thermal', label: 'Thermal', r: 1.0, g: 0.47, b: 0.0 },
-            { key: 'power', label: 'Power', r: 0.96, g: 0.83, b: 0.18 },
-            { key: 'gpu', label: 'GPU', r: 0.2, g: 0.82, b: 0.48 }
+        // One template for all eight cards, so the grid is even: name,
+        // value, a slot of fixed height (trend graph or one line of detail)
+        // and a bar. `spark` names the history a card's trend graph draws.
+        const cards = [
+            { key: 'cpu', label: 'CPU', color: [0.208, 0.518, 0.894], placeholder: '--%', spark: 'cpu' },
+            { key: 'memory', label: 'Memory', color: [0.569, 0.255, 0.675], placeholder: '--%', spark: 'mem' },
+            { key: 'battery', label: 'Battery', color: [0.18, 0.76, 0.494], placeholder: '--%' },
+            { key: 'disk', label: 'Disk', color: [0.96, 0.83, 0.18] },
+            { key: 'network', label: 'Network', color: [0.88, 0.11, 0.14] },
+            { key: 'thermal', label: 'Thermal', color: [1.0, 0.47, 0.0] },
+            { key: 'power', label: 'Power', color: [0.96, 0.83, 0.18] },
+            { key: 'gpu', label: 'GPU', color: [0.2, 0.82, 0.48] }
         ];
-
-        secondaryMetrics.forEach(m => {
-            const card = new St.BoxLayout({
-                style_class: `resource-pulse-metric-card tint-${m.key}`,
-                vertical: true, reactive: true, can_focus: true, x_expand: true
-            });
-
-            const head = new St.BoxLayout({ style: 'spacing: 6px; margin-bottom: 2px;', y_align: Clutter.ActorAlign.CENTER });
-            head.add_child(this._setMetricIcon(new St.Icon({ style_class: `rp-c-${m.key}`, style: 'icon-size: 16px;' }), m.key));
-            head.add_child(new St.Label({ text: m.label, style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
-            const grip = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'rp-grip', style: 'icon-size: 13px;' });
-            head.add_child(grip);
-            card.add_child(head);
-
-            const val = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 1.7em; font-weight: bold;' });
-            card.add_child(val);
-
-            const subtext = new St.Label({ text: '', style_class: 'rp-fg-muted', style: 'font-size: 0.75em; margin-bottom: 4px;', visible: false });
-            card.add_child(subtext);
-
-            const pbar = new ProgressBar(4, m.r, m.g, m.b);
-            card.add_child(pbar);
-
-            this._makeCardDraggable(card, m.key);
-            this._summaryCards[m.key] = { box: card, valueLabel: val, subLabel: subtext, pbar };
-        });
+        for (const card of cards) this._summaryCards[card.key] = this._buildMetricCard(card);
+        // The battery card's detail line is its charging state.
+        this._summaryCards.battery.statusLbl = this._summaryCards.battery.subLabel;
 
         // Initialize and attach cards according to saved/default order
         this._cardOrder = this._sanitizeCardOrder(this._getStrv('overview-card-order', null));

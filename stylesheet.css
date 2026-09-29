@@ -133,6 +133,11 @@
     transition-duration: 150ms;
 }
 
+/* Trend graph or detail line of an overview card; its height is set in
+   extension.js (CARD_SLOT_HEIGHT) so every card is the same size. */
+.rp-card-slot { margin-bottom: 4px; }
+.rp-card-detail { font-size: 0.75em; }
+
 .resource-pulse-secondary-grid {
     spacing-rows: 12px;
     spacing-columns: 12px;
