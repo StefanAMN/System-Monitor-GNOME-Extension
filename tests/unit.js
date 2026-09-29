@@ -17,7 +17,7 @@ import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, Thermal
 import { raplWatts, PowerSampler } from '../lib/power.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, sanitizeMetricList, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
 
 let failed = 0;
 let passed = 0;
@@ -274,6 +274,14 @@ docker0: 1 2 3
     eq(gpuTooltip({ present: true, brand: 'NVIDIA', percent: 37, memTotal: 8e9, memPercent: 25, temp: 61 }, 'F'), 'NVIDIA: 37%\nVRAM: 25% · Temp: 142°F',
         'gpu tooltip: dedicated GPU shows memory and temperature');
     ok(/not available/.test(gpuTooltip({ present: false })), 'gpu tooltip: absent');
+    // Readings a GPU does not report are null (the UI leaves the field out).
+    eq(gpuReadings({ present: true, percent: 12, temp: 0, powerDraw: null, clock: null, maxClock: null, fanSpeed: null }),
+        { clock: null, temp: null, fan: null, power: null }, 'gpu readings: an integrated GPU reports none of them');
+    eq(gpuReadings({ present: true, percent: 37, temp: 61, powerDraw: 42.46, clock: 1800, maxClock: 2400, fanSpeed: 0 }, 'F'),
+        { clock: '1800 / 2400 MHz', temp: '142°F', fan: '0 RPM', power: '42.5 W' }, 'gpu readings: all present, a stopped fan is still a reading');
+    eq(gpuReadings({ present: true, percent: 5, temp: 48, powerDraw: 0, clock: 650, fanSpeed: undefined }),
+        { clock: '650 MHz', temp: '48°C', fan: null, power: null }, 'gpu readings: no maximum clock, no fan, zero power');
+    eq(gpuReadings({ present: false, percent: 0 }), { clock: null, temp: null, fan: null, power: null }, 'gpu readings: no GPU');
 }
 
 {
