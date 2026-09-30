@@ -118,8 +118,9 @@ export class DashboardMethods {
                     sc.statusLbl.text = stateStr;
                 }
             }
+            // Every reading, so a list of batteries that are gone is hidden.
+            this._updateBatteryList(bat);
             if (bat.present) {
-                this._updateBatteryList(bat);
                 if (this._batState) {
                     this._batState.val.text = batteryStateLabel(bat.state);
                 }
