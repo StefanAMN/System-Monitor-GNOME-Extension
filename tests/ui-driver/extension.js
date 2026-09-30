@@ -153,6 +153,15 @@ function gpuPlaceholders(rp) {
     return found;
 }
 
+// Texts of the mapped labels below `root` that are cut off with an ellipsis.
+function cutOffLabels(root) {
+    const cut = [];
+    eachDescendant(root, actor => {
+        if (actor instanceof St.Label && actor.is_mapped() && actor.clutter_text.get_layout().is_ellipsized()) cut.push(actor.text);
+    });
+    return cut;
+}
+
 async function cycleTabs(rp, pass, tag = null) {
     rp._indicator.menu.open();
     for (const tab of TABS) {
@@ -169,6 +178,8 @@ async function cycleTabs(rp, pass, tag = null) {
         if (tab === 'gpu' && rp._lastGpu?.present) {
             const placeholders = gpuPlaceholders(rp);
             check(placeholders.length === 0, `pass ${pass}: the GPU page shows placeholders (${placeholders.join(' | ')})`);
+            const cut = cutOffLabels(rp._detailSections.gpu);
+            check(cut.length === 0, `pass ${pass}: cut-off text on the GPU page: ${cut.join(' | ')}`);
         }
         // The settings page is longer than the panel: capture all of it.
         if (tag && tab === 'settings') {
@@ -787,7 +798,7 @@ async function gpuPageFollowsReadings(rp) {
     const fields = () => ['clock', 'temp', 'power'].map(key => rp._gpuHwFields[key].visible).join();
 
     const full = {
-        present: true, brand: 'NVIDIA', model: 'NVIDIA GeForce RTX 4070 Laptop GPU', driver: 'NVIDIA 550.120',
+        present: true, brand: 'NVIDIA', model: 'NVIDIA GeForce RTX 4070 Laptop GPU with Max-Q Design', driver: 'NVIDIA 550.120',
         percent: 37, memPercent: 25, memUsed: 2e9, memTotal: 8e9, memFree: 6e9,
         temp: 61, powerDraw: 42.5, clock: 1800, maxClock: 2400, fanSpeed: 0
     };
@@ -797,6 +808,13 @@ async function gpuPageFollowsReadings(rp) {
     check(rp._gpuFan.val.text === '0 RPM' && rp._gpuPower.val.text === '42.5 W' && rp._gpuHwClockVal.text === '1800 / 2400 MHz',
         `gpu page: values are '${rp._gpuFan.val.text}', '${rp._gpuPower.val.text}', '${rp._gpuHwClockVal.text}'`);
     check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders with a full reading (${gpuPlaceholders(rp).join(' | ')})`);
+    // A model name longer than the card wraps; it is never cut off.
+    const nameLines = rp._gpuModelName.clutter_text.get_layout().get_line_count();
+    check(nameLines >= 2 && cutOffLabels(rp._detailSections.gpu).length === 0,
+        `gpu page: a long model name is on ${nameLines} line(s), cut off: ${cutOffLabels(rp._detailSections.gpu).join(' | ') || 'nothing'}`);
+    const [cardX] = rp._gpuHwCard.get_transformed_position();
+    const [nameX] = rp._gpuModelName.get_transformed_position();
+    check(nameX + rp._gpuModelName.width <= cardX + rp._gpuHwCard.width, 'gpu page: the model name runs past its card');
     await shot('gpu-full');
 
     await feed({
@@ -814,6 +832,8 @@ async function gpuPageFollowsReadings(rp) {
     check(rp._gpuInactiveCard.visible && !rp._gpuHwCard.visible && !rp._gpuSparkCard.visible && !rp._gpuStatsCard.visible,
         'gpu page: without a GPU the cards of readings are still shown');
     check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders without a GPU (${gpuPlaceholders(rp).join(' | ')})`);
+    check(cutOffLabels(rp._detailSections.gpu).length === 0, `gpu page: the notice is cut off: ${cutOffLabels(rp._detailSections.gpu).join(' | ')}`);
+    await shot('gpu-none');
     check(rp._summaryCards.gpu.valueLabel.text === 'n/a', `gpu card: reads '${rp._summaryCards.gpu.valueLabel.text}' without a GPU`);
 
     delete rp._gpu.sample;

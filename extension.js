@@ -3,6 +3,7 @@ import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
+import Pango from 'gi://Pango';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -2578,6 +2579,13 @@ export default class ResourcePulseExtension extends Extension {
             this._menuContainer.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
     }
 
+    /** Let a label wrap onto further lines instead of ending in an ellipsis. */
+    _wrapLabel(label) {
+        label.clutter_text.line_wrap = true;
+        label.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
+        label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+    }
+
     /** Show a detail row with `text`, or leave it out when there is no reading (null). */
     _setDetailRow(row, text) {
         row.row.visible = text !== null;
@@ -2964,6 +2972,9 @@ export default class ResourcePulseExtension extends Extension {
 
         const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
         this._gpuModelName = new St.Label({ text: 'Graphics Processor', style_class: 'rp-fg', style: 'font-size: 1.05em; font-weight: bold;' });
+        // Model names are long ("Intel Alder Lake-UP3 GT2 [Iris Xe Graphics]"):
+        // wrap onto a second line instead of cutting the name off.
+        this._wrapLabel(this._gpuModelName);
         this._gpuDriverDesc = new St.Label({ text: 'Driver: --', style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });
         hwDesc.add_child(this._gpuModelName);
         hwDesc.add_child(this._gpuDriverDesc);
@@ -3057,6 +3068,7 @@ export default class ResourcePulseExtension extends Extension {
             text: 'GPU telemetry requires NVIDIA proprietary drivers (nvidia-smi), AMD GPU sysfs (amdgpu), or Intel DRM driver (i915/xe).',
             style_class: 'rp-fg-dim', style: 'font-size: 0.8em;'
         });
+        this._wrapLabel(inactMsg);
         this._gpuInactiveCard.add_child(inactTitle);
         this._gpuInactiveCard.add_child(inactMsg);
         box.add_child(this._gpuInactiveCard);
