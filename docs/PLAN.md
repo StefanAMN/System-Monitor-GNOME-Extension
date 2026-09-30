@@ -1017,16 +1017,26 @@ Proof:
    - a "Backup" group in Settings: export to a JSON file, import with validation against the schema (unknown keys and bad values rejected and listed), and reset all with a confirmation;
    - proof: a prefs-check round trip, a rejected malformed file, and reset restoring the defaults.
 
-## Paused (2026-10-19)
+#### State (branch `smaller-items`, 2026-10-19)
 
-The owner's usage limit was reached. Where everything stands:
+1. **Settings backup** (`lib/common/backup.js`, `ui/prefs/backup.js`): a Backup group on the Settings page.
+   - Save writes every setting except the window's four signal keys as JSON.
+   - Open checks a file against the schema (type, the range or choices GSettings declares) before anything is applied: unknown keys and bad values are left out and listed, and a file that is not a backup (not JSON, another format, a newer version) is refused.
+   - Reset all asks first.
+   - Proof: unit tests on the check (valid values applied; choice, kind, range and unknown keys rejected with a reason; four kinds of non-backup refused); prefs-check runs a save / reset / restore round trip on memory-backed settings, a file with bad values (the good one applied), a non-backup refused, and the group's buttons. 146 / 146; the pseudo-language run covers the new texts (78 on the Settings page).
+2. **Session figures through the lock** (`lib/engine/sessiontotals.js`): `disable()` writes the network session totals, the interfaces' counters and the power statistics to a small file in the runtime directory, keyed by the boot id and the shell process's PID and start time; the next `enable()` of the same session takes them back. A lock keeps them; a new login, a shell restart or a reboot does not. Traffic during the lock is counted from the saved counters. Nothing is kept in module state.
+   - Proof: unit tests on the file (another shell, another boot, damaged or invalid files carry nothing), on the stats' round trip (the locked time not counted), and on a network sampler restoring into a new one. The UI test plants a 123 W peak, disables and enables the extension (the lock's path), and finds the peak and the totals in the new instance.
+3. **Process search**: a field on the CPU, Memory and Disk pages filters the list by name. The sampler applies it before taking the top rows (`filterGroups`), so every process is searched; up to ten matches.
+   - A name with no match says so. A reading taken for a shorter text is dimmed until one for the whole text arrives.
+   - Backspace edits the text instead of leaving the page. Escape never reaches the field: the shell's menu takes it and closes (traced: every other key reached the field, Escape not even in the capture phase), so closing the menu ends the search and empties the fields.
+   - Deviation: no separate sort control. The three pages already sort by CPU, memory and disk I/O.
+   - Proof: unit tests on the filter; the UI test types a name with real keys and finds an idle process never among the busiest five, then checks Backspace, the no-match line, that the matches become current, and that Escape ends the search.
+   - Overhead: the CPU page was over its 5 % budget (+5.4 to +5.6 %, on master too today); +3.5 points of it were the glide, mostly a dozen per-core bars repainted four times a second. Those rows now follow readings: CPU page +5.53 % → +2.97 %, with a search +6.23 % → +3.30 %. The overhead test now measures the CPU page while searching.
+4. The UI test now has 8 minutes: it ran past 5 with the scenarios added in areas 2, 6 and 7.
+5. Found on the way: the unit tests' live process check (no process over 150 % per process in back-to-back samples) fails when another program really uses several cores (the soak containers' llvmpipe shells did, once). That is the test's assumption, not a calculation fault; it passes alone.
 
-| Area | Branch | State | To resume |
-|---|---|---|---|
-| 1 CI | merged | done | |
-| 2 Accessibility | merged | done | |
-| 5 Memory check | `memory-check` | done: the +6–8 objects per 100 polls were the test's own records (see area 5's state) | merge |
-| 3 Translations | `translations` (pushed, on master before area 5) | built and proven (test-i18n, mutations); not yet in CI | rebase onto master after area 5; add `test-i18n` to test-compat's default list; push; dispatch CI (the images now need gettext and glibc-langpack-en); merge |
-| 4 extensions.gnome.org | `ego-ready` (pushed, on `translations`) | checklist done; fixes made (module state reset, logOnce, clipboard declared, commands instead of pkexec, test-zip) | rebase; add `test-zip` to the CI list; run the full UI test and prefs-check on the new Troubleshooting rows; merge |
-| 6 Several batteries / GPUs | `multi-device` (pushed, on `ego-ready`) | GPU sampler rewritten (every card, sleeping cards not read or woken, busiest shown with hysteresis), unit tests with a sysfs fixture (407 pass); not done: the GPU page's "All GPUs" card, the tooltip and alerts over every GPU, batteries | finish the GPU UI and the batteries (UPower DisplayDevice for the top bar, a row per battery), UI tests with injected readings |
-| 7 Smaller items | — | not started | |
+## State of the areas (2026-10-19)
+
+All seven areas are built and proven on the stacked branches (`memory-check` → `translations` → `ego-ready` → `multi-device` → `smaller-items`), each step rebased on the one before. They merge into master together once CI passes on `smaller-items`.
+
+Not done: a real translation (the machine runs in English), Orca itself, real hybrid-graphics or two-battery hardware, and the submission to extensions.gnome.org (the owner's account).
