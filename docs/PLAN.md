@@ -1035,6 +1035,10 @@ Proof:
 4. The UI test now has 8 minutes: it ran past 5 with the scenarios added in areas 2, 6 and 7.
 5. Found on the way: the unit tests' live process check (no process over 150 % per process in back-to-back samples) fails when another program really uses several cores (the soak containers' llvmpipe shells did, once). That is the test's assumption, not a calculation fault; it passes alone.
 
+6. The first CI run of the whole stack (run 39239992921) failed on all five shells: the battery page kept listing the UI test's planted pair of batteries on runners that have none. It was a real bug from area 6: the Batteries card was updated only while a battery was present, so it went stale once every battery was gone. It now follows every reading. Reproduced locally with the compat run without a battery: fails before the fix, passes after.
+7. That failure had hidden another, since a failed check ends the UI test: the search's idle process was named `sleep` in the Fedora images, because bash (their `sh`) execs a lone command in place and dash (the host's) does not. The test now runs a loop. Checked on the host: bash `-c 'sleep 30'` → `sleep`, with the loop → `rpsearchidle`.
+8. The same run's memory soak was flat on CI as well: 3,758 → 3,761 → 3,764 objects; RSS slope after the first half −0.018 MB/min; fds 60 → 60; menu actors 850 → 850.
+
 ## State of the areas (2026-10-19)
 
 All seven areas are built and proven on the stacked branches (`memory-check` → `translations` → `ego-ready` → `multi-device` → `smaller-items`), each step rebased on the one before. They merge into master together once CI passes on `smaller-items`.
