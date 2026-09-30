@@ -323,7 +323,7 @@ Seen in the same screenshots, smaller than the settings problem:
 
 1. Every setting stays in the menu.
 2. S5 (preferences window from the same model): yes.
-3. S6 (main panel): the owner answered "CPU, Memory, Power, Thermal", which does not map onto the four items listed above. Not started; asked again.
+3. S6 (main panel): first answer was "CPU, Memory, Power, Thermal", which did not map onto the four items; asked again, and the owner chose the even card grid and hiding empty GPU rows (2026-10-12). The grip on hover and the chart titles were not chosen and are untouched.
 
 ## State (2026-10-12)
 
@@ -360,3 +360,25 @@ Not executed:
 - The second click of the power row (it starts `pkexec`); the first click, the warning and the row's appearing and disappearing are tested with a stubbed reading.
 - A machine whose energy counters really are blocked (this one has the fix applied); the collector's side is covered by the fixture test only.
 - Preferences window content beyond the 65 row checks: no pointer drives the real window.
+
+## S6: main panel (2026-10-12, branch `main-panel-s6`)
+
+Reproduced first: the new checks failed on the old code with cards of 116 px (CPU, Memory: graph), 104 px (Battery, Disk, Power, GPU: detail line) and 107 px (Network / Thermal row), and the GPU page on this Intel machine showed five `--` values.
+
+| Item | Result | Proof that was run |
+|------|--------|--------------------|
+| Even card grid | `_buildMetricCard()` builds all eight cards: name, value, a slot of fixed height (`CARD_SLOT_HEIGHT`, 22 px: trend graph or one detail line) and a bar. Replaces four near-copies. | `test-ui`, dark, light and after re-enable: 8 visible cards, all 170 x 112 px, bar 95 px from the top of each |
+| GPU rows | `gpuReadings()` in `lib/present.js` returns null for a reading the GPU does not report; the page hides that field or row, the header's stat line when it is empty, and all reading cards when there is no GPU | unit: 4 cases (integrated, full, partial, absent; a stopped fan is `0 RPM`, not hidden). `test-ui`: three readings fed through the real poll (everything / load only / no GPU), row visibility checked and no `--` label mapped in any of them; plus the machine's own Intel reading |
+
+Side effects to know:
+
+- The CPU and Memory trend graphs on the overview are 22 px high instead of 30 px; the four card rows together are 448 px instead of 431 px, so the hardware card below starts 17 px lower.
+- The Thermal card has no detail line (it only has one when no sensor is found), so its slot is empty.
+
+Not executed: a real NVIDIA or AMD GPU (the full reading is a stub fed to the poll); dragging a card to reorder it (no test drives the drag; the card's drag wiring is unchanged and clicks on cards pass).
+
+Whole-project checks on the final code (2026-10-12):
+
+- Lint clean; 220 unit checks pass; `./dev.sh test-ui` passes on GNOME 50 (host).
+- `./dev.sh test-compat`: GNOME Shell 46.10, 47.10, 48.8 and 49.10 pass unit, headless and UI tests in containers.
+- `./dev.sh test-overhead` (600 s soak, one run): menu closed +0.20 % of one core (budget 1 %), overview +0.37 %, CPU tab +1.20 % (budget 5 %); soak RSS 266.4 -> 262.9 MB, steady-state slope 0.118 MB/min; fds 75 -> 75; menu actors 797 -> 797 (8 more than before: one slot per card). The baseline of this run was 0.60 % against 0.97 % in the previous one, so the two runs were made on a differently loaded machine and their differences are not attributed to the code.

@@ -66,7 +66,7 @@ Every push and pull request runs the lint and the unit tests on GitHub Actions (
 ## Known limits
 
 - **One battery, one GPU**: the first battery and the first GPU found are shown.
-- **GPU**: Intel, AMD and NVIDIA are supported, but only the Intel path has been run on real hardware. Integrated GPUs report no dedicated memory, temperature or fan; those fields read `--`.
+- **GPU**: Intel, AMD and NVIDIA are supported, but only the Intel path has been run on real hardware. Integrated GPUs report no dedicated memory, fan or power draw (and often no temperature or clock); the GPU page leaves those fields out.
 - **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; while that is the case the settings page (Panel section) and the preferences window offer a one-time fix. On battery it is the battery's discharge rate.
 - **Temperature**: the top bar shows the CPU package sensor, else the first core, else the hottest sensor.
 - **Process CPU**: 100% means one full core, as in `top`. The list needs two samples, so it stays dimmed for about half a second after the tab opens.
