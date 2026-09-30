@@ -1088,7 +1088,9 @@ async function smoothGlide(rp) {
 async function processSearch(rp) {
     const dir = GLib.dir_make_tmp('rp-search-XXXXXX');
     GLib.spawn_command_line_sync(`ln -s /bin/sh ${dir}/rpsearchidle`);
-    const idle = Gio.Subprocess.new([`${dir}/rpsearchidle`, '-c', 'sleep 600'], Gio.SubprocessFlags.NONE);
+    // A loop, not a lone 'sleep 600': bash (Fedora's sh) execs a lone
+    // command in place, and the process would be called 'sleep'.
+    const idle = Gio.Subprocess.new([`${dir}/rpsearchidle`, '-c', 'while :; do sleep 1; done'], Gio.SubprocessFlags.NONE);
     const type = async text => {
         for (const ch of text) await pressKey(Clutter.unicode_to_keysym(ch.codePointAt(0)), 120);
     };
