@@ -1044,3 +1044,40 @@ Proof:
 All seven areas are built and proven on the stacked branches (`memory-check` → `translations` → `ego-ready` → `multi-device` → `smaller-items`), each step rebased on the one before. They merge into master together once CI passes on `smaller-items`.
 
 Not done: a real translation (the machine runs in English), Orca itself, real hybrid-graphics or two-battery hardware, and the submission to extensions.gnome.org (the owner's account).
+
+# Diagnostics by area, and a hand-off to an agent (branch `diagnostics-agent`) — approved by the owner 2026-10-22
+
+The Diagnostics page gets two sections: findings the extension works out on its own, grouped CPU / Memory / Battery / Network, and a section that writes every finding and reading to a Markdown file and opens a coding agent the user picks (in a terminal) with a prompt to fix them. Collection stays in the tracker's 30 s timer in the shell; analysis, the report and the launch run in the preferences process.
+
+Not authorized: merging into `master` or pushing. Ask the owner when the branch is ready.
+
+## What can be read without privileges (checked 2026-10-22, kernel 7.0, GNOME 50)
+
+- Per-app memory: `memory.current` of each session scope (same directories as `cpu.stat`, 65 units on this machine). `memory.swap.current` too, not used.
+- Machine: `/proc/meminfo`, `pswpin`/`pswpout` in `/proc/vmstat`, cumulative stall time (`total=`, µs) in `/proc/pressure/{cpu,memory,io}`, `/proc/net/dev`; user idle time from Mutter's idle monitor.
+- Not available: network traffic per app (needs root or eBPF). Network findings are for the whole machine and say so.
+
+## Milestones
+
+| # | Work | Layer | Proof |
+|---|---|---|---|
+| D1 | Ledger version 2: per hour memory used (MiB·s, max), swap traffic, stall time (cpu, memory some/full, io), network bytes, idle seconds and bytes while idle; per app memory (MiB·s, max). Version 1 files load; a copy `battery-history.json.v1` is kept before the first version 2 save | HAL / Engine | unit: fixture cgroup with `memory.current` (vanishing, unreadable units); ingest with known answers; v1 file loads and summarizes; backup written once; `test-overhead` with tracking on against off |
+| D2 | `diagnose()` findings get `area` (cpu, memory, battery, network, data); new rules: background CPU (all power), system services, CPU stalls, heat on the charger, background memory, growing memory, swapping / memory stalls, memory nearly full, a day far above the usual traffic, traffic while idle | Engine | unit: each rule fires on its evidence and stays silent without it |
+| D3 | Section 1 grouped by area on the page; tracking switch label "Usage tracking" | UI | `prefs-check` (stand-in hostile theme and the user's theme), a11y check, light and dark screenshots |
+| D4 | `agentreport.js`: the Markdown report (machine, findings with figures, top apps by CPU, energy, memory, background share, hourly network, stalls, what cannot be measured); app ids and names only, never command lines | Engine | unit: report from a fixture against expected text; no command line or path from the process table appears |
+| D5 | Section 2: agent choice (Claude Code, Codex, Gemini CLI when on PATH, or a custom command with `{report}` / `{prompt}`), terminal choice, editable prompt, Preview report, Copy prompt, Open in agent; a first-time confirmation that the report goes to the agent's service; argv list only, no shell string; no permission-skipping flags | UI | unit: argv builder (spaces, quotes, non-ASCII, `$(…)` and `;` stay literal); fake agent on PATH records argv and working directory; real pointer clicks through the UI driver |
+| D6 | Translation template, docs, CI on GNOME 46–50, memory soak | All | as earlier areas |
+
+## Edge cases to hold
+
+- A scope that vanishes between listing and `memory.current` read: left out, no error. EACCES on one unit: noted once (`noteReadError`), the rest still read.
+- A kernel without PSI, or a machine without swap: those figures are null, the rules say nothing.
+- Interface counters going backwards: `counterDelta` counts nothing for that step.
+- Apps kept per hour stay bounded at 30: the largest by energy and CPU, but up to 10 places go to the largest by memory.
+- The agent's working directory is a folder of its own; the report is rewritten on each launch.
+- No agent on PATH: only Custom command and Copy prompt are offered.
+
+## Not verified here
+
+- How well each real agent handles the prompt (each installed one is launched once and shown to the owner, nothing approved inside it).
+- A machine that really swaps or stalls on memory: those rules are proven by unit tests only.
