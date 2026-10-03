@@ -38,19 +38,20 @@ function desktopInfo(id) {
 
 /**
  * @param {string} id ledger app id
- * @returns {{name: string, gicon: ?Gio.Icon, iconName: ?string}}
+ * @returns {{name: string, gicon: ?Gio.Icon, iconName: ?string, desktop: boolean}} desktop:
+ *   the id has a launcher entry (an app the user starts, not a service)
  */
 export function appInfo(id) {
     let info = cache.get(id);
     if (info) return info;
     if (PSEUDO[id]) {
-        info = { name: _(PSEUDO[id][0]), gicon: null, iconName: PSEUDO[id][1] };
+        info = { name: _(PSEUDO[id][0]), gicon: null, iconName: PSEUDO[id][1], desktop: false };
     } else {
         // Snaps name their desktop file <snap>_<app>.desktop.
         const entry = desktopInfo(id) ?? (id.startsWith('snap.') ? desktopInfo(`${id.slice(5)}_${id.slice(5)}`) : null);
-        if (entry) info = { name: entry.get_display_name() || entry.get_name() || id, gicon: entry.get_icon(), iconName: null };
-        else if (SERVICES[id]) info = { name: _(SERVICES[id]), gicon: null, iconName: 'system-run-symbolic' };
-        else info = { name: id.startsWith('snap.') ? id.slice(5) : id, gicon: null, iconName: 'application-x-executable-symbolic' };
+        if (entry) info = { name: entry.get_display_name() || entry.get_name() || id, gicon: entry.get_icon(), iconName: null, desktop: true };
+        else if (SERVICES[id]) info = { name: _(SERVICES[id]), gicon: null, iconName: 'system-run-symbolic', desktop: false };
+        else info = { name: id.startsWith('snap.') ? id.slice(5) : id, gicon: null, iconName: 'application-x-executable-symbolic', desktop: false };
     }
     if (cache.size >= CACHE_LIMIT) cache.clear();
     cache.set(id, info);

@@ -246,12 +246,12 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
 
     // Tracking itself.
     const control = new Adw.PreferencesGroup({
-        title: _('Battery tracking'),
-        description: fill(_('Records which apps use the processor, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
+        title: _('Usage tracking'),
+        description: fill(_('Records which apps use the processor and memory, and how much the network moves, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
             { seconds: TRACK_INTERVAL_S, days: DAYS_KEPT }),
     });
     page.add(control);
-    rows.tracking = new Adw.SwitchRow({ title: _('Track battery use per app') });
+    rows.tracking = new Adw.SwitchRow({ title: _('Track usage per app') });
     settings.bind('battery-tracking', rows.tracking, 'active', Gio.SettingsBindFlags.DEFAULT);
     control.add(rows.tracking);
     rows.status = new Adw.ActionRow({ title: _('Status') });

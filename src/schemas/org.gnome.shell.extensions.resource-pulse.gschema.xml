@@ -116,7 +116,7 @@
     </key>
     <key name="battery-tracking" type="b">
       <default>false</default>
-      <summary>Track battery use per app</summary>
+      <summary>Track usage per app</summary>
       <description>Sample per-app CPU time and energy every 30 seconds and keep 14 days of hourly totals in ~/.local/share/resource-pulse/battery-history.json. Off until the user starts it.</description>
     </key>
     <key name="prefs-page" type="s">
