@@ -19,15 +19,16 @@ import { raplWatts, PowerSampler } from '../../src/lib/collectors/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../../src/lib/collectors/appusage.js';
 import { BatteryTracker } from '../../src/lib/engine/batterytracker.js';
 import { parseDrmFdinfo, GpuUsageSampler } from '../../src/lib/collectors/gpuusage.js';
-import { diagnose, minutesGained } from '../../src/lib/engine/diagnostics.js';
+import { diagnose, minutesGained, AREAS } from '../../src/lib/engine/diagnostics.js';
 import { batteryFromProperties, readBacklight } from '../../src/lib/collectors/systemstate.js';
 import { appInfo } from '../../src/lib/common/appnames.js';
 import { AlertMonitor, alertReadings, alertLine } from '../../src/lib/engine/alerts.js';
 import { parsePressure, PressureSampler } from '../../src/lib/collectors/pressure.js';
+import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler } from '../../src/lib/collectors/machineusage.js';
 import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
 import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
-import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
+import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth, combineBatteries, BatterySampler } from '../../src/lib/collectors/battery.js';
 import { backupText, checkBackup, BackupError, NOT_BACKED_UP } from '../../src/lib/common/backup.js';
 import { _, N_, ngettext, fill, translated, setTranslations, resetTranslations } from '../../src/lib/common/i18n.js';
@@ -974,8 +975,13 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         Gio.File.new_for_path(`${session}/session.slice/locked.service/cpu.stat`)
             .set_attribute_uint32('unix::mode', 0o000, Gio.FileQueryInfoFlags.NONE, null);
 
+        GLib.file_set_contents(`${session}/app.slice/app-gnome-org.gnome.Nautilus-4321.scope/memory.current`, `${300 * 1024 * 1024}\n`);
         const sampler = new AppUsageSampler({ mount, session });
         const reading = await sampler.sample();
+        const withMemory = await sampler.sample({ withMemory: true });
+        const memOf = name => withMemory.units.find(u => u.unit === name)?.memory;
+        eq([reading.units[0].memory, memOf('app-gnome-org.gnome.Nautilus-4321.scope'), memOf('kitty-21009-1.scope')], [undefined, 300 * 1024 * 1024, null],
+            'app usage: memory per unit only when asked; a unit without memory.current reads as null, not 0');
         const byUnit = Object.fromEntries(reading.units.map(u => [u.unit, `${u.kind}:${u.id}:${u.usec}`]));
         eq([reading.total, reading.system, sampler.available], [9000000, 2000000, true], 'app usage: machine and system-service totals');
         eq(byUnit['app-gnome-org.gnome.Nautilus-4321.scope'], 'app:org.gnome.Nautilus:1500000', 'app usage: an app scope');
@@ -995,7 +1001,8 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
             .set_attribute_uint32('unix::mode', 0o644, Gio.FileQueryInfoFlags.NONE, null);
         for (const path of made.reverse()) {
             const dir = path ? `${mount}/${path}` : mount;
-            if (GLib.file_test(`${dir}/cpu.stat`, GLib.FileTest.EXISTS)) GLib.unlink(`${dir}/cpu.stat`);
+            for (const f of ['cpu.stat', 'memory.current'])
+                if (GLib.file_test(`${dir}/${f}`, GLib.FileTest.EXISTS)) GLib.unlink(`${dir}/${f}`);
         }
         // Remove the directories, deepest first.
         const dirs = new Set();
@@ -1231,6 +1238,172 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         ok(ids(plugged).includes('always-plugged'), 'diagnose: mostly plugged in without a charge limit');
         eq(ids(diagnose({ battery: summary(), all: summary(), state: state({ battery: null, backlight: 1, powerProfile: 'performance' }) })), [],
             'diagnose: a desktop without a battery gets no battery advice');
+        ok(diagnose({ battery: summary(), all: summary(), state: state() }).every(f => AREAS.includes(f.area)), 'diagnose: every finding has an area');
+
+        // By area: processor, memory, network. A v2 summary with nothing in it first.
+        const quiet = (o = {}) => summary({ memSeconds: 4 * 3600, memUsedMiBs: 0, memMaxMiB: 4000, memTotalMiB: 16000, swapMaxMiB: 0, swapTotalMiB: 2000,
+            swapInMiB: 0, swapOutMiB: 0, stallSeconds: 4 * 3600, stall: { cpu: 0, memory: 0, memoryFull: 0, io: 0 },
+            netSeconds: 4 * 3600, rxBytes: 0, txBytes: 0, idleSeconds: 0, idleRxBytes: 0, idleTxBytes: 0, ...o });
+        const H = 3600 * 1000;
+        const hour = (i, appsIn = {}, o = {}) => ({ t: 1e12 + i * H, seconds: 3600, memSeconds: 3600, memMaxMiB: 4000, memTotalMiB: 16000,
+            netSeconds: 3600, rxBytes: 0, txBytes: 0, idleSeconds: 0, idleRxBytes: 0, idleTxBytes: 0,
+            apps: new Map(Object.entries(appsIn).map(([id, a]) => [id, { cpu: 0, fg: 0, memMiBs: 0, memMaxMiB: 0, ...a }])), ...o });
+        const run = (o = {}) => ids(diagnose({ battery: summary({ seconds: 0, hotSeconds: 0 }), all: quiet(), state: state({ onBattery: false }), ...o }));
+        eq(run(), ['wear'], 'diagnose areas: a quiet machine with every figure gets nothing new');
+
+        // 4 h tracked: an app 90 % in the background at 0.3 core; another at 0.05 core.
+        const cpuApps = [{ id: 'sync', cpu: 0.3 * 4 * 3600e6 / 0.9, fg: 0.3 * 4 * 3600e6 / 0.9 * 0.1, wh: 2 },
+            { id: 'calm', cpu: 0.05 * 4 * 3600e6, fg: 0, wh: 0.1 }, { id: '@system', cpu: 1, fg: 0, wh: 0 }];
+        const busy = diagnose({ battery: summary({ seconds: 0 }), all: quiet({ apps: cpuApps }), state: state({ onBattery: false }) });
+        const sync = busy.find(f => f.id === 'cpu-background:sync');
+        ok(sync && sync.area === 'cpu' && sync.evidence.includes('30 %') && !busy.some(f => f.id === 'cpu-background:calm'),
+            `diagnose areas: background CPU on the charger names the busy app only (${sync?.evidence})`);
+        ok(Math.abs(sync.estimate.watts - 2 * 0.9 / 4) < 1e-9 && sync.estimate.minutes === null, 'diagnose areas: with energy readings it has watts, no minutes');
+        const twice = diagnose({ battery: summary({ apps: [{ id: 'sync', cpu: 9e9, fg: 0, wh: 3 }] }), all: quiet({ apps: cpuApps }), state: state() });
+        ok(twice.some(f => f.id === 'background:sync') && !twice.some(f => f.id === 'cpu-background:sync'), 'diagnose areas: an app named on battery is not named again');
+        ok(run({ all: quiet({ cpu: 1e10, apps: [{ id: '@system', cpu: 0.3e10, fg: 0, wh: 0 }] }) }).includes('system-services'),
+            'diagnose areas: system services at 30 % of the time and 0.21 core');
+        eq(run({ all: quiet({ cpu: 1e10, apps: [{ id: '@system', cpu: 0.1e10, fg: 0, wh: 0 }] }) }), ['wear'], 'diagnose areas: system services at 10 % say nothing');
+        const stalls = diagnose({ battery: summary({ seconds: 0 }), all: quiet({ stall: { cpu: 0.3 * 4 * 3600, memory: 0, memoryFull: 0, io: 0 } }), state: state({ onBattery: false }) });
+        eq(stalls.find(f => f.id === 'cpu-stalls')?.severity, 'warning', 'diagnose areas: waiting for the CPU 30 % of the time is a warning');
+        ok(run({ all: quiet({ hotSeconds: 3600 }) }).includes('heat-ac'), 'diagnose areas: hot for a quarter of the time on the charger');
+        ok(!run({ all: quiet({ stall: { cpu: 0.3 * 4 * 3600, memory: 0, memoryFull: 0, io: 0 }, stallSeconds: 1800 }) }).includes('cpu-stalls'),
+            'diagnose areas: half an hour of stall figures is not enough');
+
+        // Memory: 2 GiB for 5 unused hours; used in front: no finding; a service: no finding.
+        const unused = Array.from({ length: 5 }, (_x, i) => hour(i, { chat: { memMiBs: 2048 * 3600, memMaxMiB: 2100 }, shell: { memMiBs: 3000 * 3600, memMaxMiB: 3000 } }));
+        const memIds = run({ hours: unused, isApp: id => id !== 'shell' });
+        ok(memIds.includes('memory-idle:chat') && !memIds.includes('memory-idle:shell'), `diagnose areas: memory held while unused, services left out (${memIds})`);
+        const inFront = unused.map((h, i) => (i < 2 ? hour(i, { chat: { memMiBs: 2048 * 3600, memMaxMiB: 2100, fg: 1 } }) : h));
+        ok(!run({ hours: inFront }).includes('memory-idle:chat'), 'diagnose areas: 3 unused hours are not enough');
+        // Growth: 500 MiB to 1.4 GiB over 8 hours, once flat.
+        const sizes = [500, 600, 700, 700, 900, 1100, 1300, 1450];
+        const growing = sizes.map((m, i) => hour(i, { leaky: { memMiBs: m * 3600, memMaxMiB: m, fg: 1 } }));
+        const leak = diagnose({ battery: summary({ seconds: 0 }), all: quiet(), state: state({ onBattery: false }), hours: growing }).find(f => f.id === 'memory-growth:leaky');
+        ok(leak && leak.severity === 'warning' && leak.evidence.includes('8 hours') && leak.evidence.includes('7 of them'), `diagnose areas: growing memory (${leak?.evidence})`);
+        const broken = growing.filter((_h, i) => i !== 4); // a gap of an hour: the run is cut
+        ok(!run({ hours: broken }).includes('memory-growth:leaky'), 'diagnose areas: growth must be over consecutive hours');
+        const wobbly = [500, 1400, 600, 1300, 700, 1200, 800, 1500].map((m, i) => hour(i, { saw: { memMiBs: m * 3600, memMaxMiB: m, fg: 1 } }));
+        ok(!run({ hours: wobbly }).includes('memory-growth:saw'), 'diagnose areas: memory that goes up and down is not growth');
+        ok(run({ all: quiet({ swapInMiB: 300, swapOutMiB: 200, swapMaxMiB: 1500 }) }).includes('swapping'), 'diagnose areas: 125 MiB of swap traffic an hour');
+        ok(!run({ all: quiet({ swapInMiB: 100, swapOutMiB: 100 }) }).includes('swapping'), 'diagnose areas: 50 MiB an hour is not swapping');
+        ok(run({ all: quiet({ stall: { cpu: 0, memory: 0.06 * 4 * 3600, memoryFull: 0, io: 0 } }) }).includes('memory-stalls'), 'diagnose areas: waiting for memory 6 % of the time');
+        const full = Array.from({ length: 3 }, (_x, i) => hour(i, {}, { memMaxMiB: 15000 }));
+        ok(run({ hours: full }).includes('memory-full') && !run({ hours: full.slice(1) }).includes('memory-full'), 'diagnose areas: nearly full in 3 hours, not in 2');
+
+        // Network: a 4 GB day against 500 MB usual days; and traffic while away.
+        const days = Array.from({ length: 10 }, (_x, i) => ({ day: `2026-10-${String(i + 10).padStart(2, '0')}`, rx: 4e8, tx: 1e8 }));
+        days[8] = { day: '2026-10-18', rx: 3.5e9, tx: 5e8 };
+        const net = diagnose({ battery: summary({ seconds: 0 }), all: quiet(), state: state({ onBattery: false }), netDays: days }).find(f => f.id === 'traffic-day');
+        ok(net?.evidence.includes('2026-10-18') && net.evidence.includes('8 times'), `diagnose areas: a day far above the usual (${net?.evidence})`);
+        ok(!run({ netDays: days.slice(0, 6) }).includes('traffic-day'), 'diagnose areas: fewer than 7 earlier days are not a usual day');
+        ok(run({ all: quiet({ idleSeconds: 2 * 3600, idleRxBytes: 3e8, idleTxBytes: 1e8 }) }).includes('traffic-away'), 'diagnose areas: 400 MB over 2 h away');
+        ok(!run({ all: quiet({ idleSeconds: 10 * 3600, idleRxBytes: 3e8, idleTxBytes: 0 }) }).includes('traffic-away'), 'diagnose areas: 8 kB/s while away is background noise');
+        eq(run({ all: quiet({ memSeconds: 0 }) }), ['wear', 'memory-untracked'], 'diagnose areas: hours from before memory was recorded say so');
+    }
+
+    // Machine-wide counters for tracking: memory, swap, stall times.
+    {
+        const meminfo = 'MemTotal:       16000000 kB\nMemFree:         1000000 kB\nMemAvailable:    6000000 kB\nSwapTotal:       4000000 kB\nSwapFree:        3000000 kB\n';
+        eq(parseMeminfo(meminfo), { memTotal: 16000000 * 1024, memUsed: 10000000 * 1024, swapTotal: 4000000 * 1024, swapUsed: 1000000 * 1024 },
+            'machine: memory in use is total minus available');
+        eq(parseMeminfo('MemTotal: 100 kB\n'), { memTotal: 102400, memUsed: null, swapTotal: null, swapUsed: null }, 'machine: missing fields are null');
+        eq(parseVmstatSwap('nr_free_pages 5\npswpin 120\npswpout 7\npgfault 9\n'), { swapIn: 120, swapOut: 7 }, 'machine: swap pages from vmstat');
+        eq(parseVmstatSwap('pswpin 3\n'), { swapIn: 3, swapOut: null }, 'machine: swap counters at the start of the file, one missing');
+        eq(parsePressureTotals('some avg10=0.00 avg60=0.07 avg300=0.11 total=22943065\nfull avg10=0.00 avg60=0.07 avg300=0.11 total=22788678\n'),
+            { some: 22943065, full: 22788678 }, 'machine: cumulative stall times');
+        eq(parsePressureTotals('some avg10=0.00 avg60=0.00 avg300=0.00 total=5\n'), { some: 5, full: null }, 'machine: an old kernel without the full line of cpu');
+
+        const dir = GLib.dir_make_tmp('rp-machine-XXXXXX');
+        GLib.file_set_contents(`${dir}/meminfo`, meminfo);
+        GLib.file_set_contents(`${dir}/vmstat`, 'pswpin 10\npswpout 20\n');
+        const noPsi = await new MachineUsageSampler({ proc: dir, pressure: `${dir}/pressure` }).sample();
+        eq([noPsi.memUsed, noPsi.swapInBytes > 0, noPsi.pressure], [10000000 * 1024, true, null], 'machine: without PSI the stall times are null, the rest is read');
+        GLib.mkdir_with_parents(`${dir}/pressure`, 0o755);
+        for (const key of ['cpu', 'memory', 'io']) GLib.file_set_contents(`${dir}/pressure/${key}`, `some avg10=1 total=${key.length}\nfull avg10=1 total=1\n`);
+        eq((await new MachineUsageSampler({ proc: dir, pressure: `${dir}/pressure` }).sample()).pressure, { cpu: 3, memory: 6, memoryFull: 1, io: 2 },
+            'machine: stall times from the pressure files');
+        for (const key of ['cpu', 'memory', 'io']) GLib.unlink(`${dir}/pressure/${key}`);
+        GLib.rmdir(`${dir}/pressure`);
+        GLib.unlink(`${dir}/meminfo`);
+        GLib.unlink(`${dir}/vmstat`);
+        GLib.rmdir(dir);
+    }
+
+    // Ledger version 2: memory, swap, stalls, network and time away, by hand.
+    {
+        const MiB = 1024 * 1024;
+        const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+        const t0 = new Date(2026, 9, 22, 10, 0, 5).getTime();
+        const at = (i, { mem = {}, used = 4000, swapIn = 0, stall = 0, rx = 0, idle = false, cpu = {} } = {}) => ({
+            mono: 1e9 + i * 30e6, wall: t0 + i * 30000, packageW: null, battery: null, idle,
+            usage: { total: i * 1e6, system: 0, units: Object.keys({ ...mem, ...cpu }).map(unit => ({
+                unit, id: unit.split('#')[0], kind: 'app', label: unit, usec: cpu[unit] ?? 0,
+                memory: unit in mem ? mem[unit] * MiB : null })) },
+            machine: { memTotal: 8000 * MiB, memUsed: used * MiB, swapTotal: 2000 * MiB, swapUsed: 100 * MiB,
+                swapInBytes: swapIn * MiB, swapOutBytes: 0, pressure: { cpu: stall * 1e6, memory: stall * 0.5e6, memoryFull: 0, io: 0 } },
+            net: [{ iface: 'wlan0', rxBytes: rx, txBytes: rx / 2 }],
+        });
+        const led = new BatteryLedger();
+        led.ingest(at(0, { mem: { 'big#1': 900, 'big#2': 100, 'tiny#1': 4 }, rx: 1000 }));
+        led.ingest(at(1, { mem: { 'big#1': 1100, 'big#2': 100, 'tiny#1': 4 }, used: 5000, swapIn: 30, stall: 3, rx: 61000 }));
+        led.ingest(at(2, { mem: { 'big#1': 1300, 'tiny#1': 4 }, used: 4500, swapIn: 60, stall: 6, rx: 121000, idle: true }));
+        const sum = led.summarize();
+        const big = sum.apps.find(a => a.id === 'big');
+        ok(near(big.memMiBs, 1200 * 30 + 1300 * 30) && big.memMaxMiB === 1300 && near(big.memAvgMiB, 1250),
+            `ledger v2: memory per app summed over its units (${big.memMiBs} MiB·s, max ${big.memMaxMiB}, avg ${big.memAvgMiB})`);
+        ok(!sum.apps.some(a => a.id === 'tiny'), 'ledger v2: an app under the memory floor is not recorded');
+        ok(near(sum.memUsedMiBs / sum.memSeconds, 4750) && sum.memMaxMiB === 5000 && sum.memTotalMiB === 8000 && sum.swapMaxMiB === 100,
+            'ledger v2: machine memory average, max and size');
+        ok(near(sum.swapInMiB, 60) && near(sum.stall.cpu, 6) && near(sum.stall.memory, 3) && sum.stallSeconds === 60, 'ledger v2: swap traffic and stall seconds as deltas');
+        ok(sum.rxBytes === 120000 && sum.txBytes === 60000 && sum.idleSeconds === 30 && sum.idleRxBytes === 60000 && sum.netSeconds === 60,
+            'ledger v2: network bytes, and those while the user was away');
+        const reset = new BatteryLedger();
+        reset.ingest(at(0, { swapIn: 500, stall: 100 }));
+        reset.ingest(at(1, { swapIn: 10, stall: 1 })); // counters went backwards: a reboot cannot happen mid-run, but a wrap can
+        ok(reset.summarize().swapInMiB === 0 && reset.summarize().stall.cpu === 0, 'ledger v2: counters going backwards count nothing');
+        const hours = led.hours();
+        ok(hours.length === 1 && hours[0].apps.get('big').memMaxMiB === 1300 && hours[0].rxBytes === 120000, 'ledger v2: hours() merges an hour');
+
+        // Closing an hour keeps the largest by memory even when they used no CPU.
+        const crowd = new BatteryLedger();
+        const many = (n) => Object.fromEntries(Array.from({ length: 50 }, (_x, i) => [`cpu${i}#1`, n * (i + 1) * 1e5]));
+        const hogs = Object.fromEntries(Array.from({ length: 12 }, (_x, i) => [`hog${i}#1`, 2000 + i]));
+        crowd.ingest(at(0, { cpu: many(0), mem: hogs }));
+        crowd.ingest(at(1, { cpu: many(1), mem: hogs }));
+        const next = at(2, { cpu: many(2), mem: hogs });
+        next.wall = t0 + 3600 * 1000;
+        crowd.ingest(next);
+        const closed = Object.keys(crowd.buckets[0].a).filter(id => !id.startsWith('@'));
+        const hogsKept = closed.filter(id => id.startsWith('hog'));
+        ok(closed.length === APPS_PER_BUCKET && hogsKept.length === MEMORY_PLACES && hogsKept.includes('hog11') && !hogsKept.includes('hog0'),
+            `ledger v2: a closed hour keeps the ${MEMORY_PLACES} largest by memory (${hogsKept.join(' ')})`);
+
+        // A version 1 file loads, reads as no memory data, and is copied aside once before it is saved as version 2.
+        const v1 = { version: 1, baselineW: null, buckets: [{ t: t0 - 3600 * 1000, b: false, s: 30, bw: 0, pw: 0, iw: 0, gw: 0, cpu: 5, energy: false, a: { x: [5, 0, 0, 0] } }] };
+        const dir = GLib.dir_make_tmp('rp-ledger2-XXXXXX');
+        const path = `${dir}/battery-history.json`;
+        GLib.file_set_contents(path, JSON.stringify(v1));
+        const loaded = await loadLedger(path);
+        const old = loaded.ledger.summarize();
+        ok(loaded.problem === null && old.apps[0].memMiBs === 0 && old.memSeconds === 0 && old.rxBytes === 0, 'ledger v2: a version 1 file loads with no memory or network data');
+        ok(GLib.file_test(`${path}.v1`, GLib.FileTest.EXISTS), 'ledger v2: the version 1 file is kept as .v1');
+        loaded.ledger.ingest(at(0, { mem: { 'big#1': 900 } }));
+        loaded.ledger.ingest(at(1, { mem: { 'big#1': 900 } }));
+        await saveLedger(path, loaded.ledger);
+        const [, bytes] = GLib.file_get_contents(path);
+        const saved = JSON.parse(new TextDecoder().decode(bytes));
+        const [, keptBytes] = GLib.file_get_contents(`${path}.v1`);
+        ok(saved.version === 2 && saved.buckets.length === 2 && JSON.parse(new TextDecoder().decode(keptBytes)).version === 1,
+            'ledger v2: saved as version 2, the copy stays version 1');
+        GLib.file_set_contents(`${path}.v1`, 'first copy');
+        GLib.file_set_contents(path, JSON.stringify(v1));
+        await loadLedger(path);
+        const [, again] = GLib.file_get_contents(`${path}.v1`);
+        eq(new TextDecoder().decode(again), 'first copy', 'ledger v2: an existing copy is never overwritten');
+        GLib.unlink(path);
+        GLib.unlink(`${path}.v1`);
+        GLib.rmdir(dir);
     }
 
     // Machine state for the diagnostics: UPower battery properties and the backlight.

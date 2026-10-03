@@ -9,9 +9,14 @@ import GLib from 'gi://GLib';
 import { AppUsageSampler } from '../collectors/appusage.js';
 import { GpuUsageSampler } from '../collectors/gpuusage.js';
 import { PowerSampler } from '../collectors/power.js';
+import { MachineUsageSampler } from '../collectors/machineusage.js';
+import { NetworkSampler } from '../collectors/network.js';
 import { loadLedger, saveLedger } from './batteryledger.js';
 
 export const TRACK_INTERVAL_S = 30;
+// The user counts as away once there was no input for this long; an
+// interval counts as away when all of it was.
+export const AWAY_AFTER_MS = 5 * 60 * 1000;
 
 export function ledgerPath() {
     return `${GLib.get_user_data_dir()}/resource-pulse/battery-history.json`;
@@ -34,10 +39,17 @@ export class BatteryTracker {
      * @param {GpuUsageSampler} [opts.gpu] GPU busy time per unit
      * @param {object} [opts.thermal] a sampler with async sample(false) -> { packageTemp } (°C)
      * @param {function(): number} [opts.hotAbove] the temperature alert (°C)
+     * @param {MachineUsageSampler} [opts.machine] memory, swap and stall counters
+     * @param {NetworkSampler} [opts.network] its own instance (its rates are per caller)
+     * @param {?function(): number} [opts.idleMs] how long there was no user input, in ms
      * @param {function(string)} [opts.onProblem]
      */
     constructor({ battery, focus, path = ledgerPath(), usage = new AppUsageSampler(), power = new PowerSampler(),
-        gpu = new GpuUsageSampler(), thermal = null, hotAbove = () => Infinity, onProblem = message => console.warn(`ResourcePulse: ${message}`) }) {
+        gpu = new GpuUsageSampler(), thermal = null, hotAbove = () => Infinity, machine = new MachineUsageSampler(),
+        network = new NetworkSampler(), idleMs = null, onProblem = message => console.warn(`ResourcePulse: ${message}`) }) {
+        this._machine = machine;
+        this._network = network;
+        this._idleMs = idleMs;
         this._thermal = thermal;
         this._gpu = gpu;
         this._hotAbove = hotAbove;
@@ -108,11 +120,13 @@ export class BatteryTracker {
         this._busy = true;
         const gen = this._gen;
         try {
-            const [usage, power, battery, thermal] = await Promise.all([
-                this._usage.sample({ withPids: !!this._gpu }),
+            const [usage, power, battery, thermal, machine, net] = await Promise.all([
+                this._usage.sample({ withPids: !!this._gpu, withMemory: true }),
                 this._power.sample(),
                 this._battery.sample(),
                 this._thermal ? this._thermal.sample(false) : null,
+                this._machine ? this._machine.sample() : null,
+                this._network ? this._network.sample() : null,
             ]);
             // GPU time needs the units' processes, so it comes second.
             const gpu = this._gpu ? await this._gpu.sample(new Map(usage.units.map(u => [u.unit, u.pids ?? []]))) : null;
@@ -133,6 +147,10 @@ export class BatteryTracker {
                 hot: Number.isFinite(thermal?.packageTemp) && thermal.packageTemp >= this._hotAbove(),
                 uncoreW: power?.raplSupported ? power.uncorePower : null,
                 gpu,
+                machine,
+                net: net ? Object.entries(net.interfaces).filter(([, i]) => !i.isVirtual)
+                    .map(([iface, i]) => ({ iface, rxBytes: i.rxBytes, txBytes: i.txBytes })) : null,
+                idle: this._idleMs ? this._idleMs() >= AWAY_AFTER_MS + TRACK_INTERVAL_S * 1000 : false,
             });
             this.lastSample = { wall, attributed, appsAvailable: this._usage.available, energyAvailable: !!power?.raplSupported };
             if (this._savedHour !== hourOf(wall)) await this.save();

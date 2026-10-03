@@ -25,6 +25,7 @@ export class PollingMethods {
                 battery: this._bat,
                 thermal: this._thm,
                 hotAbove: () => this._settings.get_int('threshold-temp'),
+                idleMs: () => global.backend.get_core_idle_monitor().get_idletime(),
                 focus: {
                     current: () => windows.focus_app?.get_id()?.replace(/\.desktop$/, '') ?? null,
                     connect: callback => windows.connect('notify::focus-app', callback),
