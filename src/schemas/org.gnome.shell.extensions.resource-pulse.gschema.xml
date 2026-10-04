@@ -134,6 +134,45 @@
       <summary>Trigger for clearing the battery history</summary>
       <description>Writing true deletes all recorded battery history.</description>
     </key>
+    <key name="agent" type="s">
+      <choices>
+        <choice value=''/>
+        <choice value='claude'/>
+        <choice value='codex'/>
+        <choice value='gemini'/>
+        <choice value='custom'/>
+      </choices>
+      <default>''</default>
+      <summary>Agent the Diagnostics page hands the report to</summary>
+      <description>Empty: the first installed one.</description>
+    </key>
+    <key name="agent-command" type="s">
+      <default>''</default>
+      <summary>Custom agent command</summary>
+      <description>Program and arguments, split like a shell would but never run by one; {prompt} and {report} are replaced inside arguments. Not kept in settings backups.</description>
+    </key>
+    <key name="agent-terminal" type="s">
+      <choices>
+        <choice value='auto'/>
+        <choice value='ptyxis'/>
+        <choice value='kgx'/>
+        <choice value='gnome-terminal'/>
+        <choice value='kitty'/>
+      </choices>
+      <default>'auto'</default>
+      <summary>Terminal the agent runs in</summary>
+      <description>auto: the system's default terminal (xdg-terminal-exec), else the first one installed.</description>
+    </key>
+    <key name="agent-prompt" type="s">
+      <default>''</default>
+      <summary>Prompt given to the agent</summary>
+      <description>Empty: the built-in prompt.</description>
+    </key>
+    <key name="agent-consent" type="as">
+      <default>[]</default>
+      <summary>Agents the user agreed to send the report to</summary>
+      <description>Set when the user confirms the first hand-off to an agent. Not kept in settings backups.</description>
+    </key>
     <key name="overview-card-order" type="as">
       <default>['cpu', 'memory', 'battery', 'disk', 'network', 'thermal', 'power', 'gpu']</default>
       <summary>Overview Card Order</summary>

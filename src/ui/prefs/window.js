@@ -91,7 +91,7 @@ export function fillWindow(window, { settings, path, historyPath, tracking: trac
         let fullWh = null;
         const tracking = buildTrackingPage(settings, history, { fullWh: () => fullWh, ...trackingOpts });
         window.add(tracking.page);
-        const diagnostics = buildDiagnosticsPage(history, diagnosticsOpts);
+        const diagnostics = buildDiagnosticsPage(history, { settings, ...diagnosticsOpts });
         window.add(diagnostics.page);
         (diagnosticsOpts.readState ?? readSystemState)().then(state => {
             fullWh = state.battery?.fullWh ?? null;
