@@ -901,7 +901,10 @@ async function coverage() {
     // The fixture's app ids are its data; the profile name comes from the
     // system; shell commands are the same in every language.
     const { RAPL_FIX_COMMANDS } = await import(`file://${root}/lib/common/raplfix.js`);
-    const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n')];
+    // Agents and terminals found on this machine go by their product names.
+    const { AGENTS, TERMINALS } = await import(`file://${root}/lib/common/agentlaunch.js`);
+    const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n'), ...AGENTS.map(a => a.name), 'Ptyxis', 'kitty'];
+    ok(TERMINALS.some(t => t.name === 'Ptyxis'), 'coverage: the terminal names left out are the ones offered');
     const seen = new Set();
     for (const name of ['settings', 'tracking', 'diagnostics']) {
         window.set_visible_page_name(name);
