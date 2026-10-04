@@ -72,6 +72,20 @@ async function clickActor(actor) {
     await sleep(600);
 }
 
+// Shells before 49 start in the Activities overview, where a client's window
+// is a thumbnail: a click there picks the window instead of reaching it, and
+// a screenshot shows the thumbnail. Leave the overview and raise the window.
+async function bringForward(metaWindow) {
+    if (Main.overview.visible) {
+        Main.overview.hide();
+        for (let i = 0; i < 30 && (Main.overview.visible || Main.overview.animationInProgress); i++) await sleep(100);
+    }
+    if (!metaWindow.has_focus()) {
+        metaWindow.activate(global.get_current_time());
+        await sleep(300);
+    }
+}
+
 // A click inside a client's window (the preferences, a GTK process): the
 // client gives the point in its surface, the window's buffer rect says where
 // that surface is on the stage.
@@ -671,10 +685,12 @@ async function prefsWindow(rp) {
         const click = /^PREFS-CHECK CLICK ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
         if (click) {
             check(titled(), `prefs: no window to click ${click[1]} in`);
+            await bringForward(titled());
             await clickInWindow(titled(), Number(click[2]), Number(click[3]));
         } else if (show) {
             await sleep(700);
             check(titled(), `prefs: no window on screen for the ${show[1]} page`);
+            await bringForward(titled());
             await shot(`prefs-${show[1]}`);
         } else {
             verdict.push(line);
