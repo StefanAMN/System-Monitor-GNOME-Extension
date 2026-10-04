@@ -125,6 +125,31 @@ export async function readSystemState({ backlightRoot = '/sys/class/backlight' }
     };
 }
 
+/**
+ * What the machine is, for the report given to an agent: no host name, user
+ * name or serial numbers.
+ * @returns {Promise<{os: ?string, kernel: ?string, cpu: ?string, threads: number, desktop: ?string}>}
+ */
+export async function readMachineInfo({ proc = '/proc' } = {}) {
+    const read = async path => {
+        try {
+            return await readFileAsync(path);
+        } catch (e) {
+            noteReadError(e);
+            return null;
+        }
+    };
+    const [kernel, cpuinfo] = await Promise.all([read(`${proc}/sys/kernel/osrelease`), read(`${proc}/cpuinfo`)]);
+    const model = cpuinfo ? /^(?:model name|Model|Hardware)\s*:\s*(.+)$/m.exec(cpuinfo)?.[1].trim() ?? null : null;
+    return {
+        os: GLib.get_os_info('PRETTY_NAME'),
+        kernel: kernel?.trim() || null,
+        cpu: model,
+        threads: GLib.get_num_processors(),
+        desktop: GLib.getenv('XDG_CURRENT_DESKTOP'),
+    };
+}
+
 /** Switch the power mode (power-profiles-daemon allows the active user without a password). */
 export async function setPowerProfile(value) {
     const service = await profileService();
