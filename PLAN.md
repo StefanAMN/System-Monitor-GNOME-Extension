@@ -387,7 +387,7 @@ Follow-up the owner asked for (2026-10-12): the GPU model name wraps onto a seco
 
 ---
 
-# Battery report, diagnostics and a details window (2026-10-14, branch `battery-report`) — PLAN ONLY, awaiting owner approval
+# Battery report, diagnostics and a details window (2026-10-14, branch `battery-report`) — approved by the owner 2026-10-14
 
 Owner's request: track which apps use the battery, give a report of the biggest consumers and a diagnostic that helps the machine last longer; consider a separate window for in-depth settings and statistics instead of crowding the panel. No code has been changed for this section.
 
@@ -456,7 +456,15 @@ Overhead budget: the tracker reads about 100 small files every 30 s (expected we
 - Tracking while the screen is locked (GNOME disables extensions then).
 - Changing system settings that need a password (charge limits, kernel tunables): advice only.
 
-## Decisions needed from the owner
+## Owner's decisions (2026-10-14)
+
+1. Grow the preferences window.
+2. Tracking is off by default; the window has a tab dedicated to tracking (switch, history, report).
+3. 14 days of history.
+4. Both: runtime per charge and battery lifespan.
+5. B6 (GPU per app) after B1–B5 and B7 are done.
+
+## Decisions as first asked
 
 1. The window: grow the preferences window (recommended) or build a separate app.
 2. Tracking: off until the user starts it on the Battery page (recommended, since it records which apps were used and when) or on by default.
