@@ -1,10 +1,12 @@
 // Machine-wide counters for usage tracking: memory and swap in use, swap
-// traffic and the kernel's cumulative stall times (PSI). One reading every
+// traffic, the kernel's cumulative stall times (PSI) and the bytes the
+// physical disks read and wrote. One reading every
 // 30 s from the tracker; cumulative counters, so the ledger takes exact
 // deltas whatever the interval was.
 //
 // HAL layer: plain numbers in bytes and µs; nothing is formatted here.
 import { readFileAsync, getSysconf, noteReadError } from '../common/utils.js';
+import { parseDiskstats } from './disk.js';
 
 /** The value in kB after `key:` in /proc/meminfo, as bytes; null when absent. */
 function meminfoField(text, key) {
@@ -99,20 +101,26 @@ export class MachineUsageSampler {
     /**
      * @returns {Promise<{memTotal: ?number, memUsed: ?number, swapTotal: ?number, swapUsed: ?number,
      *   swapInBytes: ?number, swapOutBytes: ?number,
-     *   pressure: ?{cpu: ?number, memory: ?number, memoryFull: ?number, io: ?number}}>}
+     *   pressure: ?{cpu: ?number, memory: ?number, memoryFull: ?number, io: ?number},
+     *   disks: ?Array<{name: string, readBytes: number, writtenBytes: number}>}>}
      *   bytes, swap traffic cumulative since boot; pressure in µs since boot,
      *   null when this kernel does not report it
      */
     async sample() {
         this._pageSize ??= (await getSysconf()).pageSize;
-        const [meminfo, vmstat, pressure] = await Promise.all([
+        const [meminfo, vmstat, pressure, diskstats] = await Promise.all([
             this._read(`${this._proc}/meminfo`),
             this._read(`${this._proc}/vmstat`),
             this._readPressure(),
+            this._read(`${this._proc}/diskstats`),
         ]);
         const mem = meminfo !== null ? parseMeminfo(meminfo) : { memTotal: null, memUsed: null, swapTotal: null, swapUsed: null };
         const swap = vmstat !== null ? parseVmstatSwap(vmstat) : { swapIn: null, swapOut: null };
         const bytes = pages => (pages !== null && this._pageSize ? pages * this._pageSize : null);
-        return { ...mem, swapInBytes: bytes(swap.swapIn), swapOutBytes: bytes(swap.swapOut), pressure };
+        // Sectors in diskstats are 512 bytes whatever the device's own size.
+        const disks = diskstats !== null
+            ? parseDiskstats(diskstats).map(d => ({ name: d.name, readBytes: d.sectorsRead * 512, writtenBytes: d.sectorsWritten * 512 }))
+            : null;
+        return { ...mem, swapInBytes: bytes(swap.swapIn), swapOutBytes: bytes(swap.swapOut), pressure, disks };
     }
 }

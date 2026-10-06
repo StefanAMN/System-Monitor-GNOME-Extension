@@ -9,8 +9,9 @@
 //
 // Since version 2 each hour also holds what the diagnostics need beyond the
 // battery: memory per app and for the machine, swap traffic, stall times,
-// network bytes and the time the user was away. Version 1 files still load;
-// their hours have none of it.
+// network bytes and the time the user was away; later version 2 files also
+// disk bytes per app and for the machine, and the processor temperature.
+// Fields a file lacks read as 0 (no data), so older files still load.
 //
 // Engine layer: no widgets; file I/O only in loadLedger / saveLedger.
 import Gio from 'gi://Gio';
@@ -83,16 +84,20 @@ function emptyBucket(start, onBattery) {
     // iw: of which idle baseline; gw: battery Wh over gaps (locked, asleep);
     // hs: seconds the CPU was above the temperature alert;
     // uw: graphics Wh shared by GPU time (part of pw); gpu: GPU busy ns of named units;
-    // cpu: machine CPU µs; a: id -> [cpu µs, foreground cpu µs, Wh, GPU ns, memory MiB·s, max memory MiB]
+    // cpu: machine CPU µs; a: id -> [cpu µs, foreground cpu µs, Wh, GPU ns, memory MiB·s, max memory MiB,
+    //   disk bytes read, disk bytes written]
     // Since version 2: ms: seconds memory was read over; mu: memory in use MiB·s; mx: its max MiB;
     // mt: installed MiB; sx: swap in use, max MiB; st: swap size MiB; si / so: MiB swapped in / out;
     // ps: seconds stall times were read over; pc, pm, pf, pi: seconds stalled on CPU, memory
     // (some, full) and I/O; ns: seconds network was read over; rx / tx: bytes;
-    // is: seconds the user was away; ir / it: bytes while away.
+    // is: seconds the user was away; ir / it: bytes while away;
+    // ds: seconds disks were read over; dr / dw: bytes the physical disks read / wrote;
+    // tt: seconds the temperature was read over; tm: highest °C; ta: °C·s (time-weighted average × tt).
     return {
         t: start, b: onBattery, s: 0, bw: 0, pw: 0, iw: 0, gw: 0, hs: 0, uw: 0, gpu: 0, cpu: 0, energy: false, a: {},
         ms: 0, mu: 0, mx: 0, mt: 0, sx: 0, st: 0, si: 0, so: 0,
         ps: 0, pc: 0, pm: 0, pf: 0, pi: 0, ns: 0, rx: 0, tx: 0, is: 0, ir: 0, it: 0,
+        ds: 0, dr: 0, dw: 0, tt: 0, tm: 0, ta: 0,
     };
 }
 
@@ -112,6 +117,7 @@ export class BatteryLedger {
         this._prevSystem = null;
         this._prevMachine = null;
         this._prevNet = null;
+        this._prevDisks = null;
         this._prevBatteryWh = state?.last?.batteryWh ?? null;
         this._lastSeenWall = state?.last?.wall ?? null;
         this._packageLow = new LowPercentile();
@@ -158,15 +164,17 @@ export class BatteryLedger {
         this._prevGpu = null;
         this._prevMachine = null;
         this._prevNet = null;
+        this._prevDisks = null;
         this._prevBatteryWh = null;
         this._lastSeenWall = null;
         this._prevWall = 0;
     }
 
-    /** Give a bucket loaded from a version 1 file the version 2 fields. */
+    /** Give a bucket loaded from an older file the fields it lacks. */
     _upgrade(bucket) {
-        if (bucket.ms !== undefined) return;
-        Object.assign(bucket, { ms: 0, mu: 0, mx: 0, mt: 0, sx: 0, st: 0, si: 0, so: 0, ps: 0, pc: 0, pm: 0, pf: 0, pi: 0, ns: 0, rx: 0, tx: 0, is: 0, ir: 0, it: 0 });
+        if (bucket.ms === undefined)
+            Object.assign(bucket, { ms: 0, mu: 0, mx: 0, mt: 0, sx: 0, st: 0, si: 0, so: 0, ps: 0, pc: 0, pm: 0, pf: 0, pi: 0, ns: 0, rx: 0, tx: 0, is: 0, ir: 0, it: 0 });
+        if (bucket.ds === undefined) Object.assign(bucket, { ds: 0, dr: 0, dw: 0, tt: 0, tm: 0, ta: 0 });
     }
 
     _bucket(wallMs, onBattery) {
@@ -201,11 +209,13 @@ export class BatteryLedger {
         }
         for (const id of ids) {
             if (keep.has(id)) continue;
-            const [cpu, fg, wh, gpu = 0, mibS = 0, maxMib = 0] = bucket.a[id];
+            const [cpu, fg, wh, gpu = 0, mibS = 0, maxMib = 0, read = 0, written = 0] = bucket.a[id];
             const more = this._add(bucket, MORE, cpu, fg, wh, gpu, true);
             // The rest's max is the sum of theirs: an upper bound.
             more[4] += mibS;
             more[5] += maxMib;
+            more[6] += read;
+            more[7] += written;
             delete bucket.a[id];
         }
     }
@@ -221,17 +231,49 @@ export class BatteryLedger {
         if (!entry) {
             const named = Object.keys(bucket.a).length;
             if (!force && !id.startsWith('@') && named >= OPEN_BUCKET_APPS) return this._add(bucket, MORE, cpu, fg, wh, gpu, true);
-            entry = bucket.a[id] = [0, 0, 0, 0, 0, 0];
+            entry = bucket.a[id] = [0, 0, 0, 0, 0, 0, 0, 0];
         }
         entry[0] += cpu;
         entry[1] += fg;
         entry[2] += wh;
         // Entries saved before GPU time was recorded have three fields, before
-        // memory was recorded four.
+        // memory was recorded four, before disk bytes six.
         entry[3] = (entry[3] ?? 0) + gpu;
         entry[4] ??= 0;
         entry[5] ??= 0;
+        entry[6] ??= 0;
+        entry[7] ??= 0;
         return entry;
+    }
+
+    /** Disk bytes per app (summed over its units) since the previous reading. */
+    _addAppIo(bucket, units, appIo) {
+        if (!appIo || appIo.size === 0) return;
+        const idOf = new Map(units.map(u => [u.unit, u.id]));
+        for (const [unit, { read, write }] of appIo) {
+            const id = idOf.get(unit);
+            if (id === undefined) continue;
+            const entry = this._add(bucket, id, 0, 0, 0);
+            entry[6] += read;
+            entry[7] += write;
+        }
+    }
+
+    /** Bytes the physical disks read and wrote since the previous reading. */
+    _addDisks(bucket, disks, prev, dt) {
+        if (!disks || !prev) return;
+        let read = 0;
+        let written = 0;
+        for (const { name, readBytes, writtenBytes } of disks) {
+            const before = prev.get(name);
+            // A disk attached since the last reading counts from the next one.
+            if (!before) continue;
+            read += counterDelta(readBytes, before.read);
+            written += counterDelta(writtenBytes, before.written);
+        }
+        bucket.ds += dt;
+        bucket.dr += read;
+        bucket.dw += written;
     }
 
     /** Memory of each app (summed over its units) and of the machine over `dt` seconds. */
@@ -317,10 +359,13 @@ export class BatteryLedger {
      * @param {?object} [s.machine] MachineUsageSampler reading
      * @param {?Array<{iface: string, rxBytes: number, txBytes: number}>} [s.net] physical interfaces
      * @param {boolean} [s.idle] the user was away (no input) through the interval
+     * @param {?Map<string, {read: number, write: number}>} [s.appIo] disk bytes per unit since the
+     *   previous reading (AppIoSampler)
+     * @param {?number} [s.temp] the processor temperature, °C
      * @returns {boolean} whether the interval was attributed (false for the first sample and gaps)
      */
     ingest({ mono, wall, usage, packageW, battery, focusUsec = {}, hot = false, uncoreW = null, gpu = null,
-        machine = null, net = null, idle = false }) {
+        machine = null, net = null, idle = false, appIo = null, temp = null }) {
         const onBattery = !!(battery?.present && battery.onBattery);
         const batteryWh = battery?.present && Number.isFinite(battery.energyWh) ? battery.energyWh : null;
         const first = this._prevUnits === null;
@@ -347,6 +392,13 @@ export class BatteryLedger {
             this._addMemory(bucket, usage.units, machine, dt);
             this._addCounters(bucket, machine, this._prevMachine, dt);
             this._addNetwork(bucket, net, this._prevNet, dt, idle);
+            this._addAppIo(bucket, usage.units, appIo);
+            this._addDisks(bucket, machine?.disks, this._prevDisks, dt);
+            if (Number.isFinite(temp) && temp > 0) {
+                bucket.tt += dt;
+                bucket.ta += temp * dt;
+                bucket.tm = Math.max(bucket.tm, temp);
+            }
             const totalCpu = Math.max(0, usage.total - this._prevTotal);
             bucket.cpu += totalCpu;
 
@@ -422,6 +474,7 @@ export class BatteryLedger {
         if (gpu) this._prevGpu = gpu;
         this._prevMachine = machine;
         this._prevNet = net ? new Map(net.map(i => [i.iface, { rx: i.rxBytes, tx: i.txBytes }])) : null;
+        this._prevDisks = machine?.disks ? new Map(machine.disks.map(d => [d.name, { read: d.readBytes, written: d.writtenBytes }])) : null;
         this._prevMono = mono;
         this._prevWall = wall;
         this._prevTotal = usage.total;
@@ -445,8 +498,10 @@ export class BatteryLedger {
             memSeconds: 0, memUsedMiBs: 0, memMaxMiB: 0, memTotalMiB: 0, swapMaxMiB: 0, swapTotalMiB: 0, swapInMiB: 0, swapOutMiB: 0,
             stallSeconds: 0, stall: { cpu: 0, memory: 0, memoryFull: 0, io: 0 },
             netSeconds: 0, rxBytes: 0, txBytes: 0, idleSeconds: 0, idleRxBytes: 0, idleTxBytes: 0,
+            diskSeconds: 0, diskReadBytes: 0, diskWrittenBytes: 0, tempSeconds: 0, tempMax: 0, tempAvg: null,
         };
         const apps = new Map();
+        let tempArea = 0;
         for (const b of this.buckets) {
             if (b.t < from || b.t >= to || (batteryOnly && !b.b)) continue;
             sum.seconds += b.s;
@@ -478,17 +533,26 @@ export class BatteryLedger {
             sum.idleSeconds += b.is ?? 0;
             sum.idleRxBytes += b.ir ?? 0;
             sum.idleTxBytes += b.it ?? 0;
-            for (const [id, [cpu, fg, wh, gpu = 0, mibS = 0, maxMib = 0]] of Object.entries(b.a)) {
-                const app = apps.get(id) ?? { id, cpu: 0, fg: 0, wh: 0, gpu: 0, memMiBs: 0, memMaxMiB: 0 };
+            sum.diskSeconds += b.ds ?? 0;
+            sum.diskReadBytes += b.dr ?? 0;
+            sum.diskWrittenBytes += b.dw ?? 0;
+            sum.tempSeconds += b.tt ?? 0;
+            sum.tempMax = Math.max(sum.tempMax, b.tm ?? 0);
+            tempArea += b.ta ?? 0;
+            for (const [id, [cpu, fg, wh, gpu = 0, mibS = 0, maxMib = 0, read = 0, written = 0]] of Object.entries(b.a)) {
+                const app = apps.get(id) ?? { id, cpu: 0, fg: 0, wh: 0, gpu: 0, memMiBs: 0, memMaxMiB: 0, diskRead: 0, diskWritten: 0 };
                 app.cpu += cpu;
                 app.fg += fg;
                 app.wh += wh;
                 app.gpu += gpu;
                 app.memMiBs += mibS;
                 app.memMaxMiB = Math.max(app.memMaxMiB, maxMib);
+                app.diskRead += read;
+                app.diskWritten += written;
                 apps.set(id, app);
             }
         }
+        sum.tempAvg = sum.tempSeconds > 0 ? tempArea / sum.tempSeconds : null;
         sum.attributedWh = sum.packageWh - sum.idleWh;
         sum.apps = [...apps.values()].sort((x, y) => (y.wh - x.wh) || (y.cpu - x.cpu));
         for (const app of sum.apps) {
