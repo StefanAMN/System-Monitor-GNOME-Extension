@@ -18,12 +18,13 @@ export const TINTS = {
     memory: [['#1e1a2e', 'rgba(145, 65, 172, 0.4)'], ['#f2e7f6', 'rgba(145, 65, 172, 0.45)']],
     battery: [['#192820', 'rgba(46, 194, 126, 0.4)'], ['#e1f5eb', 'rgba(38, 162, 105, 0.5)']],
     power: [['#22200a', 'rgba(246, 211, 45, 0.35)'], ['#fdf6d6', 'rgba(229, 165, 10, 0.6)']],
+    disk: [['#22200a', 'rgba(246, 211, 45, 0.35)'], ['#fdf6d6', 'rgba(229, 165, 10, 0.6)']],
     thermal: [['#221608', 'rgba(255, 120, 0, 0.35)'], ['#ffedda', 'rgba(255, 120, 0, 0.5)']],
     gpu: [['#0b2014', 'rgba(51, 209, 122, 0.35)'], ['#e1f7eb', 'rgba(38, 162, 105, 0.5)']],
     network: [['#22100f', 'rgba(224, 27, 36, 0.35)'], ['#fce5e6', 'rgba(224, 27, 36, 0.4)']],
 };
 export const METRIC_COLORS = {
-    cpu: '#3584e4', memory: '#9141ac', battery: '#2ec27e', power: '#f6d32d',
+    cpu: '#3584e4', memory: '#9141ac', battery: '#2ec27e', power: '#f6d32d', disk: '#e5a50a',
     thermal: '#ff7800', gpu: '#33d17a', network: '#e01b24',
 };
 

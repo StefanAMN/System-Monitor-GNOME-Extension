@@ -1,6 +1,8 @@
-// The preferences window's Tracking page: the switch that starts battery
-// tracking, the history, and the report of which apps used the battery.
-// GTK side (preferences process); never imported by the shell.
+// The preferences window's Tracking page: the switch that starts usage
+// tracking, the history, and per component (battery, processor, memory,
+// disk, network, graphics, temperature) the figures over a period, a chart
+// and the apps that used it most. GTK side (preferences process); never
+// imported by the shell.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
@@ -9,9 +11,11 @@ import PangoCairo from 'gi://PangoCairo';
 
 import { BatteryLedger, LedgerFormatError, DAYS_KEPT } from '../../lib/engine/batteryledger.js';
 import { ledgerPath, TRACK_INTERVAL_S } from '../../lib/engine/batterytracker.js';
+import { COMPONENTS, componentView } from '../../lib/engine/trackingview.js';
 import { appInfo } from '../../lib/common/appnames.js';
-import { formatDuration } from '../../lib/common/format.js';
+import { formatDuration, formatBytes, formatTemp } from '../../lib/common/format.js';
 import { _, fill, ngettext } from '../../lib/common/i18n.js';
+import { METRIC_COLORS } from './style.js';
 
 const HOUR_MS = 3600 * 1000;
 const APPS_SHOWN = 15;
@@ -209,6 +213,169 @@ function drawDrain(area, cr, width, height, points) {
     cr.$dispose();
 }
 
+function hexColour(hex, alpha) {
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    return [r, g, b, alpha];
+}
+
+/**
+ * Bars of one component: the first series full width; a second one drawn
+ * inside it (`nested`: a part or an average of the first) or beside it.
+ */
+function drawBars(area, cr, width, height, chart) {
+    const { points, series, axis, colour, nested } = chart;
+    const fg = area.get_color();
+    const max = Math.max(1e-9, ...points.flatMap(p => series.map(key => p[key] ?? 0)));
+    const left = 52;
+    const bottom = 18;
+    const plotH = height - bottom - 6;
+    const slot = (width - left) / Math.max(1, points.length);
+    const barW = Math.max(2, slot * 0.7);
+    const text = (str, x, y, right = false) => {
+        const layout = area.create_pango_layout(str);
+        const [, logical] = layout.get_pixel_extents();
+        cr.moveTo(right ? x - logical.width : x, y - logical.height);
+        PangoCairo.show_layout(cr, layout);
+    };
+    cr.setSourceRGBA(fg.red, fg.green, fg.blue, 1);
+    text(axis(max), 0, 16);
+    text('0', 0, plotH + 10);
+    cr.setSourceRGBA(fg.red, fg.green, fg.blue, 0.25);
+    cr.rectangle(left, plotH + 6, width - left, 1);
+    cr.fill();
+    points.forEach((p, i) => {
+        const x = left + i * slot + (slot - barW) / 2;
+        series.forEach((key, j) => {
+            const h = plotH * Math.max(0, p[key] ?? 0) / max;
+            const [bx, bw] = nested ? [x + barW * 0.25 * j, barW * (1 - 0.5 * j)] : [x + (barW / series.length) * j, barW / series.length];
+            cr.setSourceRGBA(...hexColour(colour, j === 0 ? (nested ? 0.45 : 0.95) : (nested ? 0.95 : 0.5)));
+            cr.rectangle(bx, plotH + 6 - h, Math.max(1, bw), h);
+            cr.fill();
+        });
+    });
+    if (points.length > 1) {
+        cr.setSourceRGBA(fg.red, fg.green, fg.blue, 1);
+        const fmt = t => {
+            const d = new Date(t);
+            return points[1].t - points[0].t > HOUR_MS ? `${d.getDate()}.${d.getMonth() + 1}` : `${String(d.getHours()).padStart(2, '0')}:00`;
+        };
+        text(fmt(points[0].t), left, height);
+        text(fmt(points[points.length - 1].t), width, height, true);
+    }
+    cr.$dispose();
+}
+
+const dash = '—';
+// Small shares keep a decimal: an idle machine is not "0 %" busy.
+const pct = x => (x === null || x === undefined ? dash : `${x > 0 && x < 0.1 ? (x * 100).toFixed(1) : Math.round(x * 100)} %`);
+const hotFor = s => (s === null || s === undefined ? dash : s > 0 ? formatDuration(s) : _('never'));
+const mib = x => (x === null || x === undefined ? dash : formatBytes(x * 1024 * 1024, true));
+const bytes = x => (x === null || x === undefined ? dash : formatBytes(x));
+
+/**
+ * How each component is shown: its tiles (title, then value and detail from
+ * the view's figures), its chart and how an app's figure reads. `unit` is the
+ * temperature unit setting.
+ */
+export function componentSpecs(unit = 'C') {
+    const temp = x => (x === null || x === undefined ? dash : formatTemp(x, unit));
+    return {
+        battery: { title: _('Battery') },
+        cpu: {
+            title: _('Processor'),
+            description: _('The processor\'s load is its share of all cores over the time recorded.'),
+            tiles: [
+                [_('Average load'), t => [pct(t.load), _('of all cores')]],
+                [_('Waiting for the processor'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time, some program waited')]],
+                [_('Above the temperature alert'), t => [hotFor(t.hot), '']],
+                [_('Time recorded'), t => [formatDuration(t.time), '']],
+            ],
+            chart: _('Processor load'), series: [[_('load'), 'load']], axis: pct,
+            app: a => [formatCpu(a.app.cpu), a.app.id.startsWith('@') || a.app.cpu <= 0 ? ''
+                : fill(_('{percent} % in the background'), { percent: Math.round((1 - a.app.fg / a.app.cpu) * 100) })],
+            appsTitle: _('Apps by processor time'),
+        },
+        memory: {
+            title: _('Memory'),
+            tiles: [
+                [_('Average in use'), t => [mib(t.average), t.total ? fill(_('of {total}'), { total: mib(t.total) }) : '']],
+                [_('Highest in use'), t => [mib(t.highest), t.total && t.highest !== null ? fill(_('{percent} of the total'), { percent: pct(t.highest / t.total) }) : '']],
+                [_('Swap in use, at most'), t => [mib(t.swap), t.swapTotal ? fill(_('of {total}'), { total: mib(t.swapTotal) }) : _('no swap')]],
+                [_('Waiting for memory'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time, some program waited')]],
+            ],
+            chart: _('Memory in use'), series: [[_('highest'), 'highest'], [_('average'), 'average']], nested: true, axis: mib,
+            app: a => [mib(a.value), fill(_('at most {size}'), { size: mib(a.app.memMaxMiB) })],
+            appsTitle: _('Apps by memory'),
+            appsDescription: _('Average over the period, the hours an app was not running included'),
+        },
+        disk: {
+            title: _('Disk'),
+            tiles: [
+                [_('Read'), t => [bytes(t.read), _('by the disks')]],
+                [_('Written'), t => [bytes(t.written), _('by the disks')]],
+                [_('Waiting for the disk'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time, some program waited')]],
+                [_('Seen per app'), t => [bytes(t.apps), _('read and written, an estimate')]],
+            ],
+            chart: _('Disk traffic'), series: [[_('read'), 'read'], [_('written'), 'written']], axis: bytes,
+            app: a => [bytes(a.value), fill(_('{read} read · {written} written'), { read: bytes(a.app.diskRead), written: bytes(a.app.diskWritten) })],
+            appsTitle: _('Apps by disk traffic'),
+            appsDescription: _('An estimate: what a process read or wrote is missed if it started and ended between two readings, 30 seconds apart'),
+        },
+        network: {
+            title: _('Network'),
+            tiles: [
+                [_('Received'), t => [bytes(t.received), '']],
+                [_('Sent'), t => [bytes(t.sent), '']],
+                [_('While you were away'), t => [bytes(t.away), t.away === null ? '' : fill(_('over {time}'), { time: formatDuration(t.awaySeconds) })]],
+            ],
+            chart: _('Network traffic'), series: [[_('received'), 'received'], [_('sent'), 'sent']], axis: bytes,
+            appsTitle: _('Apps'),
+            noApps: _('Traffic per app cannot be read without administrator rights; these are the whole computer\'s figures.'),
+        },
+        gpu: {
+            title: _('Graphics'),
+            tiles: [
+                [_('Graphics busy'), t => [t.busy === null ? dash : formatDuration(t.busy), _('time the GPU worked for apps')]],
+                [_('Share of the time'), t => [pct(t.share), '']],
+                [_('Graphics energy'), t => [t.energy === null ? _('not measured') : formatWh(t.energy), _('an estimate')]],
+            ],
+            chart: _('Graphics busy'), series: [[_('busy'), 'busy']], axis: x => formatDuration(x),
+            app: a => [formatCpu(a.app.gpu / 1000), fill(_('{percent} % of the graphics time'), { percent: Math.round(a.share * 100) })],
+            appsTitle: _('Apps by graphics time'),
+        },
+        thermal: {
+            title: _('Temperature'),
+            tiles: [
+                [_('Average'), t => [temp(t.average), _('processor')]],
+                [_('Highest'), t => [temp(t.highest), _('processor')]],
+                [_('Above the temperature alert'), t => [hotFor(t.hot), '']],
+            ],
+            chart: _('Processor temperature'), series: [[_('highest'), 'highest'], [_('average'), 'average']], nested: true, axis: temp,
+            appsTitle: _('Apps'),
+            noApps: _('Temperature belongs to the processor, not to apps: the Processor view shows which apps kept it busy.'),
+        },
+    };
+}
+
+/** A row of a component's app list: icon, name, detail, figure and share. */
+function rankedRow(entry, [value, detail], tint) {
+    const info = appInfo(entry.app.id);
+    const row = new Adw.ActionRow({ title: info.name, subtitle: detail });
+    row.appId = entry.app.id;
+    row.add_prefix(info.gicon ? new Gtk.Image({ gicon: info.gicon, pixel_size: 32 }) : new Gtk.Image({ icon_name: info.iconName, pixel_size: 24 }));
+    const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4, valign: Gtk.Align.CENTER });
+    box.append(new Gtk.Label({ label: value, xalign: 1 }));
+    const bar = new Gtk.LevelBar({ min_value: 0, max_value: 1, value: Math.min(1, entry.share), width_request: 96, css_classes: [`rp-bar-${tint}`] });
+    bar.remove_offset_value(Gtk.LEVEL_BAR_OFFSET_LOW);
+    bar.remove_offset_value(Gtk.LEVEL_BAR_OFFSET_HIGH);
+    bar.remove_offset_value(Gtk.LEVEL_BAR_OFFSET_FULL);
+    box.append(bar);
+    row.add_suffix(box);
+    row.share = entry.share;
+    row.value = value;
+    return row;
+}
+
 function appRow(app, total, hasEnergy) {
     const info = appInfo(app.id);
     const background = app.cpu > 0 ? 1 - app.fg / app.cpu : 0;
@@ -247,7 +414,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     // Tracking itself.
     const control = new Adw.PreferencesGroup({
         title: _('Usage tracking'),
-        description: fill(_('Records which apps use the processor and memory, and how much the network moves, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
+        description: fill(_('Records which apps use the processor, memory, disk and graphics, and how much the network moves and how warm the processor runs, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
             { seconds: TRACK_INTERVAL_S, days: DAYS_KEPT }),
     });
     page.add(control);
@@ -279,6 +446,9 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     page.add(options);
     rows.period = new Adw.ComboRow({ title: _('Period'), model: Gtk.StringList.new(PERIODS.map(p => p.label())) });
     options.add(rows.period);
+    const specsNow = () => componentSpecs(settings.get_string('unit-temp') || 'C');
+    rows.component = new Adw.ComboRow({ title: _('Component'), model: Gtk.StringList.new(COMPONENTS.map(c => specsNow()[c].title)) });
+    options.add(rows.component);
     rows.batteryOnly = new Adw.SwitchRow({ title: _('On battery only'), subtitle: _('Leave out the time on the charger'), active: true });
     options.add(rows.batteryOnly);
 
@@ -318,7 +488,40 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     summary.add(batteryBox);
     rows.summary = summary;
 
+    // Every component but the battery: tiles, a chart and a message when there is nothing.
+    const componentGroup = new Adw.PreferencesGroup();
+    page.add(componentGroup);
+    const componentBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12 });
+    rows.componentTiles = [0, 1, 2, 3].map(() => tile(''));
+    componentBox.append(tileGrid(rows.componentTiles));
+    const barsBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-chart'] });
+    const barsHead = new Gtk.Box({ spacing: 12 });
+    const barsTitle = new Gtk.Label({ xalign: 0, hexpand: true, css_classes: ['rp-tile-label'] });
+    barsHead.append(barsTitle);
+    const legend = [0, 1].map(() => {
+        const key = new Gtk.Box({ spacing: 4 });
+        key.swatch = new Gtk.Label({ label: '■' });
+        key.text = new Gtk.Label({ css_classes: ['rp-tile-detail'] });
+        key.append(key.swatch);
+        key.append(key.text);
+        barsHead.append(key);
+        return key;
+    });
+    barsBox.append(barsHead);
+    const barsArea = new Gtk.DrawingArea({ content_height: 140, hexpand: true, css_classes: ['rp-chart-area'] });
+    rows.bars = { area: barsArea, box: barsBox, chart: null, title: barsTitle };
+    barsArea.set_draw_func((a, cr, width, height) => {
+        if (rows.bars.chart) drawBars(a, cr, width, height, rows.bars.chart);
+    });
+    barsBox.append(barsArea);
+    componentBox.append(barsBox);
+    rows.componentEmpty = new Gtk.Label({ xalign: 0, wrap: true, css_classes: ['dim-label'] });
+    componentBox.append(rows.componentEmpty);
+    componentGroup.add(componentBox);
+    rows.componentGroup = componentGroup;
+
     const appsGroup = new Adw.PreferencesGroup({ title: _('Apps'), description: _('Most first') });
+    rows.appsGroup = appsGroup;
     page.add(appsGroup);
     const list = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
     appsGroup.add(list);
@@ -340,6 +543,17 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
             ? _('Recording · {time} recorded · energy measured')
             : _('Recording · {time} recorded · processor time only: power readings are not available'), { time: formatDuration(hours * 3600) });
         rows.clearButton.sensitive = history.ledger.buckets.length > 0;
+
+        const component = COMPONENTS[rows.component.selected] ?? 'battery';
+        rows.batteryOnly.visible = component === 'battery';
+        componentGroup.visible = component !== 'battery';
+        if (component !== 'battery') {
+            summary.visible = false;
+            renderComponent(component, startOfHour(period.from(now)), now, tracking);
+            return;
+        }
+        appsGroup.title = _('Apps');
+        appsGroup.description = _('Most first');
 
         // Nothing recorded for this period: no column of zeros.
         summary.visible = sum.seconds > 0 || sum.gapWh > 0;
@@ -396,7 +610,66 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
         }
     };
 
+    /** One component other than the battery, over [from, now]. */
+    const renderComponent = (component, from, now, tracking) => {
+        const spec = specsNow()[component];
+        const view = componentView(component, history.ledger, { from, now, cores: GLib.get_num_processors() });
+        componentGroup.title = spec.title;
+        componentGroup.description = spec.description ?? '';
+        rows.componentView = view;
+        rows.componentTiles.forEach((t, i) => {
+            const def = spec.tiles[i];
+            showTile(t, !!def && view.has);
+            if (!def) return;
+            t.title = def[0];
+            const [value, detail] = def[1](view.tiles);
+            t.value.label = value;
+            t.detail.label = detail;
+            t.set_css_classes(['rp-tile', `rp-tint-${component}`]);
+        });
+        rows.bars.chart = { points: view.points, series: view.series, axis: spec.axis, colour: METRIC_COLORS[component], nested: !!spec.nested };
+        rows.bars.title.label = spec.chart;
+        legend.forEach((key, i) => {
+            key.visible = i < spec.series.length;
+            if (!key.visible) return;
+            key.text.label = spec.series[i][0];
+            key.swatch.set_css_classes([`rp-c-${component}`]);
+            // As drawn: nested, the outer bar is the faint one; beside, the second.
+            key.swatch.opacity = (spec.nested ? i === 0 : i === 1) ? 0.5 : 1;
+        });
+        barsBox.visible = view.has;
+        barsArea.queue_draw();
+        rows.componentEmpty.visible = !view.has;
+        rows.componentEmpty.label = tracking
+            ? _('No figures for this period yet: they are recorded while tracking is on, and this kind only since a recent version.')
+            : _('No figures for this period. Switch on tracking above to start recording.');
+
+        list.remove_all();
+        rows.appRows = [];
+        appsGroup.title = spec.appsTitle;
+        appsGroup.description = view.apps ? spec.appsDescription ?? _('Most first') : '';
+        if (!view.apps) {
+            list.append(new Adw.ActionRow({ title: _('No figures per app'), subtitle: spec.noApps }));
+            return;
+        }
+        for (const entry of view.apps.slice(0, APPS_SHOWN)) {
+            const row = rankedRow(entry, spec.app(entry), component);
+            list.append(row);
+            rows.appRows.push(row);
+        }
+        if (view.apps.length > APPS_SHOWN)
+            list.append(new Adw.ActionRow({ title: fill(_('{n} more'), { n: view.apps.length - APPS_SHOWN }), subtitle: _('Each below the ones above') }));
+        if (view.apps.length === 0) {
+            list.append(new Adw.ActionRow({
+                title: _('No figures for this period'),
+                subtitle: tracking ? _('Tracking is on; figures appear as time passes.') : _('Switch on tracking above to start recording.'),
+            }));
+        }
+    };
+
     rows.period.connect('notify::selected', render);
+    rows.component.connect('notify::selected', render);
+    const unitId = settings.connect('changed::unit-temp', render);
     rows.batteryOnly.connect('notify::active', render);
     const trackingId = settings.connect('changed::battery-tracking', () => {
         history.requestFlush();
@@ -411,6 +684,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
         render,
         dispose: () => {
             settings.disconnect(trackingId);
+            settings.disconnect(unitId);
             unsubscribe();
         },
     };

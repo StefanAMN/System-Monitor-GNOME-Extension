@@ -216,6 +216,7 @@ async function main() {
         }
         shown.window.hide();
         await agentClicks(battery.window, battery.settings, battery.diagnostics, battery.fake);
+        await componentClicks(battery.window, battery.tracking.rows);
         shown.window.destroy();
     }
     shown.dispose();
@@ -516,8 +517,8 @@ async function fixtureHistory() {
         ledger.ingest({
             mono: 1e9 + i * 30e6, wall: start + i * 30000,
             usage: { total: c.total, system: c.sys, units: [
-                { unit: 'app-gnome-chat-1.scope', id: 'chat', kind: 'app', label: 'chat', usec: c.chat },
-                { unit: 'app-gnome-editor-2.scope', id: 'editor', kind: 'app', label: 'editor', usec: c.editor },
+                { unit: 'app-gnome-chat-1.scope', id: 'chat', kind: 'app', label: 'chat', usec: c.chat, memory: 1536 * 2 ** 20 },
+                { unit: 'app-gnome-editor-2.scope', id: 'editor', kind: 'app', label: 'editor', usec: c.editor, memory: 300 * 2 ** 20 },
             ] },
             // Varies like a real machine, so an idle level below the mean is learnt.
             packageW: 5 + (i % 7),
@@ -527,7 +528,11 @@ async function fixtureHistory() {
             gpu: new Map([['app-gnome-chat-1.scope', i * 2e9], ['app-gnome-editor-2.scope', i * 0.5e9]]),
             // 150 MiB of swap traffic an hour; 50 kB/s while away.
             machine: { memTotal: 8 * 2 ** 30, memUsed: 6 * 2 ** 30, swapTotal: 2 * 2 ** 30, swapUsed: 2 ** 30,
-                swapInBytes: i * 1.25 * 2 ** 20, swapOutBytes: 0, pressure: { cpu: 0, memory: 0, memoryFull: 0, io: 0 } },
+                swapInBytes: i * 1.25 * 2 ** 20, swapOutBytes: 0, pressure: { cpu: 0, memory: 0, memoryFull: 0, io: 0 },
+                disks: [{ name: 'nvme0n1', readBytes: i * 1e6, writtenBytes: i * 4e6 }] },
+            // The editor writes 2 MB per sample; the chat reads 0.5 MB.
+            appIo: new Map([['app-gnome-editor-2.scope', { read: 0, write: 2e6 }], ['app-gnome-chat-1.scope', { read: 5e5, write: 0 }]]),
+            temp: i % 2 ? 50 : 60,
             net: [{ iface: 'wlan0', rxBytes: i * 1.5e6, txBytes: 0 }],
             idle: true,
         });
@@ -603,6 +608,8 @@ async function batteryPages(styleWindow) {
     r.period.selected = 1; // today: may or may not include the fixture, but must not fail
     r.period.selected = 3;
     ok(r.appRows.length === 4, 'tracking: the 14-day view has the same apps');
+
+    await componentChecks(r, window);
 
     r.tracking.active = true;
     ok(settings.get_boolean('battery-tracking'), 'tracking: the switch writes the setting');
@@ -680,6 +687,7 @@ async function batteryPages(styleWindow) {
     return {
         window,
         diagnostics,
+        tracking,
         settings,
         fake,
         dispose: () => {
@@ -694,6 +702,71 @@ async function batteryPages(styleWindow) {
 }
 
 const driven = Number(ARGV[1] ?? 0) > 0;
+
+/**
+ * The Tracking tab per component on the fixture (two hours: 0.4 + 0.3 + 0.1
+ * s of CPU per 30 s sample, the editor writing 2 MB a sample, 55 °C).
+ */
+async function componentChecks(r, window) {
+    const { COMPONENTS } = await import(`file://${root}/lib/engine/trackingview.js`);
+    const names = [];
+    for (let i = 0; i < r.component.model.get_n_items(); i++) names.push(r.component.model.get_string(i));
+    ok(names.join() === 'Battery,Processor,Memory,Disk,Network,Graphics,Temperature', `components: offered ${names.join()}`);
+    ok(r.component.selected === 0 && r.summary.visible && !r.componentGroup.visible, 'components: the battery view first');
+    const expect = {
+        cpu: { tile: 'Average load', apps: 'chat,editor,@system,@other' },
+        memory: { tile: 'Average in use', apps: 'chat,editor' },
+        disk: { tile: 'Read', apps: 'editor,chat' },
+        network: { tile: 'Received', apps: null },
+        gpu: { tile: 'Graphics busy', apps: 'chat,editor' },
+        thermal: { tile: 'Average', apps: null },
+    };
+    for (const [component, want] of Object.entries(expect)) {
+        r.component.selected = COMPONENTS.indexOf(component);
+        await sleep(100);
+        const first = r.componentTiles[0];
+        const shown = r.componentTiles.filter(t => t.visible);
+        ok(r.componentGroup.visible && !r.summary.visible && !r.batteryOnly.visible, `components ${component}: its own view, the battery's hidden`);
+        ok(first.title === want.tile && first.value.label !== '—' && shown.every(t => t.value.label), `components ${component}: '${first.title}' reads '${first.value.label}'`);
+        ok(r.bars.box.visible && r.bars.chart.points.some(p => r.bars.chart.series.some(k => p[k] > 0)), `components ${component}: the chart has bars`);
+        const ids = r.appRows.map(row => row.appId).join();
+        if (want.apps) ok(ids === want.apps, `components ${component}: apps ${ids}, expected ${want.apps}`);
+        else ok(r.appRows.length === 0 && r.list.get_first_child()?.title === 'No figures per app', `components ${component}: no per-app list, and it says why`);
+    }
+    r.component.selected = COMPONENTS.indexOf('thermal');
+    ok(r.componentTiles[0].value.label === '55°C' && r.componentTiles[1].value.label === '60°C', `components thermal: average ${r.componentTiles[0].value.label}, highest ${r.componentTiles[1].value.label}`);
+    r.component.selected = COMPONENTS.indexOf('disk');
+    ok(r.appRows[0].value === '478.0 MB', `components disk: the editor wrote ${r.appRows[0].value} (2 MB in each of 239 intervals)`);
+
+    // As rendered, each component's tiles in its own tint, in both variants.
+    if (Gdk.Display.get_default()) {
+        const { TINTS } = await import(`file://${root}/ui/prefs/style.js`);
+        const manager = Adw.StyleManager.get_default();
+        window.present();
+        window.set_visible_page_name('tracking');
+        for (const [variant, scheme] of [['dark', Adw.ColorScheme.FORCE_DARK], ['light', Adw.ColorScheme.FORCE_LIGHT]]) {
+            manager.color_scheme = scheme;
+            for (const component of Object.keys(expect)) {
+                r.component.selected = COMPONENTS.indexOf(component);
+                await sleep(400);
+                const tile = r.componentTiles[0];
+                const shot = render(window);
+                if (!shot) {
+                    ok(false, `components ${component} (${variant}): the window rendered nothing`);
+                    continue;
+                }
+                const [okPoint, at] = tile.compute_point(window, new Graphene.Point().init(6, tile.get_height() / 2));
+                const bg = okPoint ? shot.at(at.x, at.y) : [0, 0, 0, 0];
+                const want = TINTS[component][variant === 'dark' ? 0 : 1][0];
+                ok(near(bg, want), `components ${component} (${variant}): tile is ${show(bg)}, not ${want}`);
+            }
+        }
+        manager.color_scheme = Adw.ColorScheme.DEFAULT;
+    }
+    r.component.selected = 0;
+    ok(r.summary.visible && !r.componentGroup.visible && r.batteryOnly.visible && r.appRows.map(row => row.appId).join() === 'chat,editor,@system,@other',
+        'components: back to the battery view, as before');
+}
 
 /**
  * A terminal and agents that only record what they were given, on a PATH of
@@ -816,6 +889,39 @@ async function checkLaunch(settings, a, fake, how) {
     ok((info.get_attribute_uint32('unix::mode') & 0o777) === 0o600 && (dirInfo.get_attribute_uint32('unix::mode') & 0o777) === 0o700,
         `agent (${how}): report.md is private (${(info.get_attribute_uint32('unix::mode') & 0o777).toString(8)}, folder ${(dirInfo.get_attribute_uint32('unix::mode') & 0o777).toString(8)})`);
     ok(a.status.label.startsWith('Started in a terminal'), `agent (${how}): status '${a.status.label}'`);
+}
+
+/**
+ * Driven by the shell: the Tracking tab's Component dropdown, opened and an
+ * option picked with the real pointer. The list is a popup surface of its
+ * own: its point is where the popup sits on the window's surface plus the
+ * option's place inside it.
+ */
+async function componentClicks(window, r) {
+    window.present();
+    window.set_visible_page_name('tracking');
+    const adj = findScrolled(window.get_visible_page())?.get_vadjustment();
+    if (adj) adj.value = 0;
+    r.component.selected = 0;
+    await sleep(600);
+    const [, p] = r.component.compute_point(window, new Graphene.Point().init(r.component.get_width() - 40, r.component.get_height() / 2));
+    const [sx, sy] = window.get_surface_transform();
+    print(`PREFS-CHECK CLICK component ${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`);
+    const popover = findAll(r.component, w => w instanceof Gtk.Popover)[0];
+    ok(await until(() => popover?.get_mapped()), 'components (pointer): clicking the Component row opens its list');
+    if (!popover?.get_mapped()) return;
+    let option = null;
+    await until(() => (option = findAll(popover, w => w.get_css_name() === 'row')
+        .find(row => findAll(row, w => w instanceof Gtk.Label && w.label === 'Memory').length > 0)) && option.get_width() > 0);
+    ok(option, 'components (pointer): the list has Memory');
+    if (!option) return;
+    const surface = popover.get_surface();
+    const [px, py] = popover.get_surface_transform();
+    const [, at] = option.compute_point(popover, new Graphene.Point().init(option.get_width() / 2, option.get_height() / 2));
+    print(`PREFS-CHECK CLICK component-memory ${Math.round(surface.get_position_x() + px + at.x)} ${Math.round(surface.get_position_y() + py + at.y)}`);
+    ok(await until(() => r.component.selected === 2), `components (pointer): picking Memory shows it (selected ${r.component.selected})`);
+    ok(r.componentGroup.visible && r.componentGroup.title === 'Memory', 'components (pointer): the Memory view is on the page');
+    r.component.selected = 0;
 }
 
 /**
