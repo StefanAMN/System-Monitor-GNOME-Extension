@@ -1102,3 +1102,12 @@ Not verified: how each real agent handles the prompt (none was started for real)
 First CI run on master (39827661575, 2026-10-22): check, GNOME 49 and 50 passed; GNOME 46-48 failed "agent (pointer): Preview report opened the report": those shells start in the Activities overview, where the settings window is a thumbnail, so the pointer clicked the thumbnail (the CI screenshots show it). The driver now leaves the overview and raises the window before each click and screenshot; GNOME 46 then passes in its container (`RP_COMPAT_TESTS=test-ui ./dev.sh test-compat 46`). The memory soak failed with shell RSS 300.7 -> 329.7 MB (0.996 MB/min) while the JS heap, fds and actors stayed flat; the same container soak on the same commit locally gave 295.2 -> 287.9 MB (0.029 MB/min), so it is not reproduced; the next CI run decides.
 
 Second CI run (39835407264, commit a0e899c): green on every job (check, GNOME 46-50, memory soak).
+
+CI soak RSS, before and after this change (8 runs on GitHub, GNOME 50, 20 minutes; figures from the job logs):
+
+| Code | Runs: RSS over the soak (MB), slope after the first half (MB/min) |
+|---|---|
+| before (6a776f0, cff1a1f, d85c28c twice) | +28 / -0.018, +25 / -0.073, +29 / 0.001, +33 / -0.134 |
+| after (7d4e81d, a0e899c, b3c59a7 twice) | +29 / 0.996, +43 / 0.474, +46 / -0.050, +30 / -0.020 |
+
+No steady leak: two of the four runs after the change are as flat as every run before it, and the JS heap census is flat in all eight. The second-half slope varies between runs of the same code on GitHub's machines (b3c59a7: -0.050 and -0.020; a0e899c, the same code bar a test file: 0.474). The total growth after the change is a little higher on average (37 MB against 29 MB), within one-off growth (more modules and readings loaded), not a slope. Locally the GNOME 50 container soak stays flat (0.029 MB/min). A soak slope near the 0.5 MB/min limit on CI can therefore fail without a leak; not changed here.
