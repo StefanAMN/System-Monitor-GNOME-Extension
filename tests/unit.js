@@ -17,6 +17,7 @@ import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, Thermal
 import { raplWatts, PowerSampler } from '../lib/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../lib/appusage.js';
 import { BatteryTracker } from '../lib/batterytracker.js';
+import { diagnose, minutesGained } from '../lib/diagnostics.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
@@ -758,6 +759,56 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         eq(JSON.parse(GLib.file_get_contents(path)[1].toString()).last.batteryWh, null, 'tracker: switching off forgets the last sample');
         GLib.unlink(path);
         GLib.rmdir(dir);
+    }
+
+    // Diagnostics: each rule fires on its evidence and is silent without it.
+    {
+        const summary = (o = {}) => ({ seconds: 4 * 3600, batteryWh: 32, packageWh: 12, idleWh: 4, attributedWh: 8, gapWh: 0, cpu: 1e10,
+            hasEnergy: true, hotSeconds: 0, apps: [], ...o });
+        const state = (o = {}) => ({ battery: { healthPct: 90, cycles: 120, fullWh: 40, chargeLimit: 'on' }, backlight: 0.4,
+            powerProfile: 'balanced', onBattery: true, energyReadable: true, ...o });
+        const ids = findings => findings.map(f => f.id);
+        const calm = diagnose({ battery: summary(), all: summary(), state: state() });
+        eq(ids(calm), ['wear'], 'diagnose: a healthy, well-set machine gets only the health line');
+        eq(calm[0].severity, 'info', 'diagnose: good health is information, not a warning');
+
+        // 8 W average drain, 40 Wh full: 5 h. Saving 0.6 W gives 40/7.4 h: about 24 min more.
+        ok(Math.abs(minutesGained(40, 8, 0.6) - (40 / 7.4 - 5) * 60) < 1e-9, 'diagnose: minutes gained per charge');
+        eq(minutesGained(40, 8, 9), null, 'diagnose: no estimate when the saving exceeds the drain');
+
+        const apps = [
+            { id: 'chat', cpu: 1e9, fg: 1e8, wh: 2.6 }, // 90 % background, 2.34 Wh of it
+            { id: 'editor', cpu: 2e9, fg: 1.8e9, wh: 4 }, // used in the foreground
+            { id: 'tiny', cpu: 1e8, fg: 0, wh: 0.1 }, // background, but too small
+            { id: '@system', cpu: 3e9, fg: 0, wh: 1.3 }, // not an app
+        ];
+        const bg = diagnose({ battery: summary({ apps }), all: summary({ apps }), state: state(), appName: id => id.toUpperCase() });
+        const chat = bg.find(f => f.id === 'background:chat');
+        eq(ids(bg).filter(id => id.startsWith('background')), ['background:chat'], 'diagnose: only a sizeable background consumer is named');
+        ok(chat.title.startsWith('CHAT') && Math.abs(chat.estimate.watts - 2.34 / 4) < 1e-9 && chat.estimate.minutes > 0,
+            `diagnose: the background finding has its estimate (${chat.estimate.watts.toFixed(3)} W, ${chat.estimate.minutes?.toFixed(1)} min)`);
+        eq(ids(diagnose({ battery: summary({ apps, seconds: 1800 }), all: summary(), state: state() })).filter(id => id.startsWith('background')), [],
+            'diagnose: less than an hour on battery is not enough evidence');
+        eq(ids(diagnose({ battery: summary({ apps, hasEnergy: false }), all: summary(), state: state({ energyReadable: false }) })),
+            ['wear', 'energy-unreadable'], 'diagnose: without energy readings no background advice, and the reason is given');
+
+        const perf = diagnose({ battery: summary(), all: summary(), state: state({ powerProfile: 'performance' }) });
+        eq(perf.find(f => f.id === 'power-profile')?.action, { kind: 'power-profile', value: 'balanced', label: 'Switch to Balanced' },
+            'diagnose: performance mode on battery offers the switch');
+        eq(ids(diagnose({ battery: summary(), all: summary(), state: state({ powerProfile: 'performance', onBattery: false }) })), ['wear'],
+            'diagnose: performance mode on the charger is fine');
+        ok(ids(diagnose({ battery: summary(), all: summary(), state: state({ backlight: 0.9 }) })).includes('brightness'), 'diagnose: high brightness');
+        ok(ids(diagnose({ battery: summary({ hotSeconds: 3600 }), all: summary(), state: state() })).includes('heat'), 'diagnose: hot for a quarter of the time');
+
+        const worn = diagnose({ battery: summary(), all: summary(), state: state({ battery: { healthPct: 72, cycles: 610, fullWh: 32, chargeLimit: 'off' } }) });
+        eq(ids(worn), ['wear', 'charge-limit'], 'diagnose: a worn battery is a warning, and a charge limit is advised where it exists');
+        eq(worn[0].severity, 'warning', 'diagnose: warnings come first');
+        // On the charger 90 % of the time, no charge limit to offer.
+        const plugged = diagnose({ battery: summary({ seconds: 3600 }), all: summary({ seconds: 36000 }),
+            state: state({ battery: { healthPct: 90, cycles: 10, fullWh: 40, chargeLimit: 'unsupported' } }) });
+        ok(ids(plugged).includes('always-plugged'), 'diagnose: mostly plugged in without a charge limit');
+        eq(ids(diagnose({ battery: summary(), all: summary(), state: state({ battery: null, backlight: 1, powerProfile: 'performance' }) })), [],
+            'diagnose: a desktop without a battery gets no battery advice');
     }
 
     // A baseline older than the caller allows is dropped instead of turning
