@@ -16,6 +16,7 @@ import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../lib/thermal.js';
 import { raplWatts, PowerSampler } from '../lib/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../lib/appusage.js';
+import { BatteryTracker } from '../lib/batterytracker.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
@@ -701,6 +702,51 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
             `ledger file: a damaged file is reported and kept aside (${damaged.problem})`);
         for (const n of kept) GLib.unlink(`${dir}/sub/${n}`);
         GLib.rmdir(`${dir}/sub`);
+        GLib.rmdir(dir);
+    }
+
+    // The tracker with stand-in samplers: focus time, saving, stopping.
+    {
+        const dir = GLib.dir_make_tmp('rp-tracker-XXXXXX');
+        const path = `${dir}/battery-history.json`;
+        let cpu = 0;
+        let focusCb = null;
+        let focused = 'org.gnome.Nautilus';
+        const problems = [];
+        const tracker = new BatteryTracker({
+            path,
+            usage: {
+                available: true,
+                sample: () => {
+                    cpu += 1e6;
+                    return Promise.resolve({ total: cpu * 2, system: 0, units: [
+                        { unit: 'app-gnome-org.gnome.Nautilus-1.scope', id: 'org.gnome.Nautilus', kind: 'app', label: 'x', usec: cpu },
+                    ] });
+                },
+            },
+            power: { sample: () => Promise.resolve({ raplSupported: true, packagePower: 6 }) },
+            battery: { sample: () => Promise.resolve({ present: true, state: 'discharging', energy: 40 - cpu / 1e7 }) },
+            focus: { current: () => focused, connect: cb => { focusCb = cb; return 7; }, disconnect: id => { if (id === 7) focusCb = null; } },
+            onProblem: message => problems.push(message),
+        });
+        await tracker.start();
+        ok(tracker.running && focusCb !== null && tracker.ledger.buckets.length === 1, 'tracker: started, focus watched, first sample taken');
+        await sleep(200);
+        focused = 'kitty';
+        focusCb();
+        await sleep(100);
+        eq(await tracker.tick(), true, 'tracker: the second sample is attributed');
+        const sum = tracker.ledger.summarize();
+        const nautilus = sum.apps.find(a => a.id === 'org.gnome.Nautilus');
+        ok(nautilus && nautilus.fg > 0 && nautilus.fg < nautilus.cpu, `tracker: focus time split the CPU time (${nautilus?.fg} of ${nautilus?.cpu})`);
+        ok(sum.packageWh > 0 && sum.hasEnergy, 'tracker: package power reached the ledger');
+        ok(GLib.file_test(path, GLib.FileTest.EXISTS), 'tracker: the first hour was saved');
+        await tracker.stop({ forget: true });
+        ok(!tracker.running && focusCb === null, 'tracker: stopped, focus no longer watched');
+        const saved = await loadLedger(path);
+        eq([saved.problem, saved.ledger.buckets.length, problems.length], [null, 1, 0], 'tracker: the history survives a stop');
+        eq(JSON.parse(GLib.file_get_contents(path)[1].toString()).last.batteryWh, null, 'tracker: switching off forgets the last sample');
+        GLib.unlink(path);
         GLib.rmdir(dir);
     }
 
