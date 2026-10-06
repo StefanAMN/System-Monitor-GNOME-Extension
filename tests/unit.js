@@ -15,6 +15,7 @@ import { parseNetDev, counterDelta } from '../lib/network.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../lib/thermal.js';
 import { raplWatts, PowerSampler } from '../lib/power.js';
+import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../lib/appusage.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
@@ -489,6 +490,95 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         for (const name of ['name', 'energy_uj', 'max_energy_range_uj']) GLib.unlink(`${zone}/${name}`);
         GLib.rmdir(zone);
         GLib.rmdir(root);
+    }
+
+    // Session units named as apps, terminals, snaps and services (names as
+    // they appear on a real GNOME 50 session).
+    {
+        const name = unit => {
+            const d = describeUnit(unit);
+            return d ? `${d.kind}:${d.id}` : null;
+        };
+        eq(unescapeUnit('jetbrains\\x2didea'), 'jetbrains-idea', 'units: \\x2d unescaped');
+        eq([
+            'app-gnome-org.gnome.Nautilus-4321.scope',
+            'app-gnome-jetbrains\\x2didea-79679.scope',
+            'app-gnome-kitty-21009.scope',
+            'kitty-21009-1.scope',
+            'app-org.chromium.Chromium-80335.scope',
+            'app-antigravity-14164.scope',
+            'app-flatpak-org.mozilla.firefox-2001.scope',
+            'snap.firefox.firefox-3c1a2b.scope',
+            'vte-spawn-5a0e8c3e-1111-2222-3333-444455556666.scope',
+            'org.gnome.Shell@ubuntu.service',
+            'pipewire.service',
+            'app-gnome\\x2dsession\\x2dmanager.slice',
+            'dbus.socket',
+        ].map(name), [
+            'app:org.gnome.Nautilus', 'app:jetbrains-idea', 'app:kitty', 'app:kitty', 'app:org.chromium.Chromium',
+            'app:antigravity', 'app:org.mozilla.firefox', 'snap:snap.firefox', 'terminal:terminal',
+            'service:org.gnome.Shell', 'service:pipewire', null, null,
+        ], 'units: apps, terminal windows, snaps and services are told apart; slices and sockets are not units');
+        eq(sessionRootFrom('0::/user.slice/user-1000.slice/user@1000.service/session.slice/org.gnome.Shell@ubuntu.service\n'),
+            '/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service', 'units: session root from /proc/self/cgroup');
+        eq(sessionRootFrom('0::/system.slice/gdm.service\n'), null, 'units: no session root outside a user manager');
+    }
+
+    // The sampler on a fixture cgroup tree: nested slices, a socket, an
+    // unreadable unit and the machine-wide counters.
+    {
+        const mount = GLib.dir_make_tmp('rp-cgroup-XXXXXX');
+        const session = `${mount}/user.slice/user-1000.slice/user@1000.service`;
+        const made = [];
+        const unit = (path, usec) => {
+            GLib.mkdir_with_parents(`${mount}/${path}`, 0o755);
+            if (usec !== null) GLib.file_set_contents(`${mount}/${path}/cpu.stat`, `usage_usec ${usec}\nuser_usec 1\nsystem_usec 1\n`);
+            made.push(path);
+        };
+        unit('', 9000000);
+        unit('system.slice', 2000000);
+        unit('user.slice/user-1000.slice/user@1000.service', 5000000);
+        unit('user.slice/user-1000.slice/user@1000.service/app.slice', 4000000);
+        unit('user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-org.gnome.Nautilus-4321.scope', 1500000);
+        unit('user.slice/user-1000.slice/user@1000.service/app.slice/kitty-21009-1.scope', 700000);
+        unit('user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome\\x2dsession\\x2dmanager.slice', 100);
+        unit('user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome\\x2dsession\\x2dmanager.slice/gnome-session-manager@ubuntu.service', 100);
+        unit('user.slice/user-1000.slice/user@1000.service/app.slice/dbus.socket', 5);
+        unit('user.slice/user-1000.slice/user@1000.service/session.slice/org.gnome.Shell@ubuntu.service', 1200000);
+        unit('user.slice/user-1000.slice/user@1000.service/session.slice/locked.service', 42);
+        Gio.File.new_for_path(`${session}/session.slice/locked.service/cpu.stat`)
+            .set_attribute_uint32('unix::mode', 0o000, Gio.FileQueryInfoFlags.NONE, null);
+
+        const sampler = new AppUsageSampler({ mount, session });
+        const reading = await sampler.sample();
+        const byUnit = Object.fromEntries(reading.units.map(u => [u.unit, `${u.kind}:${u.id}:${u.usec}`]));
+        eq([reading.total, reading.system, sampler.available], [9000000, 2000000, true], 'app usage: machine and system-service totals');
+        eq(byUnit['app-gnome-org.gnome.Nautilus-4321.scope'], 'app:org.gnome.Nautilus:1500000', 'app usage: an app scope');
+        eq(byUnit['kitty-21009-1.scope'], 'app:kitty:700000', 'app usage: a terminal window scope');
+        eq(byUnit['gnome-session-manager@ubuntu.service'], 'service:gnome-session-manager:100', 'app usage: a unit inside a nested slice');
+        eq(byUnit['org.gnome.Shell@ubuntu.service'], 'service:org.gnome.Shell:1200000', 'app usage: a session service');
+        ok(!('dbus.socket' in byUnit), 'app usage: sockets are not counted');
+        if (Gio.Credentials.new().get_unix_user() === 0)
+            print('SKIP app usage: an unreadable counter cannot be simulated as root');
+        else
+            ok(!('locked.service' in byUnit), 'app usage: an unreadable counter is left out, not read as 0');
+
+        const missing = await new AppUsageSampler({ mount: `${mount}/nowhere`, session: `${mount}/nowhere/user` }).sample();
+        eq([missing.units.length, missing.total], [0, null], 'app usage: no cgroup tree gives no units and no total');
+
+        Gio.File.new_for_path(`${session}/session.slice/locked.service/cpu.stat`)
+            .set_attribute_uint32('unix::mode', 0o644, Gio.FileQueryInfoFlags.NONE, null);
+        for (const path of made.reverse()) {
+            const dir = path ? `${mount}/${path}` : mount;
+            if (GLib.file_test(`${dir}/cpu.stat`, GLib.FileTest.EXISTS)) GLib.unlink(`${dir}/cpu.stat`);
+        }
+        // Remove the directories, deepest first.
+        const dirs = new Set();
+        for (const path of made) {
+            for (let p = path; p; p = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '') dirs.add(p);
+        }
+        [...dirs].sort((a, b) => b.length - a.length).forEach(p => GLib.rmdir(`${mount}/${p}`));
+        GLib.rmdir(mount);
     }
 
     // A baseline older than the caller allows is dropped instead of turning
