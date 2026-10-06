@@ -16,6 +16,7 @@ import { parseDiskstats, parseMounts, ioUtilization } from '../lib/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../lib/thermal.js';
 import { raplWatts, PowerSampler } from '../lib/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../lib/appusage.js';
+import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel } from '../lib/present.js';
@@ -579,6 +580,128 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         }
         [...dirs].sort((a, b) => b.length - a.length).forEach(p => GLib.rmdir(`${mount}/${p}`));
         GLib.rmdir(mount);
+    }
+
+    // The battery ledger, on synthetic readings with answers worked out by hand.
+    {
+        const near = (a, b, eps = 1e-9) => Math.abs(a - b) < eps;
+        const H = 3600 * 1000;
+        const t0 = new Date(2026, 9, 14, 10, 0, 5).getTime();
+        // A reading 30 s after the previous one; counters in µs.
+        const reading = (step, units, total, system) => ({
+            mono: 1e9 + step * 30e6, wall: t0 + step * 30000,
+            usage: { total, system, units: Object.entries(units).map(([unit, usec]) => ({ unit, usec, id: unit.split('#')[0], kind: 'app', label: unit })) },
+        });
+        const battery = wh => ({ present: true, onBattery: true, energyWh: wh });
+
+        const led = new BatteryLedger();
+        eq(led.ingest({ ...reading(0, { 'a#1': 10e6, 'b#1': 5e6 }, 100e6, 20e6), packageW: 10, battery: battery(40) }), false,
+            'ledger: the first sample only sets the baseline');
+        // Next 30 s: a +6 s, b +3 s, system +1 s, machine +12 s (2 s unnamed).
+        // 10 W for 30 s = 1/12 Wh, no idle baseline learnt yet: all of it is shared.
+        eq(led.ingest({ ...reading(1, { 'a#1': 16e6, 'b#1': 8e6 }, 112e6, 21e6), packageW: 10, battery: battery(39.9), focusUsec: { a: 15e6 } }), true,
+            'ledger: the second sample is attributed');
+        let sum = led.summarize();
+        const app = id => sum.apps.find(x => x.id === id);
+        ok(near(sum.packageWh, 1 / 12) && near(sum.batteryWh, 0.1, 1e-9) && sum.seconds === 30 && sum.cpu === 12e6, 'ledger: interval totals');
+        ok(near(app('a').wh, 1 / 24) && near(app('b').wh, 1 / 48) && near(app(SYSTEM).wh, 1 / 144) && near(app(OTHER).wh, 1 / 72),
+            `ledger: package energy shared by CPU time (${sum.apps.map(x => `${x.id} ${x.wh.toFixed(5)}`).join(', ')})`);
+        ok(near(sum.apps.reduce((t, x) => t + x.wh, 0), sum.attributedWh), 'ledger: shares add up to the attributed energy');
+        ok(app('a').fg === 3e6 && app('b').fg === 0, 'ledger: focus for half the interval makes half of the CPU time foreground');
+        eq(sum.apps[0].id, 'a', 'ledger: the biggest consumer is first');
+
+        // A unit that vanished loses only its tail; a new one counts from zero.
+        led.ingest({ ...reading(2, { 'b#1': 9e6, 'b#2': 2e6, 'c#1': 4e6 }, 120e6, 21e6), packageW: 10, battery: battery(39.8) });
+        sum = led.summarize();
+        eq([app('b').cpu, app('c').cpu, app('a').cpu], [3e6 + 1e6 + 2e6, 4e6, 6e6], 'ledger: new units count from zero, scopes of one app are summed');
+
+        // The idle baseline is learnt (10th percentile) and not given to apps.
+        const base = new BatteryLedger();
+        let units = { 'a#1': 0 };
+        for (let i = 0; i <= 30; i++) {
+            units = { 'a#1': i * 1e6 };
+            base.ingest({ ...reading(i, units, i * 2e6, 0), packageW: i < 10 ? 3 : 12, battery: null });
+        }
+        ok(base.baselineW === 3, `ledger: idle baseline learnt as ${base.baselineW} W`);
+        const bs = base.summarize();
+        ok(bs.idleWh > 0 && near(bs.attributedWh, bs.packageWh - bs.idleWh) && near(bs.apps.reduce((t, x) => t + x.wh, 0), bs.attributedWh),
+            'ledger: the idle baseline is kept out of the shares');
+
+        // Gaps: the timer did not run, or the machine slept.
+        const gaps = new BatteryLedger();
+        gaps.ingest({ ...reading(0, { 'a#1': 0 }, 0, 0), packageW: 5, battery: battery(40) });
+        const late = reading(20, { 'a#1': 300e6 }, 400e6, 0); // 600 s later
+        eq(gaps.ingest({ ...late, packageW: 5, battery: battery(39) }), false, 'ledger: a 10-minute gap is not attributed');
+        const asleep = reading(21, { 'a#1': 301e6 }, 401e6, 0);
+        asleep.wall += 3 * H; // wall time moved on 3 h, monotonic time 30 s
+        eq(gaps.ingest({ ...asleep, packageW: 5, battery: battery(38.5) }), false, 'ledger: a sleep is not attributed');
+        const gs = gaps.summarize();
+        ok(near(gs.gapWh, 1.5) && gs.batteryWh === 0 && !gs.apps.some(x => x.id === 'a'), 'ledger: battery used over gaps is kept apart');
+
+        // AC and battery in one hour are two buckets; the battery-only view sees one.
+        const mixed = new BatteryLedger();
+        mixed.ingest({ ...reading(0, { 'a#1': 0 }, 0, 0), packageW: 5, battery: battery(40) });
+        mixed.ingest({ ...reading(1, { 'a#1': 1e6 }, 2e6, 0), packageW: 5, battery: battery(39.9) });
+        mixed.ingest({ ...reading(2, { 'a#1': 3e6 }, 4e6, 0), packageW: 5, battery: { present: true, onBattery: false, energyWh: 39.9 } });
+        eq([mixed.buckets.length, mixed.summarize({ batteryOnly: true }).apps.find(x => x.id === 'a').cpu], [2, 1e6], 'ledger: AC and battery are kept apart');
+
+        // Caps: at most 2 x APPS_PER_BUCKET named apps while open, APPS_PER_BUCKET once the hour is over.
+        const busy = new BatteryLedger();
+        const many = n => Object.fromEntries(Array.from({ length: 70 }, (_, i) => [`app${i}#1`, n * (i + 1) * 1e5]));
+        busy.ingest({ ...reading(0, many(0), 0, 0), packageW: 5, battery: null });
+        busy.ingest({ ...reading(1, many(1), 1e9, 0), packageW: 5, battery: null });
+        const open = busy.buckets[0];
+        const named = b => Object.keys(b.a).filter(id => !id.startsWith('@')).length;
+        ok(named(open) <= 2 * APPS_PER_BUCKET && open.a[MORE], `ledger: an open hour holds ${named(open)} named apps plus the rest`);
+        const cpuBefore = Object.values(open.a).reduce((t, x) => t + x[0], 0);
+        const next = reading(2, many(2), 2e9, 0);
+        next.wall = t0 + H; // the next hour
+        busy.ingest({ ...next, packageW: 5, battery: null });
+        ok(named(open) === APPS_PER_BUCKET && near(Object.values(open.a).reduce((t, x) => t + x[0], 0), cpuBefore),
+            `ledger: a closed hour keeps ${named(open)} apps and loses no CPU time`);
+
+        // Retention: nothing older than 14 days, never more than MAX_BUCKETS.
+        const old = new BatteryLedger();
+        for (let h = 0; h < 20 * 24; h++) {
+            const r = reading(h, { 'a#1': h * 1e6 }, h * 2e6, 0);
+            r.wall = t0 + h * H;
+            old.ingest({ ...r, packageW: 5, battery: { present: true, onBattery: h % 2 === 0, energyWh: 40 } });
+        }
+        const newest = old.buckets[old.buckets.length - 1].t;
+        ok(old.buckets.length <= MAX_BUCKETS && old.buckets.every(b => b.t > newest - DAYS_KEPT * 24 * H),
+            `ledger: ${old.buckets.length} buckets kept, oldest ${((newest - old.buckets[0].t) / H / 24).toFixed(1)} days back`);
+
+        // Saved and read back; damaged files are moved aside, not lost.
+        const dir = GLib.dir_make_tmp('rp-ledger-XXXXXX');
+        const path = `${dir}/sub/battery-history.json`;
+        eq((await loadLedger(path)).problem, null, 'ledger file: a missing file is a fresh ledger, not a problem');
+        await saveLedger(path, led);
+        const back = await loadLedger(path);
+        eq([back.problem, JSON.stringify(back.ledger.summarize())], [null, JSON.stringify(led.summarize())], 'ledger file: written and read back');
+        // After a reload the first sample reports what the battery delivered since the save as a gap.
+        back.ledger.ingest({ ...reading(40, { 'a#1': 1 }, 1, 0), packageW: 5, battery: battery(39.3) });
+        ok(near(back.ledger.summarize().gapWh, 0.5), 'ledger file: battery used while the extension was off is a gap');
+        back.ledger.forgetLast();
+        eq(back.ledger.ingest({ ...reading(41, { 'a#1': 2 }, 2, 0), packageW: 5, battery: battery(30) }), false, 'ledger: after forgetLast() the next sample starts afresh');
+        ok(near(back.ledger.summarize().gapWh, 0.5), 'ledger: ... and the time it was off is not a gap');
+        let threw = null;
+        try {
+            BatteryLedger.fromJSON('{"version": 99, "buckets": []}');
+        } catch (e) {
+            threw = e;
+        }
+        ok(threw instanceof LedgerFormatError, 'ledger file: an unknown version is refused');
+        GLib.file_set_contents(path, '{"version": 1, "buck');
+        const damaged = await loadLedger(path);
+        const kept = [];
+        const en = Gio.File.new_for_path(`${dir}/sub`).enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+        for (let info = en.next_file(null); info; info = en.next_file(null)) kept.push(info.get_name());
+        en.close(null);
+        ok(damaged.problem?.includes('damaged') && damaged.ledger.buckets.length === 0 && kept.some(n => n.startsWith('battery-history.json.damaged-')),
+            `ledger file: a damaged file is reported and kept aside (${damaged.problem})`);
+        for (const n of kept) GLib.unlink(`${dir}/sub/${n}`);
+        GLib.rmdir(`${dir}/sub`);
+        GLib.rmdir(dir);
     }
 
     // A baseline older than the caller allows is dropped instead of turning
