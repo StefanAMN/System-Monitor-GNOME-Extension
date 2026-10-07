@@ -16,7 +16,7 @@ import { sessionIdentity, sessionStateText, parseSessionState, currentSessionIde
 import { parseDiskstats, parseMounts, ioUtilization } from '../../src/lib/collectors/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../../src/lib/collectors/thermal.js';
 import { raplWatts, PowerSampler } from '../../src/lib/collectors/power.js';
-import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../../src/lib/collectors/appusage.js';
+import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler, IDLE_MEMORY_EVERY } from '../../src/lib/collectors/appusage.js';
 import { BatteryTracker } from '../../src/lib/engine/batterytracker.js';
 import { parseDrmFdinfo, GpuUsageSampler } from '../../src/lib/collectors/gpuusage.js';
 import { diagnose, minutesGained, AREAS } from '../../src/lib/engine/diagnostics.js';
@@ -986,6 +986,22 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const memOf = name => withMemory.units.find(u => u.unit === name)?.memory;
         eq([reading.units[0].memory, memOf('app-gnome-org.gnome.Nautilus-4321.scope'), memOf('kitty-21009-1.scope')], [undefined, 300 * 1024 * 1024, null],
             'app usage: memory per unit only when asked; a unit without memory.current reads as null, not 0');
+
+        // An idle unit (CPU time unchanged) keeps its process list, and its memory for a few readings.
+        const naut = `${session}/app.slice/app-gnome-org.gnome.Nautilus-4321.scope`;
+        const reuse = new AppUsageSampler({ mount, session });
+        GLib.file_set_contents(`${naut}/cgroup.procs`, '100\n101\n');
+        const unitOf = r => r.units.find(u => u.unit === 'app-gnome-org.gnome.Nautilus-4321.scope');
+        const first = unitOf(await reuse.sample({ withPids: true, withMemory: true }));
+        GLib.file_set_contents(`${naut}/cgroup.procs`, '100\n101\n102\n');
+        GLib.file_set_contents(`${naut}/memory.current`, `${400 * 1024 * 1024}\n`);
+        const idle = [];
+        for (let i = 0; i < IDLE_MEMORY_EVERY; i++) idle.push(unitOf(await reuse.sample({ withPids: true, withMemory: true })));
+        eq([first.pids, idle[0].pids, idle[0].memory / 2 ** 20, idle.at(-1).memory / 2 ** 20], [[100, 101], [100, 101], 300, 400],
+            `app usage: an idle unit keeps its processes and memory, its memory is read again after ${IDLE_MEMORY_EVERY} readings`);
+        GLib.file_set_contents(`${naut}/cpu.stat`, 'usage_usec 1600000\nuser_usec 1\nsystem_usec 1\n');
+        eq(unitOf(await reuse.sample({ withPids: true, withMemory: true })).pids, [100, 101, 102], 'app usage: a busy unit is read again');
+        GLib.unlink(`${naut}/cgroup.procs`);
         const byUnit = Object.fromEntries(reading.units.map(u => [u.unit, `${u.kind}:${u.id}:${u.usec}`]));
         eq([reading.total, reading.system, sampler.available], [9000000, 2000000, true], 'app usage: machine and system-service totals');
         eq(byUnit['app-gnome-org.gnome.Nautilus-4321.scope'], 'app:org.gnome.Nautilus:1500000', 'app usage: an app scope');

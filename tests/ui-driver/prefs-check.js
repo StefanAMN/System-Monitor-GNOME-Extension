@@ -744,24 +744,34 @@ async function componentChecks(r, window) {
         const manager = Adw.StyleManager.get_default();
         window.present();
         window.set_visible_page_name('tracking');
+        const scrolled = findScrolled(window.get_visible_page());
         for (const [variant, scheme] of [['dark', Adw.ColorScheme.FORCE_DARK], ['light', Adw.ColorScheme.FORCE_LIGHT]]) {
             manager.color_scheme = scheme;
             for (const component of Object.keys(expect)) {
                 r.component.selected = COMPONENTS.indexOf(component);
-                await sleep(400);
+                await sleep(300);
                 const tile = r.componentTiles[0];
+                // The tiles are below the fold: scroll them into the rendered part.
+                const adj = scrolled?.get_vadjustment();
+                const [okTop, top] = scrolled ? tile.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0)) : [false, null];
+                if (adj && okTop) adj.value = Math.min(Math.max(0, adj.value + top.y - 40), adj.upper - adj.page_size);
+                // Read only after the window has painted the new view: a
+                // snapshot taken before reuses what was drawn last.
+                ok(await painted(window), `components ${component} (${variant}): the window did not paint within 3 s`);
                 const shot = render(window);
                 if (!shot) {
                     ok(false, `components ${component} (${variant}): the window rendered nothing`);
                     continue;
                 }
-                const [okPoint, at] = tile.compute_point(window, new Graphene.Point().init(6, tile.get_height() / 2));
+                // Widget coordinates start at the content box: -7 is inside the tile's 14 px padding.
+                const [okPoint, at] = tile.compute_point(window, new Graphene.Point().init(-7, tile.get_height() / 2));
                 const bg = okPoint ? shot.at(at.x, at.y) : [0, 0, 0, 0];
                 const want = TINTS[component][variant === 'dark' ? 0 : 1][0];
-                ok(near(bg, want), `components ${component} (${variant}): tile is ${show(bg)}, not ${want}`);
+                ok(near(bg, want), `components ${component} (${variant}): tile is ${show(bg)}, not ${want} (at ${at?.x?.toFixed(0)},${at?.y?.toFixed(0)}; tile ${tile.get_width()}x${tile.get_height()} '${tile.title}' visible ${tile.get_mapped()}; window ${shot.width}x${shot.height})`);
             }
         }
         manager.color_scheme = Adw.ColorScheme.DEFAULT;
+        if (scrolled) scrolled.get_vadjustment().value = 0;
     }
     r.component.selected = 0;
     ok(r.summary.visible && !r.componentGroup.visible && r.batteryOnly.visible && r.appRows.map(row => row.appId).join() === 'chat,editor,@system,@other',
@@ -814,6 +824,29 @@ function fakeAgentBin() {
         },
         remove: () => GLib.spawn_command_line_sync(`rm -rf ${GLib.shell_quote(base)}`),
     };
+}
+
+/** The window's next paint (true), or false after 3 s without one. */
+function painted(window) {
+    return new Promise(resolve => {
+        const clock = window.get_frame_clock();
+        if (!clock) {
+            resolve(false);
+            return;
+        }
+        let id = 0;
+        const timeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 3000, () => {
+            clock.disconnect(id);
+            resolve(false);
+            return GLib.SOURCE_REMOVE;
+        });
+        id = clock.connect('after-paint', () => {
+            clock.disconnect(id);
+            GLib.source_remove(timeout);
+            resolve(true);
+        });
+        window.queue_draw();
+    });
 }
 
 /** Wait until `cond()` holds, up to `ms`. */
