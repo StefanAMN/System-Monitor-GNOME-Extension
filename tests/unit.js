@@ -18,6 +18,8 @@ import { raplWatts, PowerSampler } from '../lib/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../lib/appusage.js';
 import { BatteryTracker } from '../lib/batterytracker.js';
 import { diagnose, minutesGained } from '../lib/diagnostics.js';
+import { batteryFromProperties, readBacklight } from '../lib/systemstate.js';
+import { appInfo } from '../lib/appnames.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
@@ -809,6 +811,30 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         ok(ids(plugged).includes('always-plugged'), 'diagnose: mostly plugged in without a charge limit');
         eq(ids(diagnose({ battery: summary(), all: summary(), state: state({ battery: null, backlight: 1, powerProfile: 'performance' }) })), [],
             'diagnose: a desktop without a battery gets no battery advice');
+    }
+
+    // Machine state for the diagnostics: UPower battery properties and the backlight.
+    {
+        const props = { Type: 2, PowerSupply: true, IsPresent: true, EnergyFull: 38.99, EnergyFullDesign: 45, ChargeCycles: 204,
+            ChargeThresholdSupported: true, ChargeThresholdEnabled: false };
+        const b = batteryFromProperties(props);
+        ok(Math.abs(b.healthPct - 86.644) < 0.01 && b.cycles === 204 && b.fullWh === 38.99 && b.chargeLimit === 'off', 'state: battery health, cycles, charge limit off');
+        eq(batteryFromProperties({ ...props, ChargeThresholdEnabled: true }).chargeLimit, 'on', 'state: charge limit on');
+        eq(batteryFromProperties({ ...props, ChargeThresholdSupported: undefined, ChargeCycles: 0 }), { healthPct: b.healthPct, cycles: null, fullWh: 38.99, chargeLimit: 'unsupported' },
+            'state: an older UPower without charge-limit properties, no cycle count');
+        eq([batteryFromProperties({ ...props, Type: 1 }), batteryFromProperties({ ...props, PowerSupply: false }), batteryFromProperties({ ...props, IsPresent: false })],
+            [null, null, null], 'state: line power, a mouse battery and an absent battery are not the battery');
+        const dir = GLib.dir_make_tmp('rp-backlight-XXXXXX');
+        eq(await readBacklight(dir), null, 'state: no backlight device');
+        GLib.mkdir_with_parents(`${dir}/intel_backlight`, 0o755);
+        GLib.file_set_contents(`${dir}/intel_backlight/brightness`, '72000\n');
+        GLib.file_set_contents(`${dir}/intel_backlight/max_brightness`, '96000\n');
+        eq(await readBacklight(dir), 0.75, 'state: backlight level');
+        for (const f of ['brightness', 'max_brightness']) GLib.unlink(`${dir}/intel_backlight/${f}`);
+        GLib.rmdir(`${dir}/intel_backlight`);
+        GLib.rmdir(dir);
+        eq([appInfo('@system').name, appInfo('org.gnome.Shell').name, appInfo('no-such-app-here').name, appInfo('snap.nosuch').name],
+            ['System services', 'GNOME Shell', 'no-such-app-here', 'nosuch'], 'app names: pseudo apps, services and unknown ids');
     }
 
     // A baseline older than the caller allows is dropped instead of turning

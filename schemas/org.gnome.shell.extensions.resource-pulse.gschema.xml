@@ -97,6 +97,11 @@
       <summary>Track battery use per app</summary>
       <description>Sample per-app CPU time and energy every 30 seconds and keep 14 days of hourly totals in ~/.local/share/resource-pulse/battery-history.json. Off until the user starts it.</description>
     </key>
+    <key name="prefs-page" type="s">
+      <default>''</default>
+      <summary>Page the preferences window opens on</summary>
+      <description>Set by the panel before it opens the window (settings, tracking or diagnostics); the window clears it.</description>
+    </key>
     <key name="action-flush-history" type="b">
       <default>false</default>
       <summary>Trigger for saving the battery history now</summary>
