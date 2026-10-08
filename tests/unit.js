@@ -17,6 +17,7 @@ import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, Thermal
 import { raplWatts, PowerSampler } from '../lib/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler } from '../lib/appusage.js';
 import { BatteryTracker } from '../lib/batterytracker.js';
+import { parseDrmFdinfo, GpuUsageSampler } from '../lib/gpuusage.js';
 import { diagnose, minutesGained } from '../lib/diagnostics.js';
 import { batteryFromProperties, readBacklight } from '../lib/systemstate.js';
 import { appInfo } from '../lib/appnames.js';
@@ -835,6 +836,73 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         GLib.rmdir(dir);
         eq([appInfo('@system').name, appInfo('org.gnome.Shell').name, appInfo('no-such-app-here').name, appInfo('snap.nosuch').name],
             ['System services', 'GNOME Shell', 'no-such-app-here', 'nosuch'], 'app names: pseudo apps, services and unknown ids');
+    }
+
+    // GPU busy time per unit from DRM fdinfo, on a fixture /proc.
+    {
+        const i915 = 'pos:\t0\nflags:\t02100002\ndrm-driver:\ti915\ndrm-pdev:\t0000:00:02.0\ndrm-client-id:\t27\n' +
+            'drm-engine-render:\t3000000000 ns\ndrm-engine-copy:\t0 ns\ndrm-engine-video:\t500000000 ns\ndrm-engine-capacity-video:\t2\n';
+        eq(parseDrmFdinfo(i915), { key: 'i915/0000:00:02.0/27', ns: 3.5e9 }, 'gpu: engines summed, capacity lines ignored');
+        eq(parseDrmFdinfo('pos:\t0\nflags:\t02\n'), null, 'gpu: a file that is not a GPU client');
+
+        const proc = GLib.dir_make_tmp('rp-proc-XXXXXX');
+        const made = [];
+        const fd = (pid, n, target, info) => {
+            GLib.mkdir_with_parents(`${proc}/${pid}/fd`, 0o755);
+            GLib.mkdir_with_parents(`${proc}/${pid}/fdinfo`, 0o755);
+            Gio.File.new_for_path(`${proc}/${pid}/fd/${n}`).make_symbolic_link(target, null);
+            GLib.file_set_contents(`${proc}/${pid}/fdinfo/${n}`, info);
+            made.push(`${pid}/fd/${n}`, `${pid}/fdinfo/${n}`);
+        };
+        const client = (id, ns) => `drm-driver:\ti915\ndrm-pdev:\t0000:00:02.0\ndrm-client-id:\t${id}\ndrm-engine-render:\t${ns} ns\n`;
+        fd(100, 3, '/dev/dri/renderD128', client(7, 2e9));
+        fd(100, 4, '/dev/dri/renderD128', client(7, 2e9)); // the same client, dup'd
+        fd(100, 5, '/dev/null', client(99, 9e9)); // not a GPU file: never read
+        fd(101, 3, '/dev/dri/card1', client(8, 1e9)); // a child of the same app
+        fd(200, 3, '/dev/dri/renderD128', client(7, 2e9)); // passed to another unit: counted once
+        fd(300, 3, 'socket:[1234]', 'pos:\t0\n');
+        const gs = new GpuUsageSampler(proc);
+        const units = new Map([['app-a.scope', [100, 101]], ['app-b.scope', [200]], ['app-c.scope', [300, 999]]]);
+        let got = await gs.sample(units);
+        eq([...got], [['app-a.scope', 3e9]], 'gpu: per unit, dup\'d and shared clients counted once, other fds ignored, a vanished pid skipped');
+        GLib.file_set_contents(`${proc}/100/fdinfo/3`, client(7, 5e9));
+        got = await gs.sample(units);
+        eq(got.get('app-a.scope'), 6e9, 'gpu: later samples read the cached GPU fds');
+        for (const path of made.reverse()) GLib.unlink(`${proc}/${path}`);
+        for (const pid of [100, 101, 200, 300]) {
+            GLib.rmdir(`${proc}/${pid}/fd`);
+            GLib.rmdir(`${proc}/${pid}/fdinfo`);
+            GLib.rmdir(`${proc}/${pid}`);
+        }
+        GLib.rmdir(proc);
+
+        // The ledger: uncore energy above its idle level goes to the apps
+        // that kept the GPU busy, the rest of the package by CPU time.
+        const H = 3600;
+        const led = new BatteryLedger();
+        const at = (i, cpuA, cpuB, gpuA, gpuB) => ({
+            mono: 1e9 + i * 30e6, wall: new Date(2026, 9, 14, 10, 0, 5).getTime() + i * 30000,
+            usage: { total: (cpuA + cpuB) * 1.0, system: 0, units: [
+                { unit: 'a.scope', id: 'a', usec: cpuA }, { unit: 'b.scope', id: 'b', usec: cpuB },
+            ] },
+            packageW: 12, uncoreW: 4, battery: null,
+            gpu: new Map([['a.scope', gpuA], ['b.scope', gpuB]]),
+        });
+        led.ingest(at(0, 0, 0, 0, 0));
+        // 30 s: a 3 s CPU and 1 s GPU, b 1 s CPU and 3 s GPU. No baselines yet:
+        // package 0.1 Wh, of which uncore 1/30 Wh to GPU time, 1/15 Wh to CPU time.
+        led.ingest(at(1, 3e6, 1e6, 1e9, 3e9));
+        const sum = led.summarize();
+        const a = sum.apps.find(x => x.id === 'a');
+        const b = sum.apps.find(x => x.id === 'b');
+        const near = (x, y) => Math.abs(x - y) < 1e-9;
+        ok(near(sum.graphicsWh, 4 * 30 / H) && sum.gpu === 4e9, `ledger gpu: graphics pool ${sum.graphicsWh}`);
+        ok(near(a.wh, (12 - 4) * 30 / H * 0.75 + 4 * 30 / H * 0.25) && near(b.wh, (12 - 4) * 30 / H * 0.25 + 4 * 30 / H * 0.75),
+            `ledger gpu: a ${a.wh.toFixed(5)} Wh, b ${b.wh.toFixed(5)} Wh`);
+        ok(a.gpu === 1e9 && b.gpu === 3e9 && near(a.wh + b.wh, sum.attributedWh), 'ledger gpu: GPU time per app, shares add up');
+        // An entry saved before GPU time existed reads as 0.
+        const old = BatteryLedger.fromJSON(JSON.stringify({ version: 1, buckets: [{ t: 0, b: true, s: 30, bw: 0, pw: 0, iw: 0, gw: 0, cpu: 1, energy: false, a: { x: [1, 0, 0] } }] }));
+        eq(old.summarize().apps[0].gpu, 0, 'ledger gpu: entries from before GPU time read as 0');
     }
 
     // A baseline older than the caller allows is dropped instead of turning
