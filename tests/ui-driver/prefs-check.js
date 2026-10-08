@@ -1142,10 +1142,13 @@ async function coverage() {
     const { RAPL_FIX_COMMANDS } = await import(`file://${root}/lib/common/raplfix.js`);
     // Agents and terminals found on this machine go by their product names.
     const { AGENTS, TERMINALS } = await import(`file://${root}/lib/common/agentlaunch.js`);
-    const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n'), ...AGENTS.map(a => a.name), 'Ptyxis', 'kitty'];
+    // The About page names its author and links its source.
+    const { AUTHOR } = await import(`file://${root}/ui/prefs/about.js`);
+    const url = JSON.parse(new TextDecoder().decode(GLib.file_get_contents(`${root}/metadata.json`)[1])).url.replace(/^https?:\/\//, '');
+    const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n'), ...AGENTS.map(a => a.name), 'Ptyxis', 'kitty', AUTHOR, url];
     ok(TERMINALS.some(t => t.name === 'Ptyxis'), 'coverage: the terminal names left out are the ones offered');
     const seen = new Set();
-    for (const name of ['settings', 'tracking', 'diagnostics']) {
+    for (const name of ['settings', 'tracking', 'diagnostics', 'about']) {
         window.set_visible_page_name(name);
         await sleep(800);
         const texts = [];
