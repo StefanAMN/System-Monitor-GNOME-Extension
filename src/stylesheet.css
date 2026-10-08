@@ -440,46 +440,6 @@
 .icon-thermal { color: #ff7800 !important; }
 .icon-gpu { color: #33d17a !important; }
 
-/* ── About Resource Pulse (the overview's foot) ──────────────────────────── */
-
-.resource-pulse-about-button {
-    background-gradient-direction: horizontal;
-    background-gradient-start: #0d1c3f;
-    background-gradient-end: #1b3f86;
-    border: 1px solid rgba(98, 160, 234, 0.35);
-    border-radius: 14px;
-    padding: 11px 14px;
-    margin-top: 8px;
-    transition-duration: 150ms;
-}
-
-.resource-pulse-about-button:hover,
-.resource-pulse-about-button:focus {
-    background-gradient-start: #12285a;
-    background-gradient-end: #2456b0;
-    border-color: rgba(138, 180, 234, 0.75);
-}
-
-.resource-pulse-about-mark {
-    color: #8ab4ea;
-    background-color: rgba(255, 255, 255, 0.10);
-    border-radius: 10px;
-    padding: 6px;
-}
-
-.resource-pulse-about-title {
-    font-size: 0.95em;
-    font-weight: 700;
-    color: #f4f7fb;
-}
-
-.resource-pulse-about-sub {
-    font-size: 0.75em;
-    color: rgba(228, 236, 248, 0.72);
-}
-
-.resource-pulse-about-arrow { color: rgba(228, 236, 248, 0.8); }
-
 .resource-pulse-process-item:hover,
 .resource-pulse-process-item:focus {
     background-color: rgba(255, 255, 255, 0.06);
@@ -617,21 +577,6 @@
 .rp-light .rp-hover .rp-grip { color: rgba(0, 0, 0, 0.6); }
 
 .rp-light .rp-surface,
-.rp-light .resource-pulse-about-button {
-    background-gradient-start: #e4eefb;
-    background-gradient-end: #efe4f6;
-    border: 1px solid rgba(53, 132, 228, 0.35);
-}
-.rp-light .resource-pulse-about-button:hover,
-.rp-light .resource-pulse-about-button:focus {
-    background-gradient-start: #d6e6fa;
-    background-gradient-end: #e8d8f3;
-    border-color: rgba(53, 132, 228, 0.7);
-}
-.rp-light .resource-pulse-about-mark { color: #1c71d8; background-color: rgba(28, 113, 216, 0.10); }
-.rp-light .resource-pulse-about-title { color: #1a2433; }
-.rp-light .resource-pulse-about-sub { color: #4f5866; }
-.rp-light .resource-pulse-about-arrow { color: #1c71d8; }
 .rp-light .rp-surface.rp-hover {
     background-color: #fafafa;
     border-color: rgba(0, 0, 0, 0.22);

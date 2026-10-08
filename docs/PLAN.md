@@ -1169,3 +1169,11 @@ The CPU and Memory pages' "Show All" buttons and a click on a process row still 
 | A1 | About page; in every window (Settings and About from the Extensions app or Extension Manager; Tracking and Diagnostics too from the panel); `prefs-page` 'about' | prefs-check: pages and their order in both entries, the figures and links (launcher stubbed), copied details, the animation stops when the page is not shown; hero and tiles by rendered pixels, light and dark, under the user's theme; screenshots |
 | A2 | The overview's footer: "About Resource Pulse" opens the window on About; "Open System Monitor" gone | test-ui: the footer clicked with the real pointer opens the window; a11y names; screenshots |
 | A3 | metadata.json description; translation template; CI | test-i18n (the About page included), test-zip, CI on GNOME 46-50 |
+
+## Owner's correction (2026-10-24): About only behind Extension Manager's "See details"
+
+"I wanted the about screen to appear only at the see details in the extensions app. Remove the about tab from the other places." Checked in Extension Manager's source (`exm-detail-view.c`, `populate_local_only`): for an installed extension that extensions.gnome.org does not know, the details page is built from metadata.json alone (name, description, version-name or version, url, donations), in Extension Manager's own layout, with no screenshot; an extension cannot put its own widgets there. So:
+- the About tab and the overview's About button are removed (the window is Settings, plus Tracking and Diagnostics from the panel, as before; the overview ends with the hardware card); "Open System Monitor" stays removed;
+- the About content is metadata.json's description, laid out for that page (a tagline, the eight metrics, what else is inside, the cost, the clipboard uses, author and licence);
+- the bundled GPU icon stays (Tela draws video-display-symbolic blank in GTK).
+The version row reads "Unknown" until metadata.json has a version-name; a release decision, left to the owner. On extensions.gnome.org (after the owner's submission) the same page also shows a screenshot and the description.
