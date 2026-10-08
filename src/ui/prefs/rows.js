@@ -36,7 +36,7 @@ function pinSubtitle(position) {
 export function metricIcon(key, extensionPath) {
     const metric = METRICS.find(m => m.key === key);
     const theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default());
-    if (metric.bundled && (!metric.icon || !theme.has_icon(metric.icon)))
+    if (metric.bundled && (metric.bundledFirst || !metric.icon || !theme.has_icon(metric.icon)))
         return Gio.icon_new_for_string(`${extensionPath}/icons/${metric.bundled}-symbolic.svg`);
     return Gio.ThemedIcon.new(metric.icon);
 }

@@ -1,8 +1,9 @@
 // The preferences window's content. GTK side (preferences process).
 //
-// Opened from the Extensions app it holds the settings only. Opened from the
-// panel (⋮, the battery line) it also has the Tracking and Diagnostics tabs
-// and a button back to the panel. The panel says it is the one asking by
+// Opened from the Extensions app (or Extension Manager) it holds the settings
+// and About. Opened from the panel (⋮, the battery line, About) it also has
+// the Tracking and Diagnostics tabs and a button back to the panel; About
+// stays the last tab. The panel says it is the one asking by
 // setting `prefs-page` just before it opens the window; the Extensions app
 // never sets it. When the window is already open (GNOME then only raises
 // it), the same key adds the panel's tabs on the spot.
@@ -15,10 +16,20 @@ import { buildPreferences, metricIcon } from './rows.js';
 import { buildBackupGroup } from './backup.js';
 import { HistorySource, buildTrackingPage } from './tracking.js';
 import { buildDiagnosticsPage } from './diagnostics.js';
+import { buildAboutPage } from './about.js';
 import { styleWindow } from './style.js';
 import { TRACK_INTERVAL_S } from '../../lib/engine/batterytracker.js';
 import { readSystemState } from '../../lib/collectors/systemstate.js';
 import { _ } from '../../lib/common/i18n.js';
+
+function readMetadata(path) {
+    try {
+        return JSON.parse(new TextDecoder().decode(GLib.file_get_contents(`${path}/metadata.json`)[1]));
+    } catch (e) {
+        console.warn(`ResourcePulse: cannot read metadata.json: ${e.message}`);
+        return { uuid: 'resource-pulse@stefanamn.github.io' };
+    }
+}
 
 function findHeaderBar(widget) {
     if (!widget) return null;
@@ -38,15 +49,19 @@ function findHeaderBar(widget) {
  * @param {string} [opts.historyPath] battery history file, for tests
  * @param {object} [opts.tracking] extra options for buildTrackingPage, for tests
  * @param {object} [opts.diagnostics] options for buildDiagnosticsPage, for tests
- * @returns {{panelPages: function(): boolean, dispose: function()}}
+ * @param {object} [opts.metadata] metadata.json (read from `path` when not given)
+ * @param {object} [opts.about] options for buildAboutPage, for tests
+ * @returns {{panelPages: function(): boolean, about: object, dispose: function()}}
  */
-export function fillWindow(window, { settings, path, historyPath, tracking: trackingOpts = {}, diagnostics: diagnosticsOpts = {} }) {
+export function fillWindow(window, { settings, path, historyPath, tracking: trackingOpts = {}, diagnostics: diagnosticsOpts = {}, metadata = null, about: aboutOpts = {} }) {
     const page = new Adw.PreferencesPage({ title: _('Settings'), name: 'settings', icon_name: 'preferences-system-symbolic' });
     window.add(page);
     window.set_default_size(720, 760);
     styleWindow(window);
     const built = buildPreferences(page, settings, undefined, key => metricIcon(key, path));
     buildBackupGroup(page, settings);
+    const about = buildAboutPage({ path, metadata: metadata ?? readMetadata(path), ...aboutOpts });
+    window.add(about.page);
 
     // The mark in the header (a name would crowd the tabs); the panel's
     // back button joins it when the panel's tabs are added.
@@ -93,6 +108,9 @@ export function fillWindow(window, { settings, path, historyPath, tracking: trac
         window.add(tracking.page);
         const diagnostics = buildDiagnosticsPage(history, { settings, ...diagnosticsOpts });
         window.add(diagnostics.page);
+        // About stays the last tab.
+        window.remove(about.page);
+        window.add(about.page);
         (diagnosticsOpts.readState ?? readSystemState)().then(state => {
             fullWh = state.battery?.fullWh ?? null;
             if (panel) tracking.render();
@@ -124,6 +142,7 @@ export function fillWindow(window, { settings, path, historyPath, tracking: trac
         if (decorateId) GLib.source_remove(decorateId);
         decorateId = 0;
         built.dispose();
+        about.stopPulse();
         if (panel) {
             GLib.source_remove(panel.flushId);
             panel.tracking.dispose();
@@ -136,5 +155,5 @@ export function fillWindow(window, { settings, path, historyPath, tracking: trac
         dispose();
         return false;
     });
-    return { panelPages: () => !!panel, dispose };
+    return { panelPages: () => !!panel, about, dispose };
 }

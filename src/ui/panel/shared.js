@@ -288,7 +288,7 @@ export class SharedMethods {
         });
     }
 
-    /** Open the preferences window, on a given page ('settings', 'tracking', 'diagnostics'). */
+    /** Open the preferences window, on a given page ('settings', 'tracking', 'diagnostics', 'about'). */
     _openDetailsWindow(page = 'settings') {
         this._settings.set_string('prefs-page', page);
         this._indicator.menu.close();

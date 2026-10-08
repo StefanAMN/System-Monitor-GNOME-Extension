@@ -23,6 +23,11 @@ export const TINTS = {
     gpu: [['#0b2014', 'rgba(51, 209, 122, 0.35)'], ['#e1f7eb', 'rgba(38, 162, 105, 0.5)']],
     network: [['#22100f', 'rgba(224, 27, 36, 0.35)'], ['#fce5e6', 'rgba(224, 27, 36, 0.4)']],
 };
+// Large figures on the About page: the metric colours, a shade lighter on
+// dark (the purple and blue are too deep to read there) and darker on light.
+export const FIGURE_COLORS = {
+    cpu: ['#62a0ea', '#1c71d8'], memory: ['#c061cb', '#813d9c'], gpu: ['#57e389', '#26a269'], thermal: ['#ffa348', '#c64600'],
+};
 export const METRIC_COLORS = {
     cpu: '#3584e4', memory: '#9141ac', battery: '#2ec27e', power: '#f6d32d', disk: '#e5a50a',
     thermal: '#ff7800', gpu: '#33d17a', network: '#e01b24',
@@ -201,6 +206,38 @@ window.rp-window .rp-chart {
 window.rp-window .rp-chart-area { color: ${p.dim}; font-size: 0.8em; }
 window.rp-window levelbar block.empty { background-color: ${p.track}; border: none; }
 window.rp-window levelbar block.filled { background-color: ${ACCENT}; border: none; }
+/* The About page. The banner is deep blue in both variants, so its text
+   keeps its own off-white whatever the window's colours are. */
+window.rp-window .rp-hero { border-radius: 18px; }
+window.rp-window .rp-hero-title { color: #f4f7fb; font-size: 2.1em; font-weight: 800; letter-spacing: -0.5px; }
+window.rp-window .rp-hero-tagline { color: rgba(228, 236, 248, 0.82); font-size: 1.05em; }
+window.rp-window .rp-hero-mark { color: #8ab4ea; }
+window.rp-window .rp-hero-chip {
+    color: #e8eef8;
+    background-color: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 99px;
+    padding: 3px 11px;
+    font-size: 0.85em;
+    font-weight: 600;
+}
+window.rp-window .rp-figure {
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid ${p.border};
+    background-color: ${p.card};
+}
+window.rp-window .rp-figure-value { font-size: 1.9em; font-weight: 800; }
+${Object.entries(FIGURE_COLORS).map(([key, [onDark, onLight]]) => `window.rp-window .rp-figure-value.rp-c-${key} { color: ${dark ? onDark : onLight}; }`).join('\n')}
+window.rp-window .rp-metric-tile {
+    padding: 14px 16px;
+    border-radius: 14px;
+    border: 1px solid ${p.border};
+    background-color: ${p.card};
+}
+window.rp-window .rp-metric-title { font-weight: 700; }
+window.rp-window .rp-feature-icon { color: ${ACCENT}; }
+window.rp-window .rp-credits { font-size: 0.9em; }
 window.rp-window .rp-finding-warning { color: #ff7800; }
 window.rp-window .rp-finding-suggestion { color: ${ACCENT}; }
 window.rp-window .rp-finding-info { color: ${p.dim}; }

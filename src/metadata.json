@@ -1,7 +1,7 @@
 {
   "uuid": "resource-pulse@stefanamn.github.io",
   "name": "Resource Pulse",
-  "description": "Monitors system resources (CPU, Memory, Battery, Disk, Network, Thermal, GPU) in a customizable top bar and panel dropdown dashboard. The preferences window copies text to the clipboard when asked: the Diagnostics report (Copy report) and the commands that make CPU power readable (Copy commands).",
+  "description": "Your computer's vital signs, one glance away. Resource Pulse shows CPU, memory, battery, disk, network, temperature, power and GPU live in the top bar, with a dropdown dashboard of charts, the busiest processes and alerts. Its window adds 14 days of usage tracking per app (processor, memory, disk, graphics, battery), diagnostics that find what wastes resources, and a hand-off of the findings to a coding agent of your choice. Everything is measured and kept on this computer; under 1 % of one core with the panel closed.\n\nThe preferences window copies text to the clipboard when asked: the Diagnostics report (Copy report), the agent prompt (Copy prompt), details for a bug report (About › Copy details) and the commands that make CPU power readable (Copy commands).",
   "shell-version": [
     "46",
     "47",
