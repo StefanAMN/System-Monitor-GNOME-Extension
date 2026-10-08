@@ -187,6 +187,8 @@ async function batteryPages() {
             packageW: 9,
             battery: { present: true, onBattery: true, energyWh: 40 - i * 9.5 * 30 / 3600 },
             focusUsec: { editor: 30e6 },
+            uncoreW: 3,
+            gpu: new Map([['app-gnome-chat-1.scope', i * 2e9], ['app-gnome-editor-2.scope', i * 0.5e9]]),
         });
     }
     await saveLedger(path, ledger);
@@ -224,6 +226,7 @@ async function batteryPages() {
     ok(r.drain.value.label === '9.5 W' && r.runtime.value.label === 'about 4h 12m' && r.used.value.label.includes('% of a full charge'),
         `tracking: summary '${r.used.value.label}', '${r.drain.value.label}', '${r.runtime.value.label}'`);
     ok(r.rest.visible && r.idle.value.label !== 'not measured', 'tracking: the unmeasured rest and the idle share are shown');
+    ok(r.graphics.visible && r.appRows[1].subtitle.includes('of graphics time'), `tracking: graphics share and time shown ('${r.appRows[1].subtitle}')`);
 
     r.batteryOnly.active = false;
     ok(r.time.title === 'Time recorded' && !r.drain.visible, 'tracking: the AC-and-battery view drops the battery figures');
