@@ -471,3 +471,33 @@ Overhead budget: the tracker reads about 100 small files every 30 s (expected we
 3. History: 14 days (recommended) or 30.
 4. "Last longer": longer runtime per charge, longer battery lifespan, or both (recommended: both; the diagnostic list above covers both).
 5. B6 (GPU per app): now or later (recommended: later).
+
+## State (2026-10-14)
+
+Done on `battery-report` (not pushed):
+
+| # | Result | Proof that was run |
+|---|--------|--------------------|
+| B1 | `lib/appusage.js`: per-unit CPU time from the session's cgroups, units named (GNOME / flatpak / plain app scopes, terminal window scopes, snaps, services) | unit: real unit names from this machine, fixture cgroup tree (nested slices, socket, unreadable counter, no tree); live: 64 units in about 15 ms |
+| B2 | `lib/batteryledger.js`: attribution (package energy above a learnt idle baseline, by CPU time), focus split, gaps, hourly buckets, 14 days, 30 apps per closed hour, atomic file, damaged file moved aside | unit: hand-computed shares, baseline, churn, gaps, AC / battery, caps, retention, file round trip |
+| B3 | `lib/batterytracker.js` in the extension; keys `battery-tracking` (off by default), `action-flush-history`, `action-clear-history`; time above the temperature alert recorded | unit with stand-in samplers; `test-ui`: a burner started as its own app scope by the user's systemd gets 6.01 s of CPU for about 6 s and ranks first, flush and clear work, switching off stops it; `test-overhead`: 10 ms CPU per sample (+0.033 % of a core), tracking on through churn and soak (RSS slope -0.07 MB/min, fds flat) |
+| B4 | Preferences window with Settings, Tracking and Diagnostics tabs (`ui/prefsbattery.js`, `ui/prefsdiagnostics.js`, `lib/systemstate.js`, `lib/appnames.js`); overview header button and the battery page's "top app today" line open it (`prefs-page` key) | `prefs-check.js`: both tabs on a fixture history with stubbed state (85 checks: ranking, summary, period and battery-only switches, file following, findings and their actions); driver: real clicks on the button and the battery line open the window, the menu closes, the window takes the requested tab; screenshots |
+| B5 | `lib/diagnostics.js`: background apps, power mode, brightness, heat, wear, charge limit, mostly plugged in, missing power readings | unit, rule by rule, including silence without evidence |
+| B6 | `lib/gpuusage.js` (GPU busy time per unit from DRM fdinfo), uncore power in `lib/power.js`, graphics share in the ledger and the Tracking tab | unit: fdinfo parsing, fixture /proc (dup'd, shared, non-GPU fds), the graphics split by hand; live: 4 units hold GPU clients, about 10 ms wall time per sample after the first scan |
+| B7 | README, this plan; compat and overhead below | |
+
+Corrections to the plan's findings: this battery does support a charge limit through UPower (`ChargeThresholdSupported` true, `ChargeThresholdEnabled` false), although sysfs has no `charge_control_end_threshold`; the diagnostic therefore advises turning on "Preserve Battery Health" here. The power-mode finding has a one-click switch; the charge limit opens Power settings (setting it needs authorisation).
+
+Not executed or not verifiable here:
+
+- A real NVIDIA or AMD GPU (fdinfo format follows the kernel's documented drm-usage-stats; only i915 was read live).
+- A machine whose energy counters are blocked (only fixtures).
+- The containers have no systemd user session, so the burner part of the tracking test is skipped there by design; passing container runs do not keep their logs, so this was not confirmed from a log.
+- The power-mode switch against a real power-profiles-daemon (the action is tested with a stub; the D-Bus write path was not run, to leave this machine's setting alone).
+- Tracking over days, across real screen locks and suspends (gaps are unit-tested).
+
+Whole-project checks on the final code (2026-10-14):
+
+- Lint clean; 297 unit checks pass; `./dev.sh test-ui` passes on GNOME 50 (host), including the 85 GTK checks of `prefs-check.js`.
+- `./dev.sh test-compat`: 46.10 and 47.10 pass; 48 and 49 first failed to build their images (the Fedora registry could not be reached), and passed when rerun alone: unit, headless and UI tests on all four.
+- `./dev.sh test-overhead` (600 s soak, one run, GPU time included): menu closed +0.47 % of one core, tracking 28 ms CPU per sample (+0.093 %), together +0.56 % (budget 1 %); overview +0.77 %, CPU tab +1.07 % (budget 5 %); soak RSS 283.6 -> 282.1 MB, slope 0.195 MB/min; fds 75 -> 75. The churn rounds counted 808, 808, 813 actors: the network tab grew from 46 to 51 actors in the third round (an interface appearing on the host, within the test's tolerance); not investigated further.
