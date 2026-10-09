@@ -559,7 +559,7 @@
 .rp-light .resource-pulse-detail-value,
 .rp-light .resource-pulse-proc-icon,
 .rp-light .resource-pulse-process-name,
-.rp-light .resource-pulse-process-stat,
+.rp-light .resource-pulse-process-stat { color: #241f31; }
 
 .rp-light .rp-fg-dim,
 .rp-light .resource-pulse-card-title,
@@ -576,7 +576,10 @@
 .rp-light .rp-grip { color: rgba(0, 0, 0, 0.22); }
 .rp-light .rp-hover .rp-grip { color: rgba(0, 0, 0, 0.6); }
 
-.rp-light .rp-surface,
+.rp-light .rp-surface {
+    background-color: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+}
 .rp-light .rp-surface.rp-hover {
     background-color: #fafafa;
     border-color: rgba(0, 0, 0, 0.22);
