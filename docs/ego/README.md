@@ -54,3 +54,19 @@ Checked against the review guidelines as published on 2026-10-24 (https://gjs.gu
 - **AI-assisted code.** The guidelines allow AI as a development tool but reject submissions that show signs of unreviewed AI output, and expect the developer to explain any part of the code. This code was written with an AI assistant; read through it, or be ready to answer questions about it.
 - **Brand names.** The overview's processor badge shows the vendor's name in vendor-like colours ("intel CORE", also AMD and NVIDIA badges on such machines), and the screenshot shows the Intel one. The agent hand-off names Claude Code, Codex and Gemini CLI as text. The guidelines ask for permission for brand names and logos; reviewers may ask for the badge to become neutral.
 - **GNOME 51.** Released in September 2026; not claimed in `shell-version` because no test runs on it yet.
+
+## shexli (static analyser for extension reviews)
+
+Installed 2026-10-24: `pipx install shexli==0.2.1` (PyPI; AGPL-3.0; no author or source link on PyPI, so its wheel was read before installing: tree-sitter parsing and rule modules, no network, no subprocesses, zips unpacked into a temporary folder with path and size checks). Two things to know:
+- With tree-sitter 0.26.0 (what pip picks) it crashes with a segmentation fault inside tree-sitter on Python 3.14; with 0.25.2 it runs: `pipx runpip shexli install "tree-sitter==0.25.2"`.
+- A folder must be given as an absolute path (a relative one fails in `relative_to`).
+
+Run: `shexli "$PWD/resource-pulse@stefanamn.github.io.shell-extension.zip"` (or `"$PWD/src"`, same findings).
+
+Result on 2026-10-24 (master 0f78091): 0 errors, 3 warnings, none a defect:
+
+| Rule | Where | Why it stays |
+|---|---|---|
+| EGO-X-004 synchronous file IO in shell code | `appio.js` 65, `process.js` 186, 199, 352 (per-process `/proc/<pid>/stat` and `io` in idle batches), `netusage.js` 99 (`/proc/sys/kernel/random/boot_id`, once per enable), `sessiontotals.js` 23 (`/proc/self/stat`, once per enable) | All `/proc`, in memory, never a disk. The batches replaced asynchronous reads that cost about 20 ms of shell CPU per round with 1.5 ms. Not a rule of the published guidelines. |
+| EGO-L-002 objects assigned in `enable()` without `.destroy()` | `extension.js` 155-223: `_indicatorBox`, `_menuSection`, `_popupStack`, `_scrollView`, `_menuContainer`, `_menuViewport` | Children of `_indicator`; `disable()` destroys `_indicator` (and with it its children and menu), then nulls each reference. |
+| EGO-L-003 signals without disconnect | `extension.js` 317, 318, 323: `_trackingId`, `_flushHistoryId`, `_clearHistoryId` | Disconnected in `disable()` by `for (const id of [this._trackingId, this._flushHistoryId, this._clearHistoryId]) if (id) this._settings.disconnect(id);`, which the analyser does not follow. |
