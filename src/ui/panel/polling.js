@@ -218,7 +218,8 @@ export class PollingMethods {
 
     /** Add this reading's traffic to today's total; save now and then. */
     _countNetUsage(net, now) {
-        if (!this._netUsage) return;
+        // Both are read when the extension is enabled; until then nothing is counted.
+        if (!this._netUsage || this._bootId === null) return;
         const physical = Object.entries(net.interfaces)
             .filter(([, i]) => !i.isVirtual)
             .map(([iface, i]) => ({ iface, rxBytes: i.rxBytes, txBytes: i.txBytes }));

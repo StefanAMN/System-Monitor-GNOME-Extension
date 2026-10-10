@@ -99,7 +99,8 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq([parseSessionState(text, sessionIdentity('boot-1', 4242, 778)), parseSessionState(text, sessionIdentity('boot-2', 4242, 777)), parseSessionState('{', id),
         parseSessionState(JSON.stringify({ version: 1, session: id, net: { rx: -1, tx: 0, counters: [] } }), id)],
     [null, null, null, null], 'session: another shell, another boot, a damaged or invalid file: nothing carried');
-    ok(/^b\/\d+\/\d+$/.test(currentSessionIdentity('b')), `session: this process's identity (${currentSessionIdentity('b')})`);
+    currentSessionIdentity('b').then(identity =>
+        ok(/^b\/\d+\/\d+$/.test(identity), `session: this process's identity (${identity})`));
 }
 
 // ── running stats (power session average / peak) ──

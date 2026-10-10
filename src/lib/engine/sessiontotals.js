@@ -9,7 +9,7 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-import { noteReadError } from '../common/utils.js';
+import { noteReadError, readFileAsync } from '../common/utils.js';
 
 const VERSION = 1;
 
@@ -18,9 +18,9 @@ export function sessionIdentity(bootId, pid, startTicks) {
     return `${bootId}/${pid}/${startTicks}`;
 }
 
-/** This shell's session, from /proc/self/stat (read once per enable). */
-export function currentSessionIdentity(bootId) {
-    const stat = new TextDecoder().decode(GLib.file_get_contents('/proc/self/stat')[1]);
+/** This shell's session, from /proc/self/stat (read once per enable). @returns {Promise<string>} */
+export async function currentSessionIdentity(bootId) {
+    const stat = await readFileAsync('/proc/self/stat');
     // After the command name (which may hold spaces), fields from the 3rd on.
     const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
     return sessionIdentity(bootId, stat.slice(0, stat.indexOf(' ')), fields[19]);

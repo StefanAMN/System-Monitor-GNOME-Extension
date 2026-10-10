@@ -11,6 +11,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { counterDelta } from '../collectors/network.js';
+import { readFileAsync } from '../common/utils.js';
 
 export const DAYS_KEPT = 62;
 // Bounded: interfaces come and go (USB tethering, docks).
@@ -93,10 +94,10 @@ export class NetUsage {
     }
 }
 
-/** The kernel's id of this boot (counters restart with it). */
-export function readBootId() {
+/** The kernel's id of this boot (counters restart with it). @returns {Promise<string>} */
+export async function readBootId() {
     try {
-        return new TextDecoder().decode(GLib.file_get_contents('/proc/sys/kernel/random/boot_id')[1]).trim();
+        return (await readFileAsync('/proc/sys/kernel/random/boot_id')).trim();
     } catch (e) {
         // Without it every enable starts a new baseline: traffic while
         // disabled is not counted, nothing is counted twice.
