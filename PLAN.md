@@ -516,3 +516,20 @@ Owner's decisions: all settings live in the details (preferences) window only; t
 | W4 | Diagnostics and Settings tabs restyled (cards, severity tints) | UI | screenshots; existing checks unchanged |
 
 Panel tests that drove the in-panel settings page (layout, pointer, keyboard, power row, stepper clamp, threshold unit) are retired with the page; what they protected now lives in the GTK checks of the window (rows write and follow settings, ranges and steps match the schema).
+
+## State (2026-10-14)
+
+Done on `details-window` (not pushed):
+
+| # | Result | Proof that was run |
+|---|--------|--------------------|
+| W1 | Panel settings page, `ui/settings.js` and its styles removed; ⋮ (overview and detail pages) opens the window on Settings; the separate details button dropped; Panel › Size with Reset in the window; the panel follows size changes made elsewhere | `test-ui`: real click on ⋮ opens the window and it takes the Settings tab; the panel follows a stored size and a reset; keyboard (Down / Tab in, Return on a card, Backspace back with focus kept, Escape closes); GTK check of Reset |
+| W2 | `ui/prefsstyle.js`: the panel's surfaces and tints, blue accent; variables on `window.rp-window` (libadwaita ≥ 1.6), named colours removed on close (1.5); follows dark / light | GTK check: the stylesheet parses without errors for the running libadwaita, dark and light; on GNOME 46 (libadwaita 1.5) this ran in its container and passed; screenshots light and dark on 50 |
+| W3 | Tracking: stat tiles, battery-use chart (per hour or per day, processor part inside), tinted bars | GTK checks: tile values, chart bars add up to the battery used, chart hidden in the AC-and-battery view; screenshots |
+| W4 | Settings: tinted metric icons on the pinned rows (icon names moved to `lib/settingsmodel.js`); Diagnostics: tinted severity icons; header mark | GTK check: every pinned row has its icon; screenshots |
+
+Found on the way: the tracking test ranked the burner by CPU over the whole hour, so an IDE in use on the test machine could out-rank it; it now compares the CPU gained while the burner ran (separate commit).
+
+Deviation: the header shows the extension's mark only; with the name as well the tab switcher was cut off ("Diagno…").
+
+Checks on the final code: lint clean; 297 unit checks; `test-ui` on 50 (94 GTK checks of the window); `test-compat` 46.10, 47.10, 48.8, 49.10 pass. `test-overhead` was not rerun: sampling is unchanged and the panel lost a page rather than gained work.
