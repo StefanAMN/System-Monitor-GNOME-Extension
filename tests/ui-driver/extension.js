@@ -906,6 +906,11 @@ async function batteryTracking(rp) {
         const burner = launcher.spawnv(['systemd-run', '--user', '--scope', '--quiet', `--unit=app-rptest-${tag}-1.scope`,
             'timeout', '8', 'sh', '-c', 'while :; do :; done']);
         const done = new Promise(resolve => burner.wait_async(null, () => resolve()));
+        // CPU per app gained while the burner ran (other apps of the
+        // session were busy before it, and may be now).
+        const cpuNow = () => new Map(rp._tracker.ledger.summarize().apps.map(a => [a.id, a.cpu]));
+        await rp._tracker.tick();
+        const before = cpuNow();
         await sleep(500);
         await rp._tracker.tick();
         await sleep(5500);
