@@ -21,6 +21,7 @@ import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
 import { ProcessSampler } from './lib/process.js';
 import { BatteryTracker, ledgerPath } from './lib/batterytracker.js';
+import { METRICS } from './lib/settingsmodel.js';
 import { BatteryLedger, saveLedger } from './lib/batteryledger.js';
 import { appInfo as ledgerAppInfo } from './lib/appnames.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale } from './lib/present.js';
@@ -1202,16 +1203,7 @@ export default class ResourcePulseExtension extends Extension {
     }
 
     _getIconName(key) {
-        const map = {
-            cpu: 'utilities-system-monitor-symbolic',
-            memory: 'media-flash-symbolic',
-            battery: 'battery-good-symbolic',
-            power: 'thunderbolt-symbolic',
-            disk: 'drive-harddisk-symbolic',
-            network: 'network-transmit-receive-symbolic',
-            gpu: 'video-display-symbolic'
-        };
-        return map[key] || 'image-missing-symbolic';
+        return METRICS.find(m => m.key === key)?.icon ?? 'image-missing-symbolic';
     }
 
     /** An icon shipped in the extension's icons/ directory. */

@@ -2,11 +2,13 @@ import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 import GLib from 'gi://GLib';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
-import { buildPreferences } from './ui/prefsrows.js';
+import { buildPreferences, metricIcon } from './ui/prefsrows.js';
 import { HistorySource, buildTrackingPage } from './ui/prefsbattery.js';
 import { buildDiagnosticsPage } from './ui/prefsdiagnostics.js';
 import { TRACK_INTERVAL_S } from './lib/batterytracker.js';
 import { readSystemState } from './lib/systemstate.js';
+import { styleWindow } from './ui/prefsstyle.js';
+import Gio from 'gi://Gio';
 
 export default class ResourcePulsePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -20,6 +22,7 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
         });
         window.add(page);
         window.set_default_size(720, 760);
+        styleWindow(window);
 
         // Closing the window just closes it. Only the explicit back button
         // below returns to the panel menu.
@@ -49,12 +52,18 @@ export default class ResourcePulsePreferences extends ExtensionPreferences {
                     window.close();
                 });
                 headerBar.pack_start(backBtn);
+                // The extension's mark in the header (a name would crowd the tabs).
+                headerBar.pack_start(new Gtk.Image({
+                    gicon: Gio.icon_new_for_string(`${this.path}/icons/rp-cpu-symbolic.svg`),
+                    css_classes: ['rp-brand-icon'], valign: Gtk.Align.CENTER, margin_start: 4,
+                    tooltip_text: 'Resource Pulse',
+                }));
             }
             return GLib.SOURCE_REMOVE;
         });
 
         // 2. The rows, from the same settings model as the panel menu's page.
-        const built = buildPreferences(page, settings);
+        const built = buildPreferences(page, settings, undefined, key => metricIcon(key, this.path));
 
         // 3. Battery tracking and diagnostics, from the history the extension saves.
         const history = new HistorySource(settings);
