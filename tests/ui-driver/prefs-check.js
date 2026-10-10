@@ -107,6 +107,15 @@ async function main() {
     pinRows.memory.active = true;
     ok(settings.get_strv('pinned-metrics').join() === 'cpu,memory', `pins: junk survived a write (${settings.get_strv('pinned-metrics')})`);
 
+    // Panel size: shown, and Reset clears both keys.
+    const size = rows['panel-size'];
+    ok(size.subtitle === 'Automatic' && !size.resetButton.sensitive, `panel size: '${size.subtitle}' by default`);
+    settings.set_int('menu-custom-width', 420);
+    settings.set_int('menu-custom-height', 560);
+    ok(size.subtitle.startsWith('420 × 560') && size.resetButton.sensitive, `panel size: follows a dragged size ('${size.subtitle}')`);
+    size.resetButton.emit('clicked');
+    ok(settings.get_int('menu-custom-width') === 0 && settings.get_int('menu-custom-height') === 0 && size.subtitle === 'Automatic',
+        'panel size: Reset clears the size');
     await sleep(300);
     ok(!built.powerGroup.visible, 'power: the fix is offered on a machine without energy counters');
 

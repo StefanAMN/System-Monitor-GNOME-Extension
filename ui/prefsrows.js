@@ -116,7 +116,28 @@ export function buildPreferences(page, settings, power = new PowerSampler()) {
     follow();
     const changedId = settings.connect('changed', follow);
 
-    // Offered, as in the panel menu, only while the counters are blocked.
+    // The panel's size: set by dragging a bottom corner of the panel.
+    const panelGroup = addGroup('Panel', 'Drag a bottom corner of the panel to resize it.');
+    const sizeRow = new Adw.ActionRow({ title: 'Size' });
+    const resetButton = new Gtk.Button({ label: 'Reset', valign: Gtk.Align.CENTER });
+    resetButton.connect('clicked', () => {
+        settings.set_int('menu-custom-width', 0);
+        settings.set_int('menu-custom-height', 0);
+    });
+    sizeRow.add_suffix(resetButton);
+    panelGroup.add(sizeRow);
+    rows['panel-size'] = sizeRow;
+    rows['panel-size'].resetButton = resetButton;
+    followers.push(() => {
+        const w = settings.get_int('menu-custom-width');
+        const h = settings.get_int('menu-custom-height');
+        const custom = w > 0 && h > 0;
+        sizeRow.subtitle = custom ? `${w} × ${h} pixels, set by dragging` : 'Automatic';
+        resetButton.sensitive = custom;
+    });
+    follow();
+
+    // Offered only while the counters are blocked.
     const powerGroup = addGroup('Troubleshooting');
     powerGroup.visible = false;
     const powerRow = new Adw.ActionRow({
