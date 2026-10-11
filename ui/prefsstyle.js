@@ -29,7 +29,7 @@ export const METRIC_COLORS = {
 
 // The whole window takes the panel's CPU card look: navy surfaces with a thin
 // blue border in dark, pale blue in light.
-function palette(dark) {
+export function palette(dark) {
     return dark
         ? {
             window: '#141b26', header: '#18212f', card: '#1f2937', hover: '#26354a', popover: '#1f2937',
@@ -91,11 +91,19 @@ window.rp-window levelbar.rp-bar-${key} block.filled { background-color: ${METRI
     }).join('\n');
 
     return `${colours}
-window.rp-window { background-color: ${p.window}; color: ${p.fg}; }
+window.rp-window,
+window.rp-window.background { background-color: ${p.window}; color: ${p.fg}; }
+window.rp-window * { color: inherit; }
+window.rp-window .subtitle,
+window.rp-window .dim-label { color: ${p.dim}; }
+window.rp-window .accent { color: ${p.accentText}; }
 window.rp-window headerbar {
     background-color: ${p.header};
+    color: ${p.fg};
     box-shadow: inset 0 -1px ${p.divider};
 }
+window.rp-window viewswitcher button { background-color: transparent; box-shadow: none; }
+window.rp-window viewswitcher button:hover { background-color: ${p.button}; }
 window.rp-window viewswitcher button:checked,
 window.rp-window viewswitcher button:checked:hover {
     background-color: ${p.selected};
@@ -108,21 +116,38 @@ window.rp-window .card {
     border-radius: 12px;
     box-shadow: none;
 }
-window.rp-window .boxed-list > row:not(:last-child),
-window.rp-window .boxed-list row.expander list > row { border-bottom-color: ${p.divider}; }
+window.rp-window .boxed-list > row,
+window.rp-window .boxed-list row.expander list > row { background-color: transparent; border-bottom: 1px solid ${p.divider}; }
+window.rp-window .boxed-list > row:last-child { border-bottom: none; }
 window.rp-window .boxed-list > row.activatable:hover,
 window.rp-window .boxed-list row.expander list > row.activatable:hover { background-color: ${p.hover}; }
 window.rp-window .boxed-list row.expander list { background-color: transparent; }
-window.rp-window button:not(.flat):not(.suggested-action):not(.destructive-action):not(.circular):not(.image-button):not(.toggle),
-window.rp-window .boxed-list button.image-button:not(.flat) {
-    background-color: ${p.button};
+window.rp-window button { background-color: ${p.button}; box-shadow: none; }
+window.rp-window button:hover { background-color: ${p.buttonHover}; }
+window.rp-window button.flat,
+window.rp-window headerbar button,
+window.rp-window windowcontrols button { background-color: transparent; }
+window.rp-window button.flat:hover,
+window.rp-window headerbar button:hover { background-color: ${p.button}; }
+window.rp-window windowcontrols button > image { background-color: ${p.button}; }
+window.rp-window windowcontrols button:hover > image { background-color: ${p.buttonHover}; }
+window.rp-window button.suggested-action { background-color: ${ACCENT}; color: #ffffff; }
+window.rp-window button.destructive-action {
+    background-color: rgba(224, 27, 36, ${dark ? '0.22' : '0.14'});
+    color: ${dark ? '#ff7b7b' : '#c01c28'};
 }
-window.rp-window button:not(.flat):not(.suggested-action):not(.destructive-action):hover {
-    background-color: ${p.buttonHover};
-}
+window.rp-window row spinbutton,
+window.rp-window row spinbutton > text { background-color: transparent; box-shadow: none; }
+window.rp-window entry { background-color: ${p.button}; box-shadow: none; }
+window.rp-window switch { background-color: ${dark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)'}; border-color: transparent; }
+window.rp-window switch:checked { background-color: ${ACCENT}; }
+window.rp-window switch > slider { background-color: #ffffff; }
+window.rp-window check:checked,
+window.rp-window radio:checked { background-color: ${ACCENT}; color: #ffffff; }
 window.rp-window popover > contents,
 window.rp-window popover > arrow {
     background-color: ${p.popover};
+    color: ${p.fg};
     border: 1px solid ${p.border};
 }
 window.rp-window popover listview > row:selected,
@@ -171,7 +196,10 @@ export function styleWindow(window) {
     };
     load();
     const display = window.get_display();
-    Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+    // Above the user stylesheet (~/.config/gtk-4.0/gtk.css), where third-party
+    // themes such as Orchis install themselves with hard-coded colours; every
+    // rule here is scoped to this window.
+    Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER + 1);
     const darkId = manager.connect('notify::dark', load);
     window.connect('close-request', () => {
         manager.disconnect(darkId);

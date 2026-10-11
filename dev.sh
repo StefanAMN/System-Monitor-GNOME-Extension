@@ -335,6 +335,11 @@ run_driver() {
     local DRIVER_DIR="$1" DRIVER_UUID="$2" TIMEOUT="$3"
     make_sandbox
     ln -s "$SCRIPT_DIR/tests/$DRIVER_DIR" "$SANDBOX/data/gnome-shell/extensions/$DRIVER_UUID"
+    # A third-party GTK theme as the user stylesheet, which GTK ranks above
+    # every application stylesheet; the preferences window must keep its look.
+    # RP_GTK_USER_CSS=<file> tries a real theme instead of the stand-in.
+    mkdir -p "$SANDBOX/config/gtk-4.0"
+    cp "${RP_GTK_USER_CSS:-$SCRIPT_DIR/tests/ui-driver/hostile-gtk.css}" "$SANDBOX/config/gtk-4.0/gtk.css"
 
     start_log_stream "$LOG" "$SANDBOX/session.log"
     XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" RP_UITEST_SHOTS="$SANDBOX/shots" \

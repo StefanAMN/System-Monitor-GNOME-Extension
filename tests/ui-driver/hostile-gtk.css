@@ -1,0 +1,34 @@
+/* A stand-in for a third-party GTK theme installed as the user stylesheet
+ * (~/.config/gtk-4.0/gtk.css), loaded by GTK above every application
+ * stylesheet. Modelled on Orchis: its own accent on :root, named colours,
+ * and hard-coded light surfaces and dark text on the common widgets. The UI
+ * test runs the preferences window under it; the window must still show the
+ * extension's look. */
+@define-color accent_bg_color #ec407a;
+@define-color accent_color #ec407a;
+@define-color window_bg_color #f2f2f2;
+@define-color window_fg_color rgba(0, 0, 0, 0.87);
+@define-color headerbar_bg_color #ffffff;
+@define-color card_bg_color #ffffff;
+@define-color popover_bg_color #ffffff;
+:root {
+    --accent-bg-color: #ec407a;
+    --accent-color: #ec407a;
+    --window-bg-color: #f2f2f2;
+    --card-bg-color: #ffffff;
+}
+.background { background-color: #f2f2f2; color: rgba(0, 0, 0, 0.87); }
+headerbar { background-color: #ffffff; color: rgba(0, 0, 0, 0.87); box-shadow: inset 0 -1px rgba(0, 0, 0, 0.12); }
+row, row.activatable { color: rgba(0, 0, 0, 0.6); background-color: transparent; }
+list.boxed-list > row { color: rgba(0, 0, 0, 0.6); border-bottom: 1px solid rgba(0, 0, 0, 0.12); }
+list.boxed-list { background-color: #ffffff; border: none; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+label { color: rgba(0, 0, 0, 0.87); }
+label.subtitle { color: rgba(0, 0, 0, 0.6); }
+button { background-color: #e0e0e0; color: rgba(0, 0, 0, 0.87); }
+switch { background-color: rgba(0, 0, 0, 0.26); }
+switch:checked { background-color: #ec407a; }
+switch > slider { background-color: #ffffff; }
+viewswitcher button:checked { background-color: rgba(236, 64, 122, 0.3); color: #ec407a; }
+popover > contents { background-color: #ffffff; color: rgba(0, 0, 0, 0.87); }
+entry, spinbutton { background-color: #ffffff; color: rgba(0, 0, 0, 0.87); }
+image { color: rgba(0, 0, 0, 0.6); }
