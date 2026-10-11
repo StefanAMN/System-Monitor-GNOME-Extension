@@ -27,10 +27,22 @@ export const METRIC_COLORS = {
     thermal: '#ff7800', gpu: '#33d17a', network: '#e01b24',
 };
 
+// The whole window takes the panel's CPU card look: navy surfaces with a thin
+// blue border in dark, pale blue in light.
 function palette(dark) {
     return dark
-        ? { window: '#1e1e1e', card: '#242424', popover: '#2a2a2a', fg: '#ffffff', dim: '#a0a0b8', border: 'rgba(255, 255, 255, 0.08)', accentText: '#78aeed', track: 'rgba(255, 255, 255, 0.08)' }
-        : { window: '#f6f5f4', card: '#ffffff', popover: '#ffffff', fg: '#241f31', dim: '#5e5c64', border: 'rgba(0, 0, 0, 0.10)', accentText: '#1c71d8', track: 'rgba(0, 0, 0, 0.08)' };
+        ? {
+            window: '#141b26', header: '#18212f', card: '#1f2937', hover: '#26354a', popover: '#1f2937',
+            fg: '#ffffff', dim: '#a0a0b8', border: 'rgba(53, 132, 228, 0.4)', divider: 'rgba(53, 132, 228, 0.18)',
+            accentText: '#78aeed', track: 'rgba(255, 255, 255, 0.08)', button: 'rgba(53, 132, 228, 0.18)',
+            buttonHover: 'rgba(53, 132, 228, 0.30)', selected: 'rgba(53, 132, 228, 0.32)',
+        }
+        : {
+            window: '#f3f7fd', header: '#e4eefb', card: '#eaf2fd', hover: '#dbe8fa', popover: '#f3f7fd',
+            fg: '#241f31', dim: '#5e5c64', border: 'rgba(53, 132, 228, 0.45)', divider: 'rgba(53, 132, 228, 0.2)',
+            accentText: '#1c71d8', track: 'rgba(0, 0, 0, 0.08)', button: 'rgba(53, 132, 228, 0.12)',
+            buttonHover: 'rgba(53, 132, 228, 0.22)', selected: 'rgba(53, 132, 228, 0.2)',
+        };
 }
 
 /**
@@ -44,19 +56,29 @@ export function windowCss(dark, variables) {
         ? `window.rp-window {
     --window-bg-color: ${p.window}; --window-fg-color: ${p.fg};
     --view-bg-color: ${p.window}; --view-fg-color: ${p.fg};
-    --headerbar-bg-color: ${p.window}; --headerbar-backdrop-color: ${p.window};
+    --headerbar-bg-color: ${p.header}; --headerbar-fg-color: ${p.fg};
+    --headerbar-backdrop-color: ${p.header}; --headerbar-border-color: ${p.divider};
     --card-bg-color: ${p.card}; --card-fg-color: ${p.fg};
-    --dialog-bg-color: ${p.card}; --popover-bg-color: ${p.popover};
+    --dialog-bg-color: ${p.card}; --dialog-fg-color: ${p.fg};
+    --popover-bg-color: ${p.popover}; --popover-fg-color: ${p.fg};
+    --border-color: ${p.divider};
     --accent-bg-color: ${ACCENT}; --accent-fg-color: #ffffff; --accent-color: ${p.accentText};
 }`
         : `@define-color window_bg_color ${p.window};
 @define-color window_fg_color ${p.fg};
 @define-color view_bg_color ${p.window};
-@define-color headerbar_bg_color ${p.window};
-@define-color headerbar_backdrop_color ${p.window};
+@define-color view_fg_color ${p.fg};
+@define-color headerbar_bg_color ${p.header};
+@define-color headerbar_fg_color ${p.fg};
+@define-color headerbar_backdrop_color ${p.header};
+@define-color headerbar_border_color ${p.divider};
 @define-color card_bg_color ${p.card};
+@define-color card_fg_color ${p.fg};
 @define-color dialog_bg_color ${p.card};
+@define-color dialog_fg_color ${p.fg};
 @define-color popover_bg_color ${p.popover};
+@define-color popover_fg_color ${p.fg};
+@define-color borders ${p.divider};
 @define-color accent_bg_color ${ACCENT};
 @define-color accent_fg_color #ffffff;
 @define-color accent_color ${p.accentText};`;
@@ -69,12 +91,42 @@ window.rp-window levelbar.rp-bar-${key} block.filled { background-color: ${METRI
     }).join('\n');
 
     return `${colours}
+window.rp-window { background-color: ${p.window}; color: ${p.fg}; }
+window.rp-window headerbar {
+    background-color: ${p.header};
+    box-shadow: inset 0 -1px ${p.divider};
+}
+window.rp-window viewswitcher button:checked,
+window.rp-window viewswitcher button:checked:hover {
+    background-color: ${p.selected};
+    color: ${dark ? '#ffffff' : '#1c71d8'};
+}
 window.rp-window .boxed-list,
 window.rp-window .card {
+    background-color: ${p.card};
     border: 1px solid ${p.border};
     border-radius: 12px;
     box-shadow: none;
 }
+window.rp-window .boxed-list > row:not(:last-child),
+window.rp-window .boxed-list row.expander list > row { border-bottom-color: ${p.divider}; }
+window.rp-window .boxed-list > row.activatable:hover,
+window.rp-window .boxed-list row.expander list > row.activatable:hover { background-color: ${p.hover}; }
+window.rp-window .boxed-list row.expander list { background-color: transparent; }
+window.rp-window button:not(.flat):not(.suggested-action):not(.destructive-action):not(.circular):not(.image-button):not(.toggle),
+window.rp-window .boxed-list button.image-button:not(.flat) {
+    background-color: ${p.button};
+}
+window.rp-window button:not(.flat):not(.suggested-action):not(.destructive-action):hover {
+    background-color: ${p.buttonHover};
+}
+window.rp-window popover > contents,
+window.rp-window popover > arrow {
+    background-color: ${p.popover};
+    border: 1px solid ${p.border};
+}
+window.rp-window popover listview > row:selected,
+window.rp-window popover listview > row:hover { background-color: ${p.selected}; }
 window.rp-window .rp-brand { font-weight: 800; }
 window.rp-window .rp-brand-icon { color: ${ACCENT}; }
 window.rp-window .rp-tile {

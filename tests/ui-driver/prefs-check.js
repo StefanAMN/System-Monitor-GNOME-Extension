@@ -178,19 +178,17 @@ async function main() {
     const linger = Number(ARGV[1] ?? 0);
     if (linger > 0) {
         shown.window.set_default_size(640, 660);
-        shown.window.present();
-        print('PREFS-CHECK SHOW settings');
-        await sleep(linger);
-        shown.window.destroy();
         battery.window.set_default_size(720, 680);
-        battery.window.present();
         // Each tab from top to bottom, in both variants.
         const manager = Adw.StyleManager.get_default();
+        const pages = [[shown.window, 'settings'], [battery.window, 'tracking'], [battery.window, 'diagnostics']];
         for (const [variant, scheme] of [['light', Adw.ColorScheme.FORCE_LIGHT], ['dark', Adw.ColorScheme.FORCE_DARK]]) {
             manager.color_scheme = scheme;
-            for (const name of ['tracking', 'diagnostics']) {
-                battery.window.set_visible_page_name(name);
-                const adj = findScrolled(battery.window.get_visible_page())?.get_vadjustment();
+            for (const [window, name] of pages) {
+                for (const other of [shown.window, battery.window]) if (other !== window) other.hide();
+                window.present();
+                if (window === battery.window) window.set_visible_page_name(name);
+                const adj = findScrolled(window.get_visible_page())?.get_vadjustment();
                 for (let part = 0, done = false; !done && part < 4; part++) {
                     await sleep(300);
                     if (adj) {
@@ -204,6 +202,7 @@ async function main() {
                 }
             }
         }
+        shown.window.destroy();
     }
     shown.dispose();
     battery.dispose();
