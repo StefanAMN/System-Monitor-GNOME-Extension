@@ -1187,3 +1187,25 @@ The owner still sees "No extension details available". The source read above was
 ## shexli warnings (branch `shexli-warnings`, 2026-10-24)
 
 Owner's request: write the three signal disconnects out, make the two one-off `/proc` reads at enable asynchronous, keep the batched reads. `readBootId()` and `currentSessionIdentity()` now return promises; `enable()` reads the boot id, then the identity, then the saved session figures, each step dropped if a later disable/enable replaced the session token. Until the boot id is known (`_bootId` null) the day's network traffic is not counted, so a first sample cannot pass for a new boot and drop the traffic of a screen lock. Proof: unit 532 passed (the identity test now awaits the read); `test-ui` passed, with the session figures carried through disable/enable and a new check that the boot id and identity are set after enable (enable() 42.2 ms); `test-zip` passed; shexli on the packed zip: 0 errors, 2 warnings (EGO-X-004 for the batched reads, EGO-L-002 for the indicator's children), as agreed.
+
+# The Settings page rethought (branch `settings-rethink`, 2026-10-24)
+
+Owner's request: "rethink the UI for the settings menu". Today the page is one long scroll of about 30 rows that all look alike: eight pin switches whose order lives in their subtitles, five +/- spinners for the alert limits, dropdowns for two-value units, and nothing that shows what the top bar will look like.
+
+## Design
+
+Same keys, same model (`settingsmodel.js`); only the presentation changes, so backups and the shell are untouched.
+- **Top bar**: a live preview of the bar (dark, as GNOME's is), drawn from the pinned list, the compact switch, the battery and network formats and the temperature unit, with example values and the metric colours; below it the eight metrics as chips (icon, name, position badge) that pin and unpin on a click; then Compact and Tooltips, and Battery shows / Network shows as segmented buttons with example labels.
+- **Alerts**: the notification switch, then each limit as a slider with its value, beside the metric's icon.
+- **Readings**: update interval as a slider (1-10 s), smooth changes, temperature and memory units as segmented buttons.
+- **Panel**, **Troubleshooting**, **Backup**: as they are.
+- The look follows the lessons: calm surfaces, the accent only on what can be used; a checked chip takes its metric's tint; the window's colours hold under the user's theme (Orchis) and the stand-in hostile theme.
+
+## Milestones
+
+| # | Work | Proof |
+|---|---|---|
+| S1 | Preview, chips, sliders, segmented buttons in `rows.js`; their CSS in `style.js`; the rows keep `title`, `subtitle`, `value`, `active`, `selected`, `model` | prefs-check: every model row follows and writes its setting; the preview follows pins, compact, formats and unit; chips pin in order; a11y names |
+| S2 | Look | rendered pixels in light and dark (chip tint, preview bar, checked segment, switch, card, text), under the user's theme and the hostile one; screenshots of every part; the dropdown check moves to Tracking's Period (the Settings page has no dropdown left) |
+| S3 | Pointer | test-ui: a chip and a segment clicked with the real pointer |
+| S4 | Translation template, test-i18n, CI | as before |
