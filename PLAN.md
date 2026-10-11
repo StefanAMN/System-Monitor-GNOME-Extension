@@ -539,3 +539,11 @@ Checks on the final code: lint clean; 297 unit checks; `test-ui` on 50 (94 GTK c
 Owner's correction: the first pass only styled the new widgets; the window itself stayed the neutral grey of the system theme. Now the entire window takes the panel's CPU-card look: navy background and header (pale blue in light), every list card and tile in the CPU card's surface with its thin blue border, blue-tinted buttons, a blue selected tab, blue hover on rows and in popovers.
 
 Proof: lint clean; GTK check that the stylesheet parses (dark and light) in the running libadwaita; `test-ui` on 50, now screenshotting Settings, Tracking and Diagnostics top to bottom in light and dark; `test-compat` 46–49 for the named-colour path.
+
+### W6 (2026-10-15): the look holds under a third-party GTK theme
+
+Owner's report: on their machine the window was still the system's (Orchis-Pink): white surfaces, pink switches and tab. Root cause: Orchis installs itself as the user stylesheet (`~/.config/gtk-4.0/gtk.css`), which GTK ranks above every application stylesheet (priority 800 against 600), and it sets its own accent on `:root` and hard-codes light surfaces and dark text on rows, labels and buttons. The test sandbox has its own config directory, so no user theme was ever loaded there and the tests could not see it.
+
+Fix: the window's stylesheet is added at user priority + 1 (still scoped to `window.rp-window`), and it states the colours a theme may hard-code: text, subtitles, header, view-switcher buttons, rows, buttons (flat, suggested, destructive), switches, checks, entries, popovers.
+
+Proof: `test-ui` now installs `tests/ui-driver/hostile-gtk.css`, a stand-in modelled on Orchis, as the sandbox user stylesheet, and prefs-check renders the window and reads back its pixels in dark and light: window background, header, card, a checked switch (the extension's blue), and row text (light on dark, dark on light). Before the fix this failed with exactly the owner's colours (white card, `rgb(236, 64, 122)` switch, black text on dark); after it passes. Also run once with the owner's real Orchis stylesheet (`RP_GTK_USER_CSS=…`): passes, screenshots navy/blue. Orchis still shapes the switches (a thin track); their colours are the extension's.
