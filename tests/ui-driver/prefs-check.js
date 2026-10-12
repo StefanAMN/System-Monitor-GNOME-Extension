@@ -802,6 +802,77 @@ async function batteryPages(styleWindow) {
 
 const driven = Number(ARGV[1] ?? 0) > 0;
 
+/**
+ * The Tracking charts read by the pointer: the bar under it, its period and
+ * values; Left / Right / Escape from the keyboard; the box as rendered.
+ */
+async function chartHover(r, window) {
+    const { barAt, barPeriod } = await import(`file://${root}/ui/prefs/tracking.js`);
+    ok(barAt(44, 344, 44, 3) === 0 && barAt(343, 344, 44, 3) === 2 && barAt(150, 344, 44, 3) === 1 && barAt(10, 344, 44, 3) === -1 && barAt(100, 344, 44, 0) === -1,
+        'hover: the bar under x, none left of the bars or with no bars');
+    const h14 = new Date(2026, 9, 23, 14).getTime();
+    ok(barPeriod([{ t: h14 }, { t: h14 + 3600e3 }], 0) === '14:00–15:00', `hover: an hour bar reads '${barPeriod([{ t: h14 }, { t: h14 + 3600e3 }], 0)}'`);
+    const day = barPeriod([{ t: h14 }, { t: h14 + 86400e3 }], 1);
+    ok(/24/.test(day) && !day.includes(':'), `hover: a day bar reads '${day}'`);
+
+    // The battery chart: the fixture's two hours on battery.
+    const drain = r.chart.hover;
+    const points = r.chart.points;
+    const full = points.findIndex(p => p.battery > 0);
+    drain.set(full);
+    ok(drain.index === full && drain.text().startsWith(barPeriod(points, full)) && /battery \d/.test(drain.text()) && /processor \d/.test(drain.text()),
+        `hover battery: '${drain.text()}'`);
+    drain.keys.emit('key-pressed', Gdk.KEY_Left, 0, 0);
+    ok(drain.index === Math.max(0, full - 1), `hover battery: Left steps back (${drain.index})`);
+    ok(drain.keys.emit('key-pressed', Gdk.KEY_Escape, 0, 0) && drain.index === -1 && drain.text() === '', 'hover battery: Escape clears');
+    drain.keys.emit('key-pressed', Gdk.KEY_Right, 0, 0);
+    ok(drain.index === points.length - 1, 'hover battery: Right with nothing chosen starts at the last bar');
+    drain.set(-1);
+    ok(r.chart.area.focusable, 'hover battery: the chart takes the keyboard focus');
+
+    // A component's chart: memory, highest and average.
+    r.component.selected = COMPONENTS_FOR_HOVER.indexOf('memory');
+    const bars = r.bars.hover;
+    const filled = r.bars.chart.points.findIndex(p => p.highest > 0);
+    bars.set(filled);
+    ok(/highest \d/.test(bars.text()) && /average \d/.test(bars.text()), `hover memory: '${bars.text()}'`);
+    r.component.selected = COMPONENTS_FOR_HOVER.indexOf('disk');
+    ok(bars.index === -1, 'hover: switching component clears the highlight');
+
+    // As rendered: the box is dark in both variants.
+    if (Gdk.Display.get_default()) {
+        const manager = Adw.StyleManager.get_default();
+        window.present();
+        window.set_visible_page_name('tracking');
+        r.component.selected = 0;
+        r.batteryOnly.active = true;
+        const scrolled = findScrolled(window.get_visible_page());
+        // The battery view was just put back: let it be laid out before measuring it.
+        await sleep(300);
+        await painted(window);
+        for (const scheme of [Adw.ColorScheme.FORCE_DARK, Adw.ColorScheme.FORCE_LIGHT]) {
+            manager.color_scheme = scheme;
+            const area = r.chart.area;
+            const adj = scrolled.get_vadjustment();
+            const [, top] = area.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0));
+            adj.value = Math.min(Math.max(0, adj.value + top.y - 40), adj.upper - adj.page_size);
+            drain.set(0);
+            await painted(window);
+            const shot = render(window);
+            // The box sits right of the first bar, 4 px down: a point inside it.
+            const [okBox, at] = area.compute_point(window, new Graphene.Point().init(44 + (area.get_width() - 44) / points.length + 30, 12));
+            const px = okBox && shot ? shot.at(at.x, at.y) : [0, 0, 0, 0];
+            ok(px.length === 4 && (px[0] + px[1] + px[2]) / 3 < 40,
+                `hover (${scheme === Adw.ColorScheme.FORCE_DARK ? 'dark' : 'light'}): the details box is ${show(px)}, not dark (at ${at?.x?.toFixed(0)},${at?.y?.toFixed(0)} of ${shot?.width}x${shot?.height}; chart ${area.get_width()}x${area.get_height()})`);
+            drain.set(-1);
+        }
+        manager.color_scheme = Adw.ColorScheme.DEFAULT;
+        scrolled.get_vadjustment().value = 0;
+    }
+    r.component.selected = 0;
+}
+const COMPONENTS_FOR_HOVER = ['battery', 'cpu', 'memory', 'disk', 'network', 'gpu', 'thermal'];
+
 
 /**
  * The Tracking tab per component on the fixture (two hours: 0.4 + 0.3 + 0.1
@@ -813,6 +884,7 @@ async function componentChecks(r, window) {
     for (let i = 0; i < r.component.model.get_n_items(); i++) names.push(r.component.model.get_string(i));
     ok(names.join() === 'Battery,Processor,Memory,Disk,Network,Graphics,Temperature', `components: offered ${names.join()}`);
     ok(r.component.selected === 0 && r.summary.visible && !r.componentGroup.visible, 'components: the battery view first');
+    await chartHover(r, window);
     const expect = {
         cpu: { tile: 'Average load', apps: 'chat,editor,@system,@other' },
         memory: { tile: 'Average in use', apps: 'chat,editor' },
@@ -1137,6 +1209,23 @@ async function componentClicks(window, r) {
     if (adj) adj.value = 0;
     r.component.selected = 0;
     await sleep(600);
+    // The battery chart under the real pointer: the bar under it is chosen.
+    const area = r.chart.area;
+    const scrolled = findScrolled(window.get_visible_page());
+    const sAdj = scrolled.get_vadjustment();
+    const [, areaTop] = area.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0));
+    sAdj.value = Math.min(Math.max(0, sAdj.value + areaTop.y - 60), sAdj.upper - sAdj.page_size);
+    await sleep(400);
+    const n = r.chart.points.length;
+    const want = r.chart.points.findIndex(p => p.battery > 0);
+    const slotW = (area.get_width() - 44) / n;
+    const [, hp] = area.compute_point(window, new Graphene.Point().init(44 + slotW * (want + 0.5), area.get_height() / 2));
+    const [hsx, hsy] = window.get_surface_transform();
+    await act(`PREFS-CHECK HOVER chart-bar ${Math.round(hp.x + hsx)} ${Math.round(hp.y + hsy)}`);
+    ok(r.chart.hover.index === want && r.chart.hover.text().includes('battery'),
+        `hover (pointer): the bar under the pointer is chosen (${r.chart.hover.index}, wanted ${want}): '${r.chart.hover.text()}'`);
+    sAdj.value = 0;
+    await sleep(300);
     const tab = r.component.buttons[2];
     const [, p] = tab.compute_point(window, new Graphene.Point().init(tab.get_width() / 2, tab.get_height() / 2));
     const [sx, sy] = window.get_surface_transform();
