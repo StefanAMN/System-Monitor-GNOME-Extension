@@ -102,7 +102,7 @@ async function main() {
         return false;
     };
     ok(METRICS.every(m => hasIcon(pinRows[m.key], m.key)), 'pins: every row has its metric icon');
-    // Pinned metrics: switches plus the position each one has in the top bar.
+    // Pinned metrics: chips plus the position each one has in the top bar.
     settings.reset('pinned-metrics');
     ok(Object.keys(pinRows).join() === METRICS.map(m => m.key).join(), `pin rows are ${Object.keys(pinRows)}`);
     ok(pinRows.cpu.active && pinRows.cpu.subtitle === 'Position 1 in the top bar', `pins: cpu shows '${pinRows.cpu.subtitle}'`);
@@ -122,6 +122,23 @@ async function main() {
     ok(settings.get_strv('pinned-metrics').join() === 'cpu,memory', `pins: junk survived a write (${settings.get_strv('pinned-metrics')})`);
 
     // Panel size: shown, and Reset clears both keys.
+    // The preview follows the pins, the formats, the unit and compact mode.
+    const preview = rows.preview;
+    settings.set_strv('pinned-metrics', ['cpu', 'battery', 'network', 'thermal']);
+    settings.set_string('battery-top-format', 'percent-time');
+    settings.set_string('network-top-format', 'both');
+    settings.set_string('unit-temp', 'F');
+    ok(preview.text() === 'Top bar preview: CPU 12%, Battery 85% · 2h 15m, Network ↓ 1.2 MB/s ↑ 240 KB/s, Thermal 126°F',
+        `preview: '${preview.text()}'`);
+    ok(pinRows.thermal.badge.label === '4' && pinRows.thermal.badge.visible && !pinRows.gpu.badge.visible, 'chips: the badge shows the position, only when pinned');
+    settings.set_boolean('compact-label', true);
+    ok(findAll(preview, w => w.has_css_class?.('rp-preview-value')).length === 0 && findAll(preview, w => w instanceof Gtk.Image).length === 4,
+        'preview: compact shows the four icons only');
+    settings.set_strv('pinned-metrics', []);
+    ok(preview.text() === 'Top bar preview: nothing pinned', `preview with nothing pinned: '${preview.text()}'`);
+    for (const key of ['pinned-metrics', 'battery-top-format', 'network-top-format', 'unit-temp', 'compact-label', 'threshold-temp']) settings.reset(key);
+    ok(rows['threshold-temp'].valueLabel.label === '80°C', `slider value: '${rows['threshold-temp'].valueLabel.label}'`);
+
     const size = rows['panel-size'];
     ok(size.subtitle === 'Automatic' && !size.resetButton.sensitive, `panel size: '${size.subtitle}' by default`);
     settings.set_int('menu-custom-width', 420);
@@ -149,7 +166,8 @@ async function main() {
     GLib.file_set_contents(`${zone}/name`, 'package-0\n');
     GLib.file_set_contents(`${zone}/energy_uj`, '1\n');
     Gio.File.new_for_path(`${zone}/energy_uj`).set_attribute_uint32('unix::mode', 0o000, Gio.FileQueryInfoFlags.NONE, null);
-    const shown = build(newSettings(), new PowerSampler(blockedRoot));
+    const shownSettings = newSettings();
+    const shown = build(shownSettings, new PowerSampler(blockedRoot));
     await sleep(300);
     if (Gio.Credentials.new().get_unix_user() === 0)
         print('PREFS-CHECK SKIP: unreadable counters cannot be simulated as root');
@@ -181,7 +199,7 @@ async function main() {
     // shell carries a third-party theme as the user stylesheet (dev.sh), which
     // GTK ranks above application stylesheets, so a look that only holds
     // without it fails here.
-    if (Gdk.Display.get_default()) await renderedLook(shown);
+    if (Gdk.Display.get_default()) await renderedLook(shown, battery);
     else print('PREFS-CHECK SKIP: no display, the rendered look is not checked');
 
     print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} checks passed`);
@@ -214,6 +232,9 @@ async function main() {
                 }
             }
         }
+        // One window titled Resource Pulse at a time: the driver clicks into that one.
+        battery.window.hide();
+        await settingsClicks(shown.window, shown, shownSettings);
         shown.window.hide();
         await agentClicks(battery.window, battery.settings, battery.diagnostics, battery.fake);
         await componentClicks(battery.window, battery.tracking.rows);
@@ -346,16 +367,142 @@ const hex = colour => [1, 3, 5].map(i => parseInt(colour.slice(i, i + 2), 16));
 const near = (rgb, colour, tolerance = 14) => hex(colour).every((v, i) => Math.abs(v - rgb[i]) <= tolerance);
 const show = rgb => `rgb(${rgb.slice(0, 3).join(', ')})`;
 
-async function renderedLook(shown) {
+/**
+ * An open dropdown (Adw.ComboRow) in `window`: its current value on the card,
+ * its options on the popover's colour, text readable.
+ */
+async function dropdownLook(window, combo, variant, p) {
+    window.present();
+    window.set_visible_page_name('tracking');
+    await sleep(400);
+    const lum = c => (c[0] + c[1] + c[2]) / 3;
+    // The last opaque pixel a widget draws: its text's ink.
+    const inkOf = widget => {
+        const drawn = widget && render(widget);
+        let last = null;
+        for (let y = 0; drawn && y < drawn.height; y++) {
+            for (let x = 0; x < drawn.width; x++) {
+                const px = drawn.at(x, y);
+                if (px[3] > 200) last = px;
+            }
+        }
+        return last;
+    };
+
+    // Its current value, in the row: on the card, readable. The
+    // stand-in theme paints every list white, as some themes do (Orchis
+    // exempts this one), which left white boxes behind the values.
+    const scrolled = findScrolled(window.get_visible_page());
+    const adj = scrolled?.get_vadjustment();
+    const [okTop, top] = scrolled ? combo.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0)) : [false, null];
+    // (top is where it shows now, so relative to the current scroll)
+    if (adj && okTop) adj.value = Math.min(Math.max(0, adj.value + top.y - 40), adj.upper - adj.page_size);
+    await sleep(300);
+    const inline = findAll(combo, w => w.get_css_name() === 'listview' && !w.get_ancestor(Gtk.Popover.$gtype))[0];
+    const rowShot = render(window);
+    const [okValue, edge] = inline ? inline.compute_point(window, new Graphene.Point().init(1, inline.get_height() / 2)) : [false, null];
+    const valueBg = okValue && rowShot ? rowShot.at(edge.x, edge.y) : null;
+    ok(valueBg && near(valueBg, p.card), `look (${variant}): a dropdown's current value sits on ${valueBg ? show(valueBg) : 'nothing'}, not the card ${p.card}`);
+    const valueInk = inkOf(inline && findAll(inline, w => w instanceof Gtk.Label)[0]);
+    ok(valueInk && valueBg && Math.abs(lum(valueInk) - lum(valueBg)) > 110,
+        `look (${variant}): a dropdown's current value ${valueInk ? show(valueInk) : 'not drawn'} on ${valueBg ? show(valueBg) : 'nothing'} is not readable`);
+
+    // Open: its options on the popover's colour, text readable.
+    const popover = findAll(combo, w => w instanceof Gtk.Popover)[0];
+    popover.popup();
+    // Rendered from its contents node, which paints the surface: the
+    // popover itself is a native surface and renders nothing this way
+    // on GTK 4.18 (GNOME 48). Waited for until it has drawn with its
+    // options laid out. On GTK 4.18 a popover opened from code (no user
+    // input) in a window that has been up a while is sometimes never
+    // painted, although the compositor configures it and frames tick;
+    // opened again, it paints at once. So it is reopened after each
+    // second without a drawing.
+    let options = [];
+    let option = null;
+    let surface = popover;
+    let popShot = null;
+    for (let waited = 0; waited < 5000 && !popShot; waited += 100) {
+        await sleep(100);
+        options = findAll(popover, w => w.get_css_name() === 'row');
+        option = options[1] ?? options[0];
+        surface = findAll(popover, w => w.get_css_name() === 'contents')[0] ?? popover;
+        if (popover.get_mapped() && option?.get_width() > 0) popShot = render(surface);
+        if (!popShot && waited % 1000 === 900) {
+            popover.popdown();
+            await sleep(200);
+            popover.popup();
+        }
+    }
+    const [okOption, at] = option ? option.compute_point(surface, new Graphene.Point().init(option.get_width() - 4, option.get_height() / 2)) : [false, null];
+    const listBg = okOption && popShot ? popShot.at(at.x, at.y) : null;
+    ok(listBg && near(listBg, p.popover), listBg
+        ? `look (${variant}): an open dropdown's list is ${show(listBg)}, not ${p.popover}`
+        : `look (${variant}): the dropdown's list was not on screen after 5 s (mapped ${popover.get_mapped()}, ${options.length} options)`);
+    const optionInk = inkOf(option && findAll(option, w => w instanceof Gtk.Label)[0]);
+    ok(optionInk && listBg && Math.abs(lum(optionInk) - lum(listBg)) > 110,
+        `look (${variant}): dropdown text ${optionInk ? show(optionInk) : 'not drawn'} on ${listBg ? show(listBg) : 'no list'} is not readable`);
+    popover.popdown();
+    // Back to the top, where the next variant's checks look.
+    if (adj) adj.value = 0;
+    await sleep(200);
+}
+
+/**
+ * The Settings page's parts as rendered: the preview bar dark in both
+ * variants, a pinned chip in its metric's tint and an unpinned one on the
+ * card, the checked segment and the slider's highlight in the accent, the
+ * slider's knob white.
+ */
+async function settingsPartsLook(window, shown, variant, p) {
+    const { TINTS } = await import(`file://${root}/ui/prefs/style.js`);
+    const scrolled = findScrolled(window.get_visible_page());
+    const adj = scrolled?.get_vadjustment();
+    const at = async (widget, x, y) => {
+        const [okTop, top] = scrolled ? widget.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0)) : [false, null];
+        if (adj && okTop) adj.value = Math.min(Math.max(0, adj.value + top.y - 60), adj.upper - adj.page_size);
+        await painted(window);
+        const shot = render(window);
+        const [okPoint, out] = widget.compute_point(window, new Graphene.Point().init(x, y));
+        return okPoint && shot ? shot.at(out.x, out.y) : [0, 0, 0, 0];
+    };
+    const bar = findAll(shown.rows.preview, w => w.has_css_class?.('rp-preview-bar'))[0];
+    // Widget coordinates start at the content box: a few pixels left is the padding.
+    const barBg = await at(bar, -6, bar.get_height() / 2);
+    ok(near(barBg, '#0b0c0f'), `look (${variant}): the top-bar preview is ${show(barBg)}, not dark`);
+    const pinned = shown.pinRows.cpu;
+    const tint = TINTS.cpu[variant === 'dark' ? 0 : 1][0];
+    const pinnedBg = await at(pinned, -5, pinned.get_height() / 2);
+    ok(pinned.active && near(pinnedBg, tint), `look (${variant}): a pinned chip is ${show(pinnedBg)}, not the CPU tint ${tint}`);
+    const loose = Object.values(shown.pinRows).find(chip => !chip.active);
+    const looseBg = await at(loose, -5, loose.get_height() / 2);
+    ok(near(looseBg, p.card), `look (${variant}): an unpinned chip is ${show(looseBg)}, not the card ${p.card}`);
+    const segmented = shown.rows['unit-temp'];
+    const checked = segmented.buttons[segmented.selected];
+    const segmentBg = await at(checked, -6, checked.get_height() / 2);
+    ok(near(segmentBg, '#3584e4', 20), `look (${variant}): the checked segment is ${show(segmentBg)}, not the accent`);
+    const slider = shown.rows['threshold-cpu'].scale;
+    const knob = findAll(slider, w => w.get_css_name() === 'slider')[0];
+    const knobPx = await at(knob, knob.get_width() / 2, knob.get_height() / 2);
+    ok((knobPx[0] + knobPx[1] + knobPx[2]) / 3 > 235, `look (${variant}): the slider's knob is ${show(knobPx)}, not white`);
+    const highlight = findAll(slider, w => w.get_css_name() === 'highlight')[0];
+    const lit = await at(highlight, Math.min(20, highlight.get_width() / 2), highlight.get_height() / 2);
+    ok(near(lit, '#3584e4', 20), `look (${variant}): the slider's filled part is ${show(lit)}, not the accent`);
+    if (adj) adj.value = 0;
+    await painted(window);
+}
+
+async function renderedLook(shown, battery) {
     const { palette } = await import(`file://${root}/ui/prefs/style.js`);
     const manager = Adw.StyleManager.get_default();
     const window = shown.window;
     window.set_default_size(640, 660);
     window.present();
-    const row = shown.pinRows.cpu;
+    // A switch row that is on by default: its card, its switch, its title.
+    const row = shown.rows['show-tooltips'];
     const toggle = findAll(row, w => w instanceof Gtk.Switch)[0];
     const title = findAll(row, w => w instanceof Gtk.Label && w.label === row.title)[0];
-    ok(row.active && toggle && title, 'look: the CPU pin row, its switch and title were not found');
+    ok(row.active && toggle && title, 'look: the Tooltips row, its switch and title were not found');
     for (const [variant, scheme] of [['dark', Adw.ColorScheme.FORCE_DARK], ['light', Adw.ColorScheme.FORCE_LIGHT]]) {
         manager.color_scheme = scheme;
         await sleep(600);
@@ -405,80 +552,13 @@ async function renderedLook(shown) {
         ok(variant === 'dark' ? lightness > 200 : lightness >= 0 && lightness < 90,
             `look (${variant}): row text is ${ink ? show(ink) : 'not drawn'}`);
 
-        // An open dropdown (the Temperature row; Tracking › Period is the
-        // same widget): its options on the popover's colour, text readable.
-        const combo = shown.rows['unit-temp'];
-        const lum = c => (c[0] + c[1] + c[2]) / 3;
-        // The last opaque pixel a widget draws: its text's ink.
-        const inkOf = widget => {
-            const drawn = widget && render(widget);
-            let last = null;
-            for (let y = 0; drawn && y < drawn.height; y++) {
-                for (let x = 0; x < drawn.width; x++) {
-                    const px = drawn.at(x, y);
-                    if (px[3] > 200) last = px;
-                }
-            }
-            return last;
-        };
-
-        // Its current value, in the row: on the card, readable. The
-        // stand-in theme paints every list white, as some themes do (Orchis
-        // exempts this one), which left white boxes behind the values.
-        const scrolled = findScrolled(window.get_visible_page());
-        const adj = scrolled?.get_vadjustment();
-        const [okTop, top] = scrolled ? combo.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0)) : [false, null];
-        // (top is where it shows now, so relative to the current scroll)
-        if (adj && okTop) adj.value = Math.min(Math.max(0, adj.value + top.y - 40), adj.upper - adj.page_size);
+        // The Settings page's own parts, as rendered.
+        await settingsPartsLook(window, shown, variant, p);
+        // An open dropdown: the Settings page has none left, so Tracking's
+        // Period (the same widget as every dropdown in the window).
+        await dropdownLook(battery.window, battery.tracking.rows.period, variant, p);
+        window.present();
         await sleep(300);
-        const inline = findAll(combo, w => w.get_css_name() === 'listview' && !w.get_ancestor(Gtk.Popover.$gtype))[0];
-        const rowShot = render(window);
-        const [okValue, edge] = inline ? inline.compute_point(window, new Graphene.Point().init(1, inline.get_height() / 2)) : [false, null];
-        const valueBg = okValue && rowShot ? rowShot.at(edge.x, edge.y) : null;
-        ok(valueBg && near(valueBg, p.card), `look (${variant}): a dropdown's current value sits on ${valueBg ? show(valueBg) : 'nothing'}, not the card ${p.card}`);
-        const valueInk = inkOf(inline && findAll(inline, w => w instanceof Gtk.Label)[0]);
-        ok(valueInk && valueBg && Math.abs(lum(valueInk) - lum(valueBg)) > 110,
-            `look (${variant}): a dropdown's current value ${valueInk ? show(valueInk) : 'not drawn'} on ${valueBg ? show(valueBg) : 'nothing'} is not readable`);
-
-        // Open: its options on the popover's colour, text readable.
-        const popover = findAll(combo, w => w instanceof Gtk.Popover)[0];
-        popover.popup();
-        // Rendered from its contents node, which paints the surface: the
-        // popover itself is a native surface and renders nothing this way
-        // on GTK 4.18 (GNOME 48). Waited for until it has drawn with its
-        // options laid out. On GTK 4.18 a popover opened from code (no user
-        // input) in a window that has been up a while is sometimes never
-        // painted, although the compositor configures it and frames tick;
-        // opened again, it paints at once. So it is reopened after each
-        // second without a drawing.
-        let options = [];
-        let option = null;
-        let surface = popover;
-        let popShot = null;
-        for (let waited = 0; waited < 5000 && !popShot; waited += 100) {
-            await sleep(100);
-            options = findAll(popover, w => w.get_css_name() === 'row');
-            option = options[1] ?? options[0];
-            surface = findAll(popover, w => w.get_css_name() === 'contents')[0] ?? popover;
-            if (popover.get_mapped() && option?.get_width() > 0) popShot = render(surface);
-            if (!popShot && waited % 1000 === 900) {
-                popover.popdown();
-                await sleep(200);
-                popover.popup();
-            }
-        }
-        const [okOption, at] = option ? option.compute_point(surface, new Graphene.Point().init(option.get_width() - 4, option.get_height() / 2)) : [false, null];
-        const listBg = okOption && popShot ? popShot.at(at.x, at.y) : null;
-        ok(listBg && near(listBg, p.popover), listBg
-            ? `look (${variant}): an open dropdown's list is ${show(listBg)}, not ${p.popover}`
-            : `look (${variant}): the dropdown's list was not on screen after 5 s (mapped ${popover.get_mapped()}, ${options.length} options)`);
-        const optionInk = inkOf(option && findAll(option, w => w instanceof Gtk.Label)[0]);
-        ok(optionInk && listBg && Math.abs(lum(optionInk) - lum(listBg)) > 110,
-            `look (${variant}): dropdown text ${optionInk ? show(optionInk) : 'not drawn'} on ${listBg ? show(listBg) : 'no list'} is not readable`);
-        popover.popdown();
-        // Back to the top, where the next variant's checks look.
-        if (adj) adj.value = 0;
-        await sleep(200);
     }
     manager.color_scheme = Adw.ColorScheme.DEFAULT;
     window.hide();
@@ -922,6 +1002,41 @@ async function checkLaunch(settings, a, fake, how) {
     ok((info.get_attribute_uint32('unix::mode') & 0o777) === 0o600 && (dirInfo.get_attribute_uint32('unix::mode') & 0o777) === 0o700,
         `agent (${how}): report.md is private (${(info.get_attribute_uint32('unix::mode') & 0o777).toString(8)}, folder ${(dirInfo.get_attribute_uint32('unix::mode') & 0o777).toString(8)})`);
     ok(a.status.label.startsWith('Started in a terminal'), `agent (${how}): status '${a.status.label}'`);
+}
+
+/**
+ * Driven by the shell: on the Settings page, an unpinned metric's chip and
+ * the °F segment clicked with the real pointer.
+ */
+async function settingsClicks(window, shown, settings) {
+    const pointAt = widget => {
+        const [, p] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() / 2, widget.get_height() / 2));
+        const [sx, sy] = window.get_surface_transform();
+        return `${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`;
+    };
+    const scrollTo = async widget => {
+        const scrolled = findScrolled(window.get_visible_page());
+        const adj = scrolled.get_vadjustment();
+        const [, top] = widget.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0));
+        adj.value = Math.min(Math.max(0, adj.value + top.y - 80), adj.upper - adj.page_size);
+        await sleep(500);
+    };
+    window.present();
+    await sleep(400);
+    const chip = shown.pinRows.gpu;
+    const before = settings.get_strv('pinned-metrics').join();
+    await scrollTo(chip);
+    print(`PREFS-CHECK CLICK chip-gpu ${pointAt(chip)}`);
+    ok(await until(() => settings.get_strv('pinned-metrics').includes('gpu')) && chip.badge.visible,
+        `settings (pointer): clicking the GPU chip pinned it (${before} -> ${settings.get_strv('pinned-metrics').join()})`);
+    ok(shown.rows.preview.text().endsWith('GPU 18%'), `settings (pointer): the preview shows it last ('${shown.rows.preview.text()}')`);
+    const fahrenheit = shown.rows['unit-temp'].buttons[1];
+    await scrollTo(fahrenheit);
+    print(`PREFS-CHECK CLICK segment-f ${pointAt(fahrenheit)}`);
+    ok(await until(() => settings.get_string('unit-temp') === 'F'), `settings (pointer): clicking °F stored '${settings.get_string('unit-temp')}'`);
+    ok(shown.rows['threshold-temp'].valueLabel.label.endsWith('°F'), `settings (pointer): the temperature limit reads ${shown.rows['threshold-temp'].valueLabel.label}`);
+    settings.reset('pinned-metrics');
+    settings.reset('unit-temp');
 }
 
 /**

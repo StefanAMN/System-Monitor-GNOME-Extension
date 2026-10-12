@@ -28,9 +28,11 @@ export const METRICS = [
  * Row kinds:
  *   pins    the pinned-metrics list (key is an `as` setting)
  *   switch  a boolean
- *   choice  a string with a fixed set of values: choices = [[value, label, longLabel], ...]
+ *   choice  a string with a fixed set of values: choices = [[value, label, longLabel, segment], ...];
+ *           segment is the label of its button in the window's segmented control
  *   number  an integer with min / max (the schema's range) and the step of
  *           one click; unit is 's', '%' or 'temp' (stored in °C)
+ * `metric` names the metric a row is about (its icon beside the row).
  * `title` is short enough for the 360 px panel; `detail` is the longer
  * explanation the preferences window has room for. Labels are marked with
  * N_() and translated where they are shown; keys and values are not.
@@ -56,17 +58,17 @@ export const SETTINGS_SECTIONS = [
                 key: 'battery-top-format', kind: 'choice', title: N_('Battery shows'),
                 detail: N_('What the battery metric displays in the top bar'),
                 choices: [
-                    ['percent', '%', N_('Percentage (85%)')],
-                    ['percent-time', '% + time', N_('Percentage and time (85% · 2h 15m)')],
+                    ['percent', '%', N_('Percentage (85%)'), '85%'],
+                    ['percent-time', '% + time', N_('Percentage and time (85% · 2h 15m)'), '85% · 2h 15m'],
                 ],
             },
             {
                 key: 'network-top-format', kind: 'choice', title: N_('Network shows'),
                 detail: N_('What the network metric displays in the top bar'),
                 choices: [
-                    ['download', '↓', N_('Download (↓)')],
-                    ['upload', '↑', N_('Upload (↑)')],
-                    ['both', '↓ ↑', N_('Download and upload (↓ ↑)')],
+                    ['download', '↓', N_('Download (↓)'), N_('↓ Download')],
+                    ['upload', '↑', N_('Upload (↑)'), N_('↑ Upload')],
+                    ['both', '↓ ↑', N_('Download and upload (↓ ↑)'), N_('↓ ↑ Both')],
                 ],
             },
         ],
@@ -87,12 +89,12 @@ export const SETTINGS_SECTIONS = [
             {
                 key: 'unit-temp', kind: 'choice', title: N_('Temperature'),
                 detail: N_('Unit for every temperature shown'),
-                choices: [['C', '°C', N_('Celsius (°C)')], ['F', '°F', N_('Fahrenheit (°F)')]],
+                choices: [['C', '°C', N_('Celsius (°C)'), '°C'], ['F', '°F', N_('Fahrenheit (°F)'), '°F']],
             },
             {
                 key: 'unit-mem', kind: 'choice', title: N_('Memory'),
                 detail: N_('Decimal gigabytes or binary gibibytes'),
-                choices: [['GB', 'GB', N_('Gigabytes (GB)')], ['GiB', 'GiB', N_('Gibibytes (GiB)')]],
+                choices: [['GB', 'GB', N_('Gigabytes (GB)'), 'GB'], ['GiB', 'GiB', N_('Gibibytes (GiB)'), 'GiB']],
             },
         ],
     },
@@ -106,27 +108,27 @@ export const SETTINGS_SECTIONS = [
                 detail: N_('Also send a notification, at most one per metric every 10 minutes'),
             },
             {
-                key: 'threshold-cpu', kind: 'number', title: N_('CPU'),
+                key: 'threshold-cpu', kind: 'number', metric: 'cpu', title: N_('CPU'),
                 detail: N_('CPU usage above this is shown as a warning'),
                 min: 50, max: 100, step: 5, unit: '%',
             },
             {
-                key: 'threshold-mem', kind: 'number', title: N_('Memory'),
+                key: 'threshold-mem', kind: 'number', metric: 'memory', title: N_('Memory'),
                 detail: N_('Memory usage above this is shown as a warning'),
                 min: 50, max: 100, step: 5, unit: '%',
             },
             {
-                key: 'threshold-temp', kind: 'number', title: N_('Temperature'),
+                key: 'threshold-temp', kind: 'number', metric: 'thermal', title: N_('Temperature'),
                 detail: N_('CPU temperature above this is shown as a warning (stored in °C)'),
                 min: 40, max: 100, step: 5, unit: 'temp',
             },
             {
-                key: 'threshold-gpu', kind: 'number', title: N_('GPU'),
+                key: 'threshold-gpu', kind: 'number', metric: 'gpu', title: N_('GPU'),
                 detail: N_('GPU usage above this is shown as a warning'),
                 min: 50, max: 100, step: 5, unit: '%',
             },
             {
-                key: 'threshold-disk', kind: 'number', title: N_('Disk space'),
+                key: 'threshold-disk', kind: 'number', metric: 'disk', title: N_('Disk space'),
                 detail: N_('Space used on / above this is shown as a warning'),
                 min: 50, max: 100, step: 1, unit: '%',
             },
