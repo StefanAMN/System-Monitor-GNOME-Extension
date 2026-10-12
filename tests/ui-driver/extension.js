@@ -104,6 +104,30 @@ async function clickInWindow(metaWindow, x, y) {
     await sleep(300);
 }
 
+// A drag inside a client's window: press at (x1, y1), move there in small
+// steps (past GTK's drag threshold, slowly enough for the client to follow),
+// release. Points are in the window's surface, as for clickInWindow.
+async function dragInWindow(metaWindow, x1, y1, x2, y2) {
+    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    const rect = metaWindow.get_buffer_rect();
+    const now = () => GLib.get_monotonic_time();
+    const at = (x, y) => pointer.notify_absolute_motion(now(), rect.x + x, rect.y + y);
+    at(x1 + 2, y1 + 2);
+    await sleep(150);
+    at(x1, y1);
+    await sleep(200);
+    pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+    await sleep(120);
+    const steps = 24;
+    for (let i = 1; i <= steps; i++) {
+        at(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps);
+        await sleep(30);
+    }
+    await sleep(250);
+    pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+    await sleep(500);
+}
+
 // Scroll an actor into view and wait until the scroll animation has
 // finished: a click sent while the content still moves lands elsewhere
 // (seen in the slower compat containers).
@@ -684,7 +708,12 @@ async function prefsWindow(rp) {
         if (!line.startsWith('PREFS-CHECK')) continue;
         const show = /^PREFS-CHECK SHOW ([\w-]+)/.exec(line);
         const click = /^PREFS-CHECK CLICK ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
-        if (click) {
+        const drag = /^PREFS-CHECK DRAG ([\w-]+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)/.exec(line);
+        if (drag) {
+            check(titled(), `prefs: no window to drag ${drag[1]} in`);
+            await bringForward(titled());
+            await dragInWindow(titled(), ...drag.slice(2, 6).map(Number));
+        } else if (click) {
             check(titled(), `prefs: no window to click ${click[1]} in`);
             await bringForward(titled());
             await clickInWindow(titled(), Number(click[2]), Number(click[3]));

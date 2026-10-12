@@ -134,6 +134,22 @@ async function main() {
     settings.set_boolean('compact-label', true);
     ok(findAll(preview, w => w.has_css_class?.('rp-preview-value')).length === 0 && findAll(preview, w => w instanceof Gtk.Image).length === 4,
         'preview: compact shows the four icons only');
+    settings.set_boolean('compact-label', false);
+    // Reordering: a drop puts a metric at a place; a chip's drop pins it there.
+    settings.set_strv('pinned-metrics', ['cpu', 'memory', 'battery', 'network']);
+    ok(preview.dropAt('network', 0) && settings.get_strv('pinned-metrics').join() === 'network,cpu,memory,battery' && preview.text().startsWith('Top bar preview: Network'),
+        `drag: network dropped at the front gives ${settings.get_strv('pinned-metrics').join()}`);
+    ok(preview.dropAt('gpu', 1) && settings.get_strv('pinned-metrics').join() === 'network,gpu,cpu,memory,battery' && pinRows.gpu.active && pinRows.gpu.badge.label === '2',
+        `drag: the GPU chip dropped second pins it there (${settings.get_strv('pinned-metrics').join()})`);
+    ok(!preview.dropAt('not-a-metric', 0) && settings.get_strv('pinned-metrics').join() === 'network,gpu,cpu,memory,battery', 'drag: a drop of anything else changes nothing');
+    // From the keyboard: Ctrl+Right moves the focused metric one place later, and it keeps the focus.
+    const cpuItem = preview.items.find(item => item.key === 'cpu');
+    ok(cpuItem.widget.focusable && cpuItem.widget.moveKeys.emit('key-pressed', Gdk.KEY_Right, 0, Gdk.ModifierType.CONTROL_MASK),
+        'keys: Ctrl+Right is taken by a preview metric');
+    ok(settings.get_strv('pinned-metrics').join() === 'network,gpu,memory,cpu,battery', `keys: cpu one place later (${settings.get_strv('pinned-metrics').join()})`);
+    preview.items.find(item => item.key === 'network').widget.moveKeys.emit('key-pressed', Gdk.KEY_Left, 0, Gdk.ModifierType.CONTROL_MASK);
+    ok(settings.get_strv('pinned-metrics')[0] === 'network', 'keys: Ctrl+Left on the first metric keeps it first');
+    ok(!cpuItem.widget.moveKeys.emit('key-pressed', Gdk.KEY_Right, 0, 0), 'keys: Right without Ctrl is left to the window');
     settings.set_strv('pinned-metrics', []);
     ok(preview.text() === 'Top bar preview: nothing pinned', `preview with nothing pinned: '${preview.text()}'`);
     for (const key of ['pinned-metrics', 'battery-top-format', 'network-top-format', 'unit-temp', 'compact-label', 'threshold-temp']) settings.reset(key);
@@ -1030,6 +1046,27 @@ async function settingsClicks(window, shown, settings) {
     ok(await until(() => settings.get_strv('pinned-metrics').includes('gpu')) && chip.badge.visible,
         `settings (pointer): clicking the GPU chip pinned it (${before} -> ${settings.get_strv('pinned-metrics').join()})`);
     ok(shown.rows.preview.text().endsWith('GPU 18%'), `settings (pointer): the preview shows it last ('${shown.rows.preview.text()}')`);
+    // Drag and drop in the preview: Network to the front, then the Disk chip onto the end.
+    settings.set_strv('pinned-metrics', ['cpu', 'memory', 'battery', 'network']);
+    await sleep(300);
+    const preview = shown.rows.preview;
+    await scrollTo(preview);
+    const item = key => preview.items.find(i => i.key === key).widget;
+    const pointIn = (widget, fx, fy) => {
+        const [, p] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() * fx, widget.get_height() * fy));
+        const [sx, sy] = window.get_surface_transform();
+        return `${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`;
+    };
+    print(`PREFS-CHECK DRAG network-front ${pointIn(item('network'), 0.5, 0.5)} ${pointIn(item('cpu'), 0.15, 0.5)}`);
+    ok(await until(() => settings.get_strv('pinned-metrics')[0] === 'network'),
+        `drag (pointer): Network dragged to the front gives ${settings.get_strv('pinned-metrics').join()}`);
+    ok(preview.text().startsWith('Top bar preview: Network'), `drag (pointer): the preview starts with Network ('${preview.text()}')`);
+    await sleep(300);
+    const disk = shown.pinRows.disk;
+    const last = preview.items.at(-1).widget;
+    print(`PREFS-CHECK DRAG chip-disk ${pointIn(disk, 0.5, 0.5)} ${pointIn(last, 0.9, 0.5)}`);
+    ok(await until(() => settings.get_strv('pinned-metrics').at(-1) === 'disk'),
+        `drag (pointer): the Disk chip dropped on the end pins it last (${settings.get_strv('pinned-metrics').join()})`);
     const fahrenheit = shown.rows['unit-temp'].buttons[1];
     await scrollTo(fahrenheit);
     print(`PREFS-CHECK CLICK segment-f ${pointAt(fahrenheit)}`);
