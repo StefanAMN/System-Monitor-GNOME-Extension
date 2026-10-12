@@ -183,3 +183,17 @@ export function pinPositions(pinned) {
 export function togglePinned(pinned, key) {
     return pinned.includes(key) ? pinned.filter(k => k !== key) : [...pinned, key];
 }
+
+/**
+ * The pinned list with `key` placed at `index` (0: first in the top bar),
+ * counted in the list without `key`; pinned if it was not. An index past
+ * the end places it last.
+ * @param {string[]} pinned
+ * @param {string} key
+ * @param {number} index
+ */
+export function movePinned(pinned, key, index) {
+    const rest = pinned.filter(k => k !== key);
+    const at = Math.max(0, Math.min(rest.length, Math.trunc(index)));
+    return [...rest.slice(0, at), key, ...rest.slice(at)];
+}

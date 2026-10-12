@@ -7,7 +7,7 @@ import System from 'system';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../../src/lib/common/format.js';
 import { RingBuffer } from '../../src/lib/engine/ringbuffer.js';
 import { RunningStats } from '../../src/lib/engine/stats.js';
-import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned } from '../../src/lib/common/settingsmodel.js';
+import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned, movePinned } from '../../src/lib/common/settingsmodel.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses, filterGroups } from '../../src/lib/collectors/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
 import { listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
@@ -563,6 +563,14 @@ docker0: 1 2 3
         [95, 100, 100, 50, 1], 'settings model: a step clamps to the range, also from an off-grid value');
     eq(pinPositions(['memory', 'cpu']), { cpu: 2, memory: 1, battery: 0, power: 0, disk: 0, network: 0, thermal: 0, gpu: 0 }, 'pins: positions follow the pinned order');
     eq([togglePinned(['cpu', 'memory'], 'gpu'), togglePinned(['cpu', 'memory'], 'cpu')], [['cpu', 'memory', 'gpu'], ['memory']], 'pins: toggling appends or removes');
+    const bar = ['cpu', 'memory', 'battery', 'network'];
+    eq(movePinned(bar, 'network', 0), ['network', 'cpu', 'memory', 'battery'], 'pins: network moved to the front');
+    eq(movePinned(bar, 'cpu', 2), ['memory', 'battery', 'cpu', 'network'], 'pins: moved later, counted without itself');
+    eq(movePinned(bar, 'cpu', 99), ['memory', 'battery', 'network', 'cpu'], 'pins: an index past the end places it last');
+    eq(movePinned(bar, 'gpu', 1), ['cpu', 'gpu', 'memory', 'battery', 'network'], 'pins: an unpinned metric is pinned at the place');
+    eq(movePinned(bar, 'memory', 1), bar, 'pins: dropped where it was, nothing changes');
+    eq(movePinned([], 'disk', -3), ['disk'], 'pins: a negative index is the front');
+    eq(bar, ['cpu', 'memory', 'battery', 'network'], 'pins: the list given is not changed');
 }
 
 // ── collectors: pressure (PSI) ──
