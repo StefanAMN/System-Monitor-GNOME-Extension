@@ -89,7 +89,7 @@ export function fillWindow(window, { settings, path, historyPath, tracking: trac
         if (panel) return;
         const history = new HistorySource(settings, historyPath);
         let fullWh = null;
-        const tracking = buildTrackingPage(settings, history, { fullWh: () => fullWh, ...trackingOpts });
+        const tracking = buildTrackingPage(settings, history, { fullWh: () => fullWh, iconFor: key => metricIcon(key, path), ...trackingOpts });
         window.add(tracking.page);
         const diagnostics = buildDiagnosticsPage(history, { settings, ...diagnosticsOpts });
         window.add(diagnostics.page);

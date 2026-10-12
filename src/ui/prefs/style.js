@@ -92,6 +92,8 @@ export function windowCss(dark, variables) {
         const [bg, border] = variants[dark ? 0 : 1];
         return `window.rp-window .rp-tint-${key},
 window.rp-window button.rp-pin-chip.rp-tint-${key},
+window.rp-window button.rp-tab.rp-tint-${key},
+window.rp-window button.rp-tab.rp-tint-${key}:hover,
 window.rp-window button.rp-pin-chip.rp-tint-${key}:hover { background-color: ${bg}; border-color: ${border}; }
 window.rp-window .rp-c-${key} { color: ${METRIC_COLORS[key]}; }
 window.rp-window levelbar.rp-bar-${key} block.filled { background-color: ${METRIC_COLORS[key]}; }`;
@@ -245,6 +247,21 @@ window.rp-window .rp-pin-badge {
     font-size: 0.75em;
     font-weight: 800;
 }
+/* Tracking's component tabs. */
+window.rp-window .rp-tabs {
+    padding: 5px;
+    border-radius: 14px;
+    border: 1px solid ${p.border};
+    background-color: ${p.card};
+}
+window.rp-window button.rp-tab {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 8px 4px 6px;
+}
+window.rp-window button.rp-tab:hover { background-color: ${p.hover}; }
+window.rp-window .rp-tab-label { font-size: 0.82em; font-weight: 600; }
 window.rp-window .rp-segmented button { padding: 4px 12px; font-weight: 600; }
 window.rp-window .rp-segmented button:checked { background-color: ${ACCENT}; color: #ffffff; }
 window.rp-window scale.rp-slider trough { background-color: ${p.track}; }

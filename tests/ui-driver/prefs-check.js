@@ -154,6 +154,9 @@ async function main() {
     ok(preview.text() === 'Top bar preview: nothing pinned', `preview with nothing pinned: '${preview.text()}'`);
     for (const key of ['pinned-metrics', 'battery-top-format', 'network-top-format', 'unit-temp', 'compact-label', 'threshold-temp']) settings.reset(key);
     ok(rows['threshold-temp'].valueLabel.label === '80°C', `slider value: '${rows['threshold-temp'].valueLabel.label}'`);
+    const wheelBefore = settings.get_int('threshold-cpu');
+    ok(rows['threshold-cpu'].knobOnly.wheel.emit('scroll', 0, -3) === true && settings.get_int('threshold-cpu') === wheelBefore,
+        'slider: the wheel over it is taken before the slider and leaves the value alone');
 
     const size = rows['panel-size'];
     ok(size.subtitle === 'Automatic' && !size.resetButton.sensitive, `panel size: '${size.subtitle}' by default`);
@@ -648,7 +651,8 @@ async function batteryPages(styleWindow) {
     const window = new Adw.PreferencesWindow({ title: 'Resource Pulse' });
     const style = styleWindow(window);
     ok(window.has_css_class('rp-window') && style.css().includes('#3584e4'), 'style: the window carries the extension\'s look and accent');
-    const tracking = buildTrackingPage(settings, history, { fullWh: () => 40 });
+    const { metricIcon } = await import(`file://${root}/ui/prefs/rows.js`);
+    const tracking = buildTrackingPage(settings, history, { fullWh: () => 40, iconFor: key => metricIcon(key, root) });
     window.add(tracking.page);
     const profileCalls = [];
     const launched = [];
@@ -864,6 +868,16 @@ async function componentChecks(r, window) {
                 const bg = okPoint ? shot.at(at.x, at.y) : [0, 0, 0, 0];
                 const want = TINTS[component][variant === 'dark' ? 0 : 1][0];
                 ok(near(bg, want), `components ${component} (${variant}): tile is ${show(bg)}, not ${want} (at ${at?.x?.toFixed(0)},${at?.y?.toFixed(0)}; tile ${tile.get_width()}x${tile.get_height()} '${tile.title}' visible ${tile.get_mapped()}; window ${shot.width}x${shot.height})`);
+                // Its tab, tinted the same way.
+                const tab = r.component.buttons[COMPONENTS.indexOf(component)];
+                const tAdj = scrolled?.get_vadjustment();
+                const [okTabTop, tabTop] = scrolled ? tab.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0)) : [false, null];
+                if (tAdj && okTabTop) tAdj.value = Math.min(Math.max(0, tAdj.value + tabTop.y - 40), tAdj.upper - tAdj.page_size);
+                await painted(window);
+                const tabShot = render(window);
+                const [okTab, tabAt] = tab.compute_point(window, new Graphene.Point().init(-2, tab.get_height() / 2));
+                const tabBg = okTab && tabShot ? tabShot.at(tabAt.x, tabAt.y) : [0, 0, 0, 0];
+                ok(near(tabBg, want), `components ${component} (${variant}): its tab is ${show(tabBg)}, not ${want}`);
             }
         }
         manager.color_scheme = Adw.ColorScheme.DEFAULT;
@@ -943,6 +957,23 @@ function painted(window) {
         });
         window.queue_draw();
     });
+}
+
+/**
+ * Ask the driver for a pointer action (a CLICK, DRAG or SCROLL line) and wait
+ * until it has finished it: the driver acknowledges each action by writing a
+ * file in RP_ACK_DIR. Without the wait the checks ran while the driver was
+ * still busy with an earlier action, a second or more behind.
+ */
+let actions = 0;
+async function act(line) {
+    const dir = GLib.getenv('RP_ACK_DIR');
+    const id = `${++actions}`;
+    print(`${line} ack=${id}`);
+    if (!dir) return;
+    const file = `${dir}/${id}`;
+    ok(await until(() => GLib.file_test(file, GLib.FileTest.EXISTS), 20000), `driver: action ${id} (${line.split(' ').slice(1, 3).join(' ')}) not acknowledged within 20 s`);
+    if (GLib.file_test(file, GLib.FileTest.EXISTS)) GLib.unlink(file);
 }
 
 /** Wait until `cond()` holds, up to `ms`. */
@@ -1042,7 +1073,7 @@ async function settingsClicks(window, shown, settings) {
     const chip = shown.pinRows.gpu;
     const before = settings.get_strv('pinned-metrics').join();
     await scrollTo(chip);
-    print(`PREFS-CHECK CLICK chip-gpu ${pointAt(chip)}`);
+    await act(`PREFS-CHECK CLICK chip-gpu ${pointAt(chip)}`);
     ok(await until(() => settings.get_strv('pinned-metrics').includes('gpu')) && chip.badge.visible,
         `settings (pointer): clicking the GPU chip pinned it (${before} -> ${settings.get_strv('pinned-metrics').join()})`);
     ok(shown.rows.preview.text().endsWith('GPU 18%'), `settings (pointer): the preview shows it last ('${shown.rows.preview.text()}')`);
@@ -1057,19 +1088,38 @@ async function settingsClicks(window, shown, settings) {
         const [sx, sy] = window.get_surface_transform();
         return `${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`;
     };
-    print(`PREFS-CHECK DRAG network-front ${pointIn(item('network'), 0.5, 0.5)} ${pointIn(item('cpu'), 0.15, 0.5)}`);
+    await act(`PREFS-CHECK DRAG network-front ${pointIn(item('network'), 0.5, 0.5)} ${pointIn(item('cpu'), 0.15, 0.5)}`);
     ok(await until(() => settings.get_strv('pinned-metrics')[0] === 'network'),
         `drag (pointer): Network dragged to the front gives ${settings.get_strv('pinned-metrics').join()}`);
     ok(preview.text().startsWith('Top bar preview: Network'), `drag (pointer): the preview starts with Network ('${preview.text()}')`);
     await sleep(300);
     const disk = shown.pinRows.disk;
     const last = preview.items.at(-1).widget;
-    print(`PREFS-CHECK DRAG chip-disk ${pointIn(disk, 0.5, 0.5)} ${pointIn(last, 0.9, 0.5)}`);
+    await act(`PREFS-CHECK DRAG chip-disk ${pointIn(disk, 0.5, 0.5)} ${pointIn(last, 0.9, 0.5)}`);
     ok(await until(() => settings.get_strv('pinned-metrics').at(-1) === 'disk'),
         `drag (pointer): the Disk chip dropped on the end pins it last (${settings.get_strv('pinned-metrics').join()})`);
+    // A slider: the wheel scrolls the page, a click on its track does nothing, dragging its knob moves it.
+    const sliderRowW = shown.rows['threshold-cpu'];
+    const scale = sliderRowW.scale;
+    const trough = findAll(scale, w => w.get_css_name() === 'trough')[0];
+    const knobOf = () => findAll(scale, w => w.get_css_name() === 'slider')[0];
+    await scrollTo(sliderRowW);
+    const valueBefore = settings.get_int('threshold-cpu');
+    const pageAdj = findScrolled(window.get_visible_page()).get_vadjustment();
+    const pageBefore = pageAdj.value;
+    await act(`PREFS-CHECK SCROLL slider-wheel ${pointIn(trough, 0.3, 0.5)} down`);
+    ok(pageAdj.value !== pageBefore && settings.get_int('threshold-cpu') === valueBefore,
+        `slider (pointer): the wheel over it scrolled the page (${pageBefore} -> ${pageAdj.value}) and left ${valueBefore} (now ${settings.get_int('threshold-cpu')})`);
+    await scrollTo(sliderRowW);
+    await act(`PREFS-CHECK CLICK slider-track ${pointIn(trough, 0.05, 0.5)}`);
+    ok(settings.get_int('threshold-cpu') === valueBefore, `slider (pointer): a click on its track left ${valueBefore} (now ${settings.get_int('threshold-cpu')})`);
+    await scrollTo(sliderRowW);
+    await act(`PREFS-CHECK DRAG slider-knob ${pointIn(knobOf(), 0.5, 0.5)} ${pointIn(trough, 0.02, 0.5)}`);
+    ok(settings.get_int('threshold-cpu') < valueBefore, `slider (pointer): dragging its knob moved it (${valueBefore} -> ${settings.get_int('threshold-cpu')})`);
+    settings.reset('threshold-cpu');
     const fahrenheit = shown.rows['unit-temp'].buttons[1];
     await scrollTo(fahrenheit);
-    print(`PREFS-CHECK CLICK segment-f ${pointAt(fahrenheit)}`);
+    await act(`PREFS-CHECK CLICK segment-f ${pointAt(fahrenheit)}`);
     ok(await until(() => settings.get_string('unit-temp') === 'F'), `settings (pointer): clicking °F stored '${settings.get_string('unit-temp')}'`);
     ok(shown.rows['threshold-temp'].valueLabel.label.endsWith('°F'), `settings (pointer): the temperature limit reads ${shown.rows['threshold-temp'].valueLabel.label}`);
     settings.reset('pinned-metrics');
@@ -1077,10 +1127,8 @@ async function settingsClicks(window, shown, settings) {
 }
 
 /**
- * Driven by the shell: the Tracking tab's Component dropdown, opened and an
- * option picked with the real pointer. The list is a popup surface of its
- * own: its point is where the popup sits on the window's surface plus the
- * option's place inside it.
+ * Driven by the shell: a component tab of the Tracking page clicked with
+ * the real pointer.
  */
 async function componentClicks(window, r) {
     window.present();
@@ -1089,23 +1137,12 @@ async function componentClicks(window, r) {
     if (adj) adj.value = 0;
     r.component.selected = 0;
     await sleep(600);
-    const [, p] = r.component.compute_point(window, new Graphene.Point().init(r.component.get_width() - 40, r.component.get_height() / 2));
+    const tab = r.component.buttons[2];
+    const [, p] = tab.compute_point(window, new Graphene.Point().init(tab.get_width() / 2, tab.get_height() / 2));
     const [sx, sy] = window.get_surface_transform();
-    print(`PREFS-CHECK CLICK component ${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`);
-    const popover = findAll(r.component, w => w instanceof Gtk.Popover)[0];
-    ok(await until(() => popover?.get_mapped()), 'components (pointer): clicking the Component row opens its list');
-    if (!popover?.get_mapped()) return;
-    let option = null;
-    await until(() => (option = findAll(popover, w => w.get_css_name() === 'row')
-        .find(row => findAll(row, w => w instanceof Gtk.Label && w.label === 'Memory').length > 0)) && option.get_width() > 0);
-    ok(option, 'components (pointer): the list has Memory');
-    if (!option) return;
-    const surface = popover.get_surface();
-    const [px, py] = popover.get_surface_transform();
-    const [, at] = option.compute_point(popover, new Graphene.Point().init(option.get_width() / 2, option.get_height() / 2));
-    print(`PREFS-CHECK CLICK component-memory ${Math.round(surface.get_position_x() + px + at.x)} ${Math.round(surface.get_position_y() + py + at.y)}`);
-    ok(await until(() => r.component.selected === 2), `components (pointer): picking Memory shows it (selected ${r.component.selected})`);
-    ok(r.componentGroup.visible && r.componentGroup.title === 'Memory', 'components (pointer): the Memory view is on the page');
+    await act(`PREFS-CHECK CLICK tab-memory ${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`);
+    ok(await until(() => r.component.selected === 2), `components (pointer): clicking the Memory tab shows it (selected ${r.component.selected})`);
+    ok(r.componentGroup.visible && r.componentGroup.title === 'Memory' && tab.has_css_class('rp-tint-memory'), 'components (pointer): the Memory view is on the page, its tab tinted');
     r.component.selected = 0;
 }
 
@@ -1119,7 +1156,7 @@ async function agentClicks(window, settings, diagnostics, fake) {
     const clickAt = async (widget, name) => {
         const [, p] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() / 2, widget.get_height() / 2));
         const [sx, sy] = window.get_surface_transform();
-        print(`PREFS-CHECK CLICK ${name} ${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`);
+        await act(`PREFS-CHECK CLICK ${name} ${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`);
     };
     window.present();
     window.set_visible_page_name('diagnostics');

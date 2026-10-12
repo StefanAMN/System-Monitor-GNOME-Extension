@@ -401,13 +401,63 @@ function appRow(app, total, hasEnergy) {
 }
 
 /**
+ * A row of tabs, one per component (icon over name), the selected one in
+ * its component's tint. Keeps `selected` and `model` as the dropdown it
+ * replaced had them.
+ * @param {Array<[string, string]>} components key and title
+ * @param {?function(string): Gio.Icon} iconFor
+ * @param {function()} onChange
+ */
+function componentTabs(components, iconFor, onChange) {
+    // Sized by their names, the space left shared out: equal widths would
+    // need every tab as wide as "Temperature".
+    const widget = new Gtk.Box({ spacing: 4, css_classes: ['rp-tabs'], accessible_role: Gtk.AccessibleRole.TAB_LIST });
+    widget.update_property([Gtk.AccessibleProperty.LABEL], [_('Component')]);
+    const buttons = components.map(([key, title], i) => {
+        const button = new Gtk.ToggleButton({ css_classes: ['rp-tab'], accessible_role: Gtk.AccessibleRole.TAB, tooltip_text: title, hexpand: true });
+        const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4, halign: Gtk.Align.CENTER });
+        const gicon = iconFor?.(key);
+        if (gicon) box.append(new Gtk.Image({ gicon, pixel_size: 18, css_classes: [`rp-c-${key}`] }));
+        box.append(new Gtk.Label({ label: title, css_classes: ['rp-tab-label'] }));
+        button.set_child(box);
+        button.update_property([Gtk.AccessibleProperty.LABEL], [title]);
+        if (i > 0) button.set_group(widget.get_first_child());
+        button.key = key;
+        widget.append(button);
+        return button;
+    });
+    const mark = button => {
+        button.update_state([Gtk.AccessibleState.SELECTED], [button.active]);
+        if (button.active) button.add_css_class(`rp-tint-${button.key}`);
+        else button.remove_css_class(`rp-tint-${button.key}`);
+    };
+    // The first tab selected before the page can render: no change reported.
+    buttons[0].active = true;
+    buttons.forEach(mark);
+    for (const button of buttons) {
+        button.connect('toggled', () => {
+            mark(button);
+            if (button.active) onChange();
+        });
+    }
+    const tabs = { widget, buttons, model: Gtk.StringList.new(components.map(([, title]) => title)) };
+    Object.defineProperty(tabs, 'selected', {
+        get: () => buttons.findIndex(b => b.active),
+        set: i => {
+            if (buttons[i]) buttons[i].active = true;
+        },
+    });
+    return tabs;
+}
+
+/**
  * @param {Gio.Settings} settings
  * @param {HistorySource} history
  * @param {object} [opts]
  * @param {function(): ?number} [opts.fullWh] energy of a full charge, if known
  * @returns {{page: Adw.PreferencesPage, rows: object, render: function(), dispose: function()}}
  */
-export function buildTrackingPage(settings, history, { fullWh = () => null } = {}) {
+export function buildTrackingPage(settings, history, { fullWh = () => null, iconFor = null } = {}) {
     const page = new Adw.PreferencesPage({ title: _('Tracking'), name: 'tracking', icon_name: 'battery-level-70-symbolic' });
     const rows = {};
 
@@ -441,14 +491,18 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     rows.clear.add_suffix(rows.clearButton);
     control.add(rows.clear);
 
+    // The components as tabs: each shows the whole page for one of them.
+    const specsNow = () => componentSpecs(settings.get_string('unit-temp') || 'C');
+    const tabsGroup = new Adw.PreferencesGroup();
+    page.add(tabsGroup);
+    rows.component = componentTabs(COMPONENTS.map(c => [c, specsNow()[c].title]), iconFor, () => render());
+    tabsGroup.add(rows.component.widget);
+
     // What to report on.
     const options = new Adw.PreferencesGroup({ title: _('Report') });
     page.add(options);
     rows.period = new Adw.ComboRow({ title: _('Period'), model: Gtk.StringList.new(PERIODS.map(p => p.label())) });
     options.add(rows.period);
-    const specsNow = () => componentSpecs(settings.get_string('unit-temp') || 'C');
-    rows.component = new Adw.ComboRow({ title: _('Component'), model: Gtk.StringList.new(COMPONENTS.map(c => specsNow()[c].title)) });
-    options.add(rows.component);
     rows.batteryOnly = new Adw.SwitchRow({ title: _('On battery only'), subtitle: _('Leave out the time on the charger'), active: true });
     options.add(rows.batteryOnly);
 
@@ -668,7 +722,6 @@ export function buildTrackingPage(settings, history, { fullWh = () => null } = {
     };
 
     rows.period.connect('notify::selected', render);
-    rows.component.connect('notify::selected', render);
     const unitId = settings.connect('changed::unit-temp', render);
     rows.batteryOnly.connect('notify::active', render);
     const trackingId = settings.connect('changed::battery-tracking', () => {

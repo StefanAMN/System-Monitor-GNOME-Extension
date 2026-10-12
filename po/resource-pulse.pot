@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-24 19:57+0300\n"
+"POT-Creation-Date: 2026-10-24 21:33+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -395,7 +395,7 @@ msgstr ""
 msgid "Thermal"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:43 src/ui/prefs/rows.js:335
+#: src/lib/common/settingsmodel.js:43 src/ui/prefs/rows.js:380
 msgid "Top bar"
 msgstr ""
 
@@ -670,8 +670,8 @@ msgid "{minutes} min more per full charge"
 msgstr ""
 
 #: src/lib/engine/agentreport.js:130 src/ui/prefs/tracking.js:332
-#: src/ui/prefs/tracking.js:354 src/ui/prefs/tracking.js:523
-#: src/ui/prefs/tracking.js:555
+#: src/ui/prefs/tracking.js:354 src/ui/prefs/tracking.js:577
+#: src/ui/prefs/tracking.js:609
 msgid "Apps"
 msgstr ""
 
@@ -1729,7 +1729,7 @@ msgstr ""
 
 #: src/ui/panel/processes.js:79 src/ui/panel/processes.js:119
 #: src/ui/panel/processes.js:151 src/ui/prefs/agent.js:215
-#: src/ui/prefs/backup.js:141 src/ui/prefs/tracking.js:433
+#: src/ui/prefs/backup.js:141 src/ui/prefs/tracking.js:483
 msgid "Cancel"
 msgstr ""
 
@@ -1991,7 +1991,7 @@ msgstr ""
 msgid "Open"
 msgstr ""
 
-#: src/ui/prefs/agent.js:232 src/ui/prefs/tracking.js:445
+#: src/ui/prefs/agent.js:232 src/ui/prefs/tracking.js:502
 msgid "Report"
 msgstr ""
 
@@ -2001,7 +2001,7 @@ msgid "Copy report"
 msgstr ""
 
 #: src/ui/prefs/agent.js:236 src/ui/prefs/diagnostics.js:246
-#: src/ui/prefs/rows.js:400
+#: src/ui/prefs/rows.js:445
 msgid "Copied"
 msgstr ""
 
@@ -2091,7 +2091,7 @@ msgid ""
 "panel's size. Battery history is kept."
 msgstr ""
 
-#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:371
+#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:416
 msgid "Reset"
 msgstr ""
 
@@ -2171,7 +2171,7 @@ msgid ""
 "now. Advice about apps and memory needs tracking to be on."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:123 src/ui/prefs/rows.js:402
+#: src/ui/prefs/diagnostics.js:123 src/ui/prefs/rows.js:447
 msgid "Check again"
 msgstr ""
 
@@ -2245,59 +2245,59 @@ msgstr ""
 msgid "Top bar preview: {items}"
 msgstr ""
 
-#: src/ui/prefs/rows.js:335
+#: src/ui/prefs/rows.js:380
 msgid ""
 "Click a metric to pin it next to the clock. Pinned last shows last, and "
 "loses its value first when space runs out."
 msgstr ""
 
-#: src/ui/prefs/rows.js:336
+#: src/ui/prefs/rows.js:381
 msgid "How often values are read, and in which units."
 msgstr ""
 
-#: src/ui/prefs/rows.js:336
+#: src/ui/prefs/rows.js:381
 msgid "Readings"
 msgstr ""
 
-#: src/ui/prefs/rows.js:369
+#: src/ui/prefs/rows.js:414
 msgid "Drag a bottom corner of the panel to resize it."
 msgstr ""
 
-#: src/ui/prefs/rows.js:369
+#: src/ui/prefs/rows.js:414
 msgid "Panel"
 msgstr ""
 
-#: src/ui/prefs/rows.js:370
+#: src/ui/prefs/rows.js:415
 msgid "Size"
 msgstr ""
 
-#: src/ui/prefs/rows.js:384
+#: src/ui/prefs/rows.js:429
 msgid "Automatic"
 msgstr ""
 
-#: src/ui/prefs/rows.js:384
+#: src/ui/prefs/rows.js:429
 msgid "{width} × {height} pixels, set by dragging"
 msgstr ""
 
-#: src/ui/prefs/rows.js:390
+#: src/ui/prefs/rows.js:435
 msgid "Troubleshooting"
 msgstr ""
 
-#: src/ui/prefs/rows.js:393
+#: src/ui/prefs/rows.js:438
 msgid "CPU power is not readable"
 msgstr ""
 
-#: src/ui/prefs/rows.js:394
+#: src/ui/prefs/rows.js:439
 msgid ""
 "Run these two commands in a terminal to make it readable; they ask for your "
 "password."
 msgstr ""
 
-#: src/ui/prefs/rows.js:396
+#: src/ui/prefs/rows.js:441
 msgid "Copy commands"
 msgstr ""
 
-#: src/ui/prefs/rows.js:414
+#: src/ui/prefs/rows.js:459
 msgid "CPU power is now readable"
 msgstr ""
 
@@ -2345,7 +2345,7 @@ msgstr ""
 
 #: src/ui/prefs/tracking.js:289 src/ui/prefs/tracking.js:304
 #: src/ui/prefs/tracking.js:316 src/ui/prefs/tracking.js:340
-#: src/ui/prefs/tracking.js:572 src/ui/prefs/tracking.js:574
+#: src/ui/prefs/tracking.js:626 src/ui/prefs/tracking.js:628
 msgid "not measured"
 msgstr ""
 
@@ -2358,7 +2358,7 @@ msgstr ""
 msgid "Above the temperature alert"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:291 src/ui/prefs/tracking.js:565
+#: src/ui/prefs/tracking.js:291 src/ui/prefs/tracking.js:619
 msgid "Time recorded"
 msgstr ""
 
@@ -2544,7 +2544,7 @@ msgid "Average"
 msgstr ""
 
 #: src/ui/prefs/tracking.js:349 src/ui/prefs/tracking.js:350
-#: src/ui/prefs/tracking.js:469
+#: src/ui/prefs/tracking.js:523
 msgid "processor"
 msgstr ""
 
@@ -2570,77 +2570,77 @@ msgstr ""
 msgid "{time} of graphics time"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:411
+#: src/ui/prefs/tracking.js:415
+msgid "Component"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:461
 msgid "Tracking"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:416
+#: src/ui/prefs/tracking.js:466
 msgid "Usage tracking"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:417
+#: src/ui/prefs/tracking.js:467
 msgid ""
 "Records which apps use the processor, memory, disk and graphics, and how "
 "much the network moves and how warm the processor runs, every {seconds} "
 "seconds while you are logged in. Kept for {days} days, on this computer only."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:421
+#: src/ui/prefs/tracking.js:471
 msgid "Track usage per app"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:424
+#: src/ui/prefs/tracking.js:474
 msgid "Status"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:426
+#: src/ui/prefs/tracking.js:476
 msgid "History"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:426
+#: src/ui/prefs/tracking.js:476
 msgid "Recorded figures of the last {n} day"
 msgid_plural "Recorded figures of the last {n} days"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/prefs/tracking.js:427
+#: src/ui/prefs/tracking.js:477
 msgid "Clear…"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:430
+#: src/ui/prefs/tracking.js:480
 msgid "Clear the battery history?"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:431
+#: src/ui/prefs/tracking.js:481
 msgid ""
 "All recorded figures are deleted. Tracking goes on if it is switched on."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:434
+#: src/ui/prefs/tracking.js:484
 msgid "Clear"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:447
+#: src/ui/prefs/tracking.js:504
 msgid "Period"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:450
-msgid "Component"
-msgstr ""
-
-#: src/ui/prefs/tracking.js:452
+#: src/ui/prefs/tracking.js:506
 msgid "Leave out the time on the charger"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:452
+#: src/ui/prefs/tracking.js:506
 msgid "On battery only"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:456
+#: src/ui/prefs/tracking.js:510
 msgid "Summary"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:457
+#: src/ui/prefs/tracking.js:511
 msgid ""
 "Processor energy is shared among apps by the processor time each used, and "
 "the integrated graphics part by graphics time where the machine reports it: "
@@ -2648,151 +2648,151 @@ msgid ""
 "measured per app."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:460
+#: src/ui/prefs/tracking.js:514
 msgid "A full charge lasts"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:460
+#: src/ui/prefs/tracking.js:514
 msgid "Average drain"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:460
+#: src/ui/prefs/tracking.js:514
 msgid "Battery used"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:460 src/ui/prefs/tracking.js:565
+#: src/ui/prefs/tracking.js:514 src/ui/prefs/tracking.js:619
 msgid "Time on battery"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:468
+#: src/ui/prefs/tracking.js:522
 msgid "Battery use"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:469
+#: src/ui/prefs/tracking.js:523
 msgid "battery"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:482
+#: src/ui/prefs/tracking.js:536
 msgid "Processor idle and platform"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:482
+#: src/ui/prefs/tracking.js:536
 msgid "Processor, shared among apps"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:482
+#: src/ui/prefs/tracking.js:536
 msgid "of which graphics"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:483
+#: src/ui/prefs/tracking.js:537
 msgid "Display, radios and the rest"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:483
+#: src/ui/prefs/tracking.js:537
 msgid "While locked or asleep"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:523 src/ui/prefs/tracking.js:556
-#: src/ui/prefs/tracking.js:650
+#: src/ui/prefs/tracking.js:577 src/ui/prefs/tracking.js:610
+#: src/ui/prefs/tracking.js:704
 msgid "Most first"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:539
+#: src/ui/prefs/tracking.js:593
 msgid "Problem: {problem}"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:540
+#: src/ui/prefs/tracking.js:594
 msgid "Off"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:540
+#: src/ui/prefs/tracking.js:594
 msgid "Off. The history below is kept until you clear it."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:541
+#: src/ui/prefs/tracking.js:595
 msgid "Recording. The first figures appear within a minute."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:543
+#: src/ui/prefs/tracking.js:597
 msgid "Recording · {time} recorded · energy measured"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:544
+#: src/ui/prefs/tracking.js:598
 msgid ""
 "Recording · {time} recorded · processor time only: power readings are not "
 "available"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:562
+#: src/ui/prefs/tracking.js:616
 #, javascript-format
 msgid "{percent} % of the battery used"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:564
+#: src/ui/prefs/tracking.js:618
 #, javascript-format
 msgid "{percent} % of a full charge"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:569
+#: src/ui/prefs/tracking.js:623
 msgid "on average"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:571
+#: src/ui/prefs/tracking.js:625
 msgid "at this drain"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:573
+#: src/ui/prefs/tracking.js:627
 msgid "power readings are not available"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:577
+#: src/ui/prefs/tracking.js:631
 msgid "by graphics time"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:580
+#: src/ui/prefs/tracking.js:634
 msgid "not measurable per app"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:580
+#: src/ui/prefs/tracking.js:634
 msgid "{share}; not measurable per app"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:582
+#: src/ui/prefs/tracking.js:636
 msgid "not attributed: extensions pause while the screen is locked"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:602 src/ui/prefs/tracking.js:661
+#: src/ui/prefs/tracking.js:656 src/ui/prefs/tracking.js:715
 msgid "Each below the ones above"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:602 src/ui/prefs/tracking.js:661
+#: src/ui/prefs/tracking.js:656 src/ui/prefs/tracking.js:715
 msgid "{n} more"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:607 src/ui/prefs/tracking.js:664
+#: src/ui/prefs/tracking.js:661 src/ui/prefs/tracking.js:718
 msgid "No figures for this period"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:608 src/ui/prefs/tracking.js:665
+#: src/ui/prefs/tracking.js:662 src/ui/prefs/tracking.js:719
 msgid "Switch on tracking above to start recording."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:608 src/ui/prefs/tracking.js:665
+#: src/ui/prefs/tracking.js:662 src/ui/prefs/tracking.js:719
 msgid "Tracking is on; figures appear as time passes."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:644
+#: src/ui/prefs/tracking.js:698
 msgid ""
 "No figures for this period yet: they are recorded while tracking is on, and "
 "this kind only since a recent version."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:645
+#: src/ui/prefs/tracking.js:699
 msgid ""
 "No figures for this period. Switch on tracking above to start recording."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:652
+#: src/ui/prefs/tracking.js:706
 msgid "No figures per app"
 msgstr ""
 
