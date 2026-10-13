@@ -421,13 +421,19 @@ async function batteryPages(styleWindow) {
 
     // The file changes (the extension saved): both pages follow.
     ok(r.summary.visible, 'tracking: the summary is shown when there are figures');
+    // File monitor + debounce + asynchronous load: well under a second with
+    // inotify. When the user has run out of inotify instances (128 by
+    // default; IDEs and language servers use many) GLib falls back to
+    // polling the file every few seconds, so allow 10 s.
     await saveLedger(path, new BatteryLedger());
-    for (let i = 0; i < 30 && r.appRows.length > 0; i++) await sleep(100);
-    ok(r.appRows.length === 0, `tracking: did not follow the file (${r.appRows.length} rows left)`);
+    const savedAt = GLib.get_monotonic_time();
+    for (let i = 0; i < 100 && r.appRows.length > 0; i++) await sleep(100);
+    ok(r.appRows.length === 0, `tracking: did not follow the file within 10 s (${r.appRows.length} rows left)`);
+    print(`PREFS-CHECK INFO: the Tracking page followed the file in ${((GLib.get_monotonic_time() - savedAt) / 1000).toFixed(0)} ms`);
     ok(!r.summary.visible, 'tracking: no summary of zeros without figures');
     await saveLedger(path, ledger);
-    for (let i = 0; i < 30 && r.appRows.length === 0; i++) await sleep(100);
-    ok(r.appRows.length === 4, `tracking: did not pick up the restored file (${r.appRows.length} rows)`);
+    for (let i = 0; i < 100 && r.appRows.length === 0; i++) await sleep(100);
+    ok(r.appRows.length === 4, `tracking: did not pick up the restored file within 10 s (${r.appRows.length} rows)`);
 
     return {
         window,

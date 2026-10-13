@@ -53,6 +53,23 @@
       <summary>Temperature Alert Threshold</summary>
       <description>Temperature threshold to trigger warning style.</description>
     </key>
+    <key name="threshold-gpu" type="i">
+      <range min="50" max="100"/>
+      <default>95</default>
+      <summary>GPU Alert Threshold</summary>
+      <description>GPU usage percentage that raises an alert when sustained.</description>
+    </key>
+    <key name="threshold-disk" type="i">
+      <range min="50" max="100"/>
+      <default>95</default>
+      <summary>Disk Space Alert Threshold</summary>
+      <description>Percentage of space used on / that raises an alert.</description>
+    </key>
+    <key name="alert-notify" type="b">
+      <default>true</default>
+      <summary>Alert Notifications</summary>
+      <description>Send a desktop notification when a metric stays above its threshold.</description>
+    </key>
     <key name="show-tooltips" type="b">
       <default>true</default>
       <summary>Show Tooltips</summary>
