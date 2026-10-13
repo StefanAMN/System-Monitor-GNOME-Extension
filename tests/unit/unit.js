@@ -32,7 +32,7 @@ import { componentView, bars, COMPONENTS } from '../../src/lib/engine/trackingvi
 import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
 import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
-import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES } from '../../src/lib/engine/batteryledger.js';
+import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES, FINE_MS, FINE_KEPT_MS, MAX_FINE } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth, combineBatteries, BatterySampler } from '../../src/lib/collectors/battery.js';
 import { backupText, checkBackup, BackupError, NOT_BACKED_UP } from '../../src/lib/common/backup.js';
 import { _, N_, ngettext, fill, translated, setTranslations, resetTranslations } from '../../src/lib/common/i18n.js';
@@ -1537,6 +1537,46 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         eq(['memory', 'disk', 'network', 'thermal'].map(c => componentView(c, old, { from: h10, now }).has), [false, false, false, false],
             'components: hours from before a component was recorded do not count as figures');
         eq(bars(led, h10, now, false, () => ({ n: 0 }), (p, b) => { p.n += b.cpu; }).length, 3, 'components: bars from the period start to now');
+    }
+
+    // Five-minute totals: the same sums as the hours, split finer, for 48 hours.
+    {
+        const t0 = new Date(2026, 9, 25, 10, 0, 5).getTime();
+        const MiB = 1024 * 1024;
+        const sample = (i, o = {}) => ({
+            mono: 1e9 + i * 30e6, wall: t0 + i * 30000, packageW: 6, battery: { present: true, onBattery: true, energyWh: 40 - i * 0.01 },
+            usage: { total: i * 2e6, system: 0, units: [{ unit: 'a.scope', id: 'a', usec: i * 1e6 }] },
+            machine: { memTotal: 8000 * MiB, memUsed: (3000 + i * 10) * MiB, swapTotal: 0, swapUsed: 0, swapInBytes: 0, swapOutBytes: 0, pressure: null,
+                disks: [{ name: 'nvme0n1', readBytes: i * 1e6, writtenBytes: 0 }] },
+            net: [{ iface: 'wlan0', rxBytes: i * 5e5, txBytes: 0 }], temp: 40 + i, ...o,
+        });
+        const led = new BatteryLedger();
+        for (let i = 0; i < 20; i++) led.ingest(sample(i)); // 10:00:05 to 10:09:35: two five-minute buckets
+        const hour = led.buckets[0];
+        const fine = led.fine.filter(b => b.b);
+        ok(fine.length === 2 && fine.every(b => b.t % FINE_MS === 0), `fine: ${fine.length} five-minute buckets on 5-minute marks`);
+        const sum = key => fine.reduce((t, b) => t + b[key], 0);
+        ok(['s', 'bw', 'cpu', 'pw', 'rx', 'dr', 'ms', 'mu', 'tt', 'ta'].every(key => Math.abs(sum(key) - hour[key]) < 1e-6),
+            `fine: the five-minute sums add up to the hour's (${['s', 'cpu', 'rx', 'dr'].map(k => `${k} ${sum(k)}/${hour[k]}`).join(', ')})`);
+        ok(fine[0].mx < fine[1].mx && fine[1].mx === hour.mx && fine[1].tm === 59 && fine[0].tm < 59, 'fine: each keeps its own highest memory and temperature');
+        ok(fine[0].energy && !('a' in fine[0]), 'fine: machine figures only, no apps');
+        const back = BatteryLedger.fromJSON(JSON.stringify(led));
+        eq(back.fine.length, led.fine.length, 'fine: written and read back');
+        eq(BatteryLedger.fromJSON(JSON.stringify({ version: 2, buckets: [] })).fine, [], 'fine: a file without them reads as none');
+        eq(BatteryLedger.fromJSON(JSON.stringify({ version: 2, buckets: [], fine: 'junk' })).fine, [], 'fine: a damaged list is dropped, the file still loads');
+        // Pruned to the last 48 hours, and never more than MAX_FINE.
+        const long = new BatteryLedger();
+        for (let i = 0; i <= 50 * 12; i++) {
+            const r = sample(i);
+            r.mono = 1e9 + i * 30e6;
+            r.wall = t0 + i * FINE_MS;
+            long.forgetLast();
+            long.ingest(r);
+        }
+        const newest = long.fine.at(-1).t;
+        ok(long.fine.length <= MAX_FINE && long.fine.every(b => b.t > newest - FINE_KEPT_MS), `fine: ${long.fine.length} kept, none older than 48 h`);
+        led.clear();
+        eq([led.buckets.length, led.fine.length], [0, 0], 'fine: clearing the history clears them too');
     }
 
     // Machine-wide counters for tracking: memory, swap, stall times.
