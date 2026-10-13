@@ -563,3 +563,25 @@ Data flow: alerts read the poll's snapshot (Aggregator); new collectors are HAL 
 | E | Disk page: top processes by read + write rate from `/proc/<pid>/io`, only while the page is open; the user's processes only (EACCES for others is expected, counted, not shown) | HAL + UI | PID exits between listing and read | unit tests; test-ui with a writer process |
 | F | Network data per day and month from `/proc/net/dev` every 60 s, counter resets handled, 62 days kept in `~/.local/share/resource-pulse/network-usage.json` | HAL + Engine + UI | counter wrap / interface re-created, clock change across midnight (wall time for day keys only) | unit tests; overhead |
 | G | Diagnostics: "Copy report" puts findings and system state on the clipboard as text | UI (prefs) | no findings yet | GTK check reads the clipboard |
+
+## State (2026-10-15, branch `alerts-and-history`)
+
+| # | Result | Proof that was run |
+|---|--------|--------------------|
+| A | Alerts with ⚠ (22 px, narrower than any value so it hides at most one) and red pinned value; notifications with the cause ("sh ×12 using 11.7 cores"), clicking opens the page; GPU / disk limits and a notifications switch in Settings | 23 unit checks with a fake clock (sustain, hysteresis, recovery, unreadable values, gap per metric, lowered threshold); test-ui: every core burned, ⚠ + red value, tooltip by real hover, notification text, real click on the banner opens the CPU page, all clear after; ⚠ hides ≤ 1 value (measured: 5 → 6) |
+| B | Pressure rows on CPU / Memory / Disk; memory pressure ≥ 20 % alerts | unit parse + fixture tree + missing-PSI tests; test-ui reads the three rows |
+| C | End / Force quit / Cancel on top-process rows (CPU, Memory, Disk); session processes never offered; the ✕ keeps its room when hidden | unit tests: identity from a fixture /proc (zombie, reused pid, other user), real children ended by TERM and KILL, kill's error reported (pid_max, never a real process); test-ui with real clicks: polite process ended, one ignoring TERM force-quit, Cancel leaves it running, the click does not reach the row |
+| D | 2m / 1h / 24h switch in the detail header; gaps drawn as gaps; peak line; network, battery, power read once a minute while not shown | unit tests (bucketing, gaps, capacity, hours in the hover label); test-ui clicks 1h / 24h / live and finds filled buckets |
+| E | Disk page "Top Disk Usage": only processes doing I/O; other users' counted and named as unreadable | test-ui: a dd writer on ext4 listed first (718 MB/s); note shows 235 unreadable processes |
+| F | Today / This month on the Network page, saved with the boot id | unit tests (baseline, day roll, month sum, counter reset, reboot, new interface, save/load, 62-day bound, foreign file refused); test-ui reads both rows |
+| G | Copy report in Diagnostics | GTK check reads the clipboard: header, system line, findings by goal |
+
+Found on the way:
+- The UI test sandbox never loaded a user GTK theme. That is fixed in W6.
+- The Tracking-page file check depended on inotify. This machine had 126 of 128 inotify instances in use, so GLib fell back to polling; the check now allows 10 s.
+- The cause line said "sh ×14 1189 %". It now says cores.
+- The bold red value grew wider than the space reserved for it and hid neighbouring values. The value is now red only, not bold.
+- `Gdk.Clipboard.set_text` is not introspectable, so the report goes through a bytes content provider.
+- The network-usage load compared a generation counter captured before `enable()` bumps it, so the saved totals were never attached. It now uses a per-enable token.
+
+Not run: real NVIDIA / AMD GPUs (GPU alerts use the same reading as the GPU page); a kernel without PSI (fixture only); traffic across a real screen lock (the boot-id path is unit-tested).

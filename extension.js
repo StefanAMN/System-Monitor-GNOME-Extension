@@ -3860,10 +3860,11 @@ export default class ResourcePulseExtension extends Extension {
         if (!container) return;
         if (!this[targetWidgetsKey]) this[targetWidgetsKey] = [];
 
-        if (this[targetWidgetsKey].length !== processes.length) {
-            container.destroy_all_children();
-            this[targetWidgetsKey] = [];
-            for (let i = 0; i < processes.length; i++) {
+        // Rows are only added, never rebuilt: a list whose length changes
+        // from poll to poll (the Disk page shows only active processes)
+        // hides the spare rows instead of creating actors every time.
+        if (this[targetWidgetsKey].length < processes.length) {
+            for (let i = this[targetWidgetsKey].length; i < processes.length; i++) {
                 const item = new St.BoxLayout({
                     style: 'padding: 6px 8px; spacing: 8px; border-radius: 8px;',
                     style_class: 'resource-pulse-process-item',
@@ -3914,11 +3915,16 @@ export default class ResourcePulseExtension extends Extension {
                 this._addClickAnimations(item);
 
                 container.add_child(item);
+                widgets.item = item;
                 this[targetWidgetsKey].push(widgets);
             }
         }
 
         const useGiB = this._settings.get_string('unit-mem') === 'GiB';
+        this[targetWidgetsKey].forEach((w, i) => {
+            w.item.visible = i < processes.length;
+            if (i >= processes.length) w.group = null;
+        });
         processes.forEach((proc, i) => {
             const w = this[targetWidgetsKey][i];
             if (!w) return;
