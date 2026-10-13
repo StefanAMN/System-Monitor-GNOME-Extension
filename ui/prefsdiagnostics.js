@@ -1,7 +1,9 @@
 // The preferences window's Diagnostics page: advice for a longer runtime per
 // charge and a longer battery life, from the tracked history and the
 // machine's current state. GTK side (preferences process).
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 
@@ -30,6 +32,42 @@ export function estimateText(estimate) {
 }
 
 /**
+ * The findings and the machine's state as plain text, for pasting into a
+ * bug report or a question.
+ * @param {object[]} findings from diagnose()
+ * @param {?object} system from readSystemState()
+ * @param {Date} [now]
+ */
+export function reportText(findings, system, now = new Date()) {
+    const lines = [`Resource Pulse diagnostics, ${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`];
+    if (system) {
+        const b = system.battery;
+        const parts = [
+            system.onBattery === null || system.onBattery === undefined ? null : system.onBattery ? 'on battery' : 'on AC',
+            system.powerProfile ? `power profile ${system.powerProfile}` : null,
+            Number.isFinite(system.backlight) ? `backlight ${Math.round(system.backlight * 100)} %` : null,
+            b && Number.isFinite(b.healthPct) ? `battery holds ${Math.round(b.healthPct)} % of its design capacity${Number.isFinite(b.cycles) ? ` after ${b.cycles} cycles` : ''}` : null,
+            b?.chargeLimit ? `charge limit ${b.chargeLimit}` : null,
+            system.energyReadable === false ? 'processor energy not readable' : null,
+        ].filter(Boolean);
+        lines.push(`System: ${parts.join(', ') || 'unknown'}`);
+    } else {
+        lines.push('System: not read yet');
+    }
+    for (const [goal, title] of GOALS) {
+        const mine = findings.filter(f => f.goal === goal);
+        if (mine.length === 0) continue;
+        lines.push('', title);
+        for (const f of mine) {
+            const rest = [f.detail, f.evidence, estimateText(f.estimate)].filter(Boolean).join(' ');
+            lines.push(`- [${f.severity}] ${f.title}${rest ? `: ${rest}` : ''}`);
+        }
+    }
+    if (findings.length === 0) lines.push('', 'No findings.');
+    return lines.join('\n');
+}
+
+/**
  * @param {HistorySource} history
  * @param {object} [opts]
  * @param {function(): Promise<object>} [opts.readState] for tests
@@ -47,8 +85,12 @@ export function buildDiagnosticsPage(history, {
             'Advice about apps needs tracking to be on.',
     });
     page.add(intro);
-    const again = new Gtk.Button({ label: 'Check again', halign: Gtk.Align.START });
-    intro.add(again);
+    const buttons = new Gtk.Box({ spacing: 8, halign: Gtk.Align.START });
+    const again = new Gtk.Button({ label: 'Check again' });
+    const copy = new Gtk.Button({ label: 'Copy report', tooltip_text: 'Copy the findings and the machine\'s state as text' });
+    buttons.append(again);
+    buttons.append(copy);
+    intro.add(buttons);
 
     const groups = {};
     const lists = {};
@@ -130,9 +172,27 @@ export function buildDiagnosticsPage(history, {
         history.requestFlush();
         refresh();
     });
+    let copiedId = 0;
+    copy.connect('clicked', () => {
+        // set_text() is not introspectable; a bytes provider is the same thing.
+        const bytes = new GLib.Bytes(new TextEncoder().encode(reportText(state.findings, state.system)));
+        copy.get_clipboard().set_content(Gdk.ContentProvider.new_for_bytes('text/plain;charset=utf-8', bytes));
+        copy.label = 'Copied';
+        if (copiedId) GLib.source_remove(copiedId);
+        copiedId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
+            copiedId = 0;
+            copy.label = 'Copy report';
+            return GLib.SOURCE_REMOVE;
+        });
+    });
     const unsubscribe = history.subscribe(() => refresh());
     render();
     refresh();
 
-    return { page, lists, groups, state, refresh, dispose: () => unsubscribe() };
+    const dispose = () => {
+        unsubscribe();
+        if (copiedId) GLib.source_remove(copiedId);
+        copiedId = 0;
+    };
+    return { page, lists, groups, state, refresh, copy, dispose };
 }

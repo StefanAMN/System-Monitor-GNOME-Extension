@@ -20,7 +20,7 @@ import { DiskSampler } from './lib/disk.js';
 import { NetworkSampler } from './lib/network.js';
 import { ThermalSampler } from './lib/thermal.js';
 import { GpuSampler } from './lib/gpu.js';
-import { ProcessSampler } from './lib/process.js';
+import { ProcessSampler, canEnd, liveMembers, signalProcesses } from './lib/process.js';
 import { BatteryTracker, ledgerPath } from './lib/batterytracker.js';
 import { METRICS } from './lib/settingsmodel.js';
 import { BatteryLedger, saveLedger } from './lib/batteryledger.js';
@@ -28,6 +28,9 @@ import { appInfo as ledgerAppInfo } from './lib/appnames.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale } from './lib/present.js';
 import { RingBuffer } from './lib/ringbuffer.js';
 import { AlertMonitor, alertReadings, alertLine } from './lib/alerts.js';
+import { PressureSampler } from './lib/pressure.js';
+import { BucketSeries, RANGES } from './lib/longhistory.js';
+import { loadNetUsage, saveNetUsage, netUsagePath, readBootId } from './lib/netusage.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from './lib/format.js';
@@ -53,8 +56,14 @@ const METRIC_NAMES = {
 // Alerts watch metrics that are not pinned too; the slower ones less often.
 const ALERT_DISK_EVERY_US = 60e6;
 const ALERT_GPU_EVERY_US = 30e6;
-// Share of time some program waited for memory (PSI "full", avg10) that alerts.
-const PRESSURE_LIMIT = 10;
+// Network, battery and power are read this often while not shown, so the
+// 1 h / 24 h charts and the network day totals have no holes.
+const BACKGROUND_EVERY_US = 60e6;
+// Network day totals are written at most this often (and on disable).
+const NET_USAGE_SAVE_US = 5 * 60e6;
+// Share of time (PSI "some", 10 s average) in which programs waited for
+// memory that raises an alert: well past the occasional reclaim stall.
+const PRESSURE_LIMIT = 20;
 // Panel page and wording per alert.
 const ALERTS = {
     cpu: { tab: 'cpu', name: 'CPU', title: 'CPU usage is high' },
@@ -102,8 +111,25 @@ export default class ResourcePulseExtension extends Extension {
         this._net = new NetworkSampler();
         this._thm = new ThermalSampler();
         this._gpu = new GpuSampler();
+        this._psi = new PressureSampler();
+        // Network data per day: counted from the file's last counters once loaded.
+        this._netUsage = null;
+        this._netUsageDirty = false;
+        this._netUsageSavedAt = GLib.get_monotonic_time();
+        this._bootId = readBootId();
+        {
+            // A token, not _gen: _gen is bumped further down in enable().
+            const token = this._netUsageToken = {};
+            loadNetUsage(netUsagePath()).then(({ usage, problem }) => {
+                if (problem) console.warn(`ResourcePulse: ${problem}`);
+                if (this._netUsageToken === token) this._netUsage = usage;
+            });
+        }
+        this._selfPid = Gio.Credentials.new().get_unix_pid();
+        this._uid = Gio.Credentials.new().get_unix_user();
+        this._waits = new Map();
         this._alerts = new AlertMonitor();
-        this._alertSampled = { dsk: 0, gpu: 0 };
+        this._alertSampled = { dsk: 0, gpu: 0, net: 0, bat: 0, pwr: 0 };
         this._alertCauses = {};
         this._alertProc = null;
         this._causeTimerId = 0;
@@ -125,6 +151,14 @@ export default class ResourcePulseExtension extends Extension {
         this._hist = {};
         for (const key of HISTORY_KEYS) this._hist[key] = new RingBuffer(HISTORY_CAPACITY);
         this._histStamp = {};
+        // 1 h and 24 h of buckets per key; fixed size, kept across interval changes.
+        this._long = {};
+        for (const [range, spec] of Object.entries(RANGES)) {
+            if (!spec) continue;
+            this._long[range] = {};
+            for (const key of HISTORY_KEYS) this._long[range][key] = new BucketSeries(spec.bucketUs, spec.capacity);
+        }
+        this._range = 'live';
         this._sparklines = [];
 
         // Tooltip state
@@ -478,6 +512,17 @@ export default class ResourcePulseExtension extends Extension {
         this._notifySource?.destroy();
         this._notifySource = null;
         this._alerts = null;
+        // Counters since the last save; the next enable counts from here.
+        if (this._netUsage) this._saveNetUsage();
+        this._netUsage = null;
+        this._netUsageToken = null;
+        for (const [id, resolve] of this._waits ?? []) {
+            GLib.source_remove(id);
+            resolve(false);
+        }
+        this._waits = null;
+        this._psi = null;
+        this._lastPsi = null;
         this._dangerBox = null;
 
         // Pages are built lazily, so a field left over from the previous
@@ -1000,6 +1045,7 @@ export default class ResourcePulseExtension extends Extension {
             spark.setSpanLabel(spanLabel);
             spark.setSampleSeconds(interval);
         }
+        this._applyRange();
 
         this._poll();
         this._timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
@@ -1051,6 +1097,77 @@ export default class ResourcePulseExtension extends Extension {
         }
         if (need.thm) this._pushHistory('thm', data.thm.packageTemp, now);
         if (need.gpu && data.gpu.present) this._pushHistory('gpu', data.gpu.percent, now);
+    }
+
+    /**
+     * Feed the 1 h / 24 h buckets with what this poll read; series of
+     * metrics not read now only move on in time (their empty buckets become
+     * gaps).
+     */
+    _recordLong(data, need, now) {
+        const MB = 1000000;
+        const values = {};
+        if (need.cpu) values.cpu = data.cpu.total;
+        if (need.mem) values.mem = data.mem.percent;
+        if (need.bat && data.bat.present) {
+            values.bat = data.bat.percent;
+            values.batRate = data.bat.energyRate || 0;
+        }
+        if (need.pwr && (data.pwr.raplSupported || data.pwr.systemPower !== null))
+            values.pwr = data.pwr.systemPower ?? data.pwr.packagePower ?? NaN;
+        if (need.dsk) {
+            values.dskRead = data.dsk.readRate / MB;
+            values.dskWrite = data.dsk.writeRate / MB;
+        }
+        if (need.net) {
+            values.netRx = data.net.total.rxRate / 1000;
+            values.netTx = data.net.total.txRate / 1000;
+        }
+        if (need.thm && !thermalUnavailable(data.thm)) values.thm = data.thm.packageTemp;
+        if (need.gpu && data.gpu.present) values.gpu = data.gpu.percent;
+        for (const series of Object.values(this._long)) {
+            for (const key of HISTORY_KEYS) {
+                if (key in values) series[key].add(values[key], now);
+                else series[key].advance(now);
+            }
+        }
+    }
+
+    /** Add this reading's traffic to today's total; save now and then. */
+    _countNetUsage(net, now) {
+        if (!this._netUsage) return;
+        const physical = Object.entries(net.interfaces)
+            .filter(([, i]) => !i.isVirtual)
+            .map(([iface, i]) => ({ iface, rxBytes: i.rxBytes, txBytes: i.txBytes }));
+        const day = GLib.DateTime.new_now_local().format('%Y-%m-%d');
+        if (this._netUsage.ingest(physical, this._bootId, day)) this._netUsageDirty = true;
+        if (this._netUsageDirty && now - this._netUsageSavedAt >= NET_USAGE_SAVE_US) this._saveNetUsage(now);
+    }
+
+    _saveNetUsage(now = GLib.get_monotonic_time()) {
+        if (!this._netUsage) return;
+        this._netUsageSavedAt = now;
+        this._netUsageDirty = false;
+        saveNetUsage(netUsagePath(), this._netUsage).catch(e =>
+            console.warn(`ResourcePulse: cannot save network usage: ${e.message}`));
+    }
+
+    /** Point the detail charts at the chosen range. */
+    _applyRange() {
+        const spec = RANGES[this._range];
+        for (const spark of this._sparklines) {
+            if (!spark.options.showGrid) continue;
+            spark.history = spec ? this._long[this._range][spark.histKey] : this._hist[spark.histKey];
+            spark.setSampleSeconds(spec ? spec.bucketUs / 1e6 : this._sampleSeconds);
+            spark.setSpanLabel(spec ? spec.label : this._spanLabel);
+            spark.refresh();
+        }
+        for (const [range, button] of Object.entries(this._rangeButtons ?? {})) {
+            if (range === this._range) button.add_style_class_name('rp-range-on');
+            else button.remove_style_class_name('rp-range-on');
+            button.checked = range === this._range;
+        }
+        if (this._rangeButtons?.live) this._rangeButtons.live.label = this._spanLabel || 'live';
     }
 
     /**
@@ -1135,16 +1252,19 @@ export default class ResourcePulseExtension extends Extension {
             // Alerts also watch what is not shown: the cheap metrics on every
             // poll, disk space and the GPU less often. Graphs record only
             // what is shown, so their time axis stays continuous.
+            const due = (key, every) => now - this._alertSampled[key] >= every;
             const need = {
                 ...shown,
                 cpu: true,
                 mem: true,
                 thm: true,
-                dsk: shown.dsk || now - this._alertSampled.dsk >= ALERT_DISK_EVERY_US,
-                gpu: shown.gpu || now - this._alertSampled.gpu >= ALERT_GPU_EVERY_US,
+                dsk: shown.dsk || due('dsk', ALERT_DISK_EVERY_US),
+                gpu: shown.gpu || due('gpu', ALERT_GPU_EVERY_US),
+                net: shown.net || due('net', BACKGROUND_EVERY_US),
+                bat: shown.bat || due('bat', BACKGROUND_EVERY_US),
             };
-            if (need.dsk) this._alertSampled.dsk = now;
-            if (need.gpu) this._alertSampled.gpu = now;
+            need.pwr = shown.pwr || due('pwr', BACKGROUND_EVERY_US);
+            for (const key of ['dsk', 'gpu', 'net', 'bat', 'pwr']) if (need[key]) this._alertSampled[key] = now;
 
             const deadline = new Promise(resolve => {
                 this._pollDeadlineId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, POLL_DEADLINE_MS, () => {
@@ -1183,6 +1303,11 @@ export default class ResourcePulseExtension extends Extension {
             if (need.thm) this._lastThm = thm;
             if (need.gpu) this._lastGpu = gpu;
 
+            // Three small reads; feeds the load rows and the memory alert.
+            const psi = await this._guarded('pressure', deadline, () => this._psi.sample(), this._lastPsi ?? null);
+            if (gen !== this._gen) return;
+            this._lastPsi = psi;
+
             const pwr = need.pwr
                 ? await this._guarded('power', deadline, () => this._pwr.sample(bat), last.pwr)
                 : last.pwr;
@@ -1198,26 +1323,33 @@ export default class ResourcePulseExtension extends Extension {
             let processes = [];
             let procSort = null;
             let procWarmingUp = false;
-            if (isDetailedCpu || isDetailedMem) {
+            let ioDenied = 0;
+            if (isDetailedCpu || isDetailedMem || isDetailedDsk) {
                 // A baseline older than a couple of intervals (the menu sat
                 // on another tab) would turn the rates into long averages.
                 const procResult = await this._guarded('processes', deadline,
-                    () => this._proc.sample(mem.total, isDetailedMem, 5, 2.5 * this._sampleSeconds), null);
+                    () => this._proc.sample(mem.total, isDetailedMem, 5, 2.5 * this._sampleSeconds, { io: isDetailedDsk }), null);
                 if (gen !== this._gen) return;
                 // null: the sampler was destroyed or is still reading.
-                // CPU rates need two readings; memory is valid from the first.
-                procWarmingUp = !!procResult?.warmingUp && isDetailedCpu;
+                // CPU and disk rates need two readings; memory is valid from the first.
+                procWarmingUp = !!procResult?.warmingUp && !isDetailedMem;
                 if (procResult && !procWarmingUp) {
                     processes = procResult.top;
-                    procSort = isDetailedMem ? 'memory' : 'cpu';
+                    procSort = isDetailedMem ? 'memory' : isDetailedDsk ? 'disk' : 'cpu';
+                    ioDenied = procResult.ioDenied;
                 }
             } else if (!isOpen) {
                 // Deltas across a closed menu would be averages over minutes.
                 this._proc.reset();
             }
 
-            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, processes, procSort };
-            if (tick || this._recordPending) this._recordHistory(data, shown, now);
+            if (need.net) this._countNetUsage(net, now);
+
+            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, processes, procSort, ioDenied };
+            if (tick || this._recordPending) {
+                this._recordHistory(data, shown, now);
+                this._recordLong(data, need, now);
+            }
             this._lastData = data;
             this._render(data);
             this._updateAlerts(data, now);
@@ -1242,10 +1374,12 @@ export default class ResourcePulseExtension extends Extension {
             ? { paddingLeft: 38, formatValue: v => formatTemp(v, this._settings?.get_string('unit-temp') || 'C') }
             : SPARK_SCALES[key];
         const spark = new Sparkline(this._hist[key], height, Object.assign({}, options, scale));
+        spark.histKey = key;
         // Pages are built on first visit, after polling has started.
         if (this._spanLabel) spark.setSpanLabel(this._spanLabel);
         if (this._sampleSeconds) spark.setSampleSeconds(this._sampleSeconds);
         this._sparklines.push(spark);
+        if (options.showGrid && this._range !== 'live') this._applyRange();
         return spark;
     }
 
@@ -1670,6 +1804,110 @@ export default class ResourcePulseExtension extends Extension {
             this._indicator.menu.open();
         });
         this._notifySource.addNotification(notification);
+    }
+
+    // ── Ending processes ──────────────────────────────────────────────────────
+
+    /** A timer that disable() ends early (resolving false), so no flow outlives the session. */
+    _wait(ms) {
+        return new Promise(resolve => {
+            if (!this._waits) {
+                resolve(false);
+                return;
+            }
+            const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+                this._waits?.delete(id);
+                resolve(true);
+                return GLib.SOURCE_REMOVE;
+            });
+            this._waits.set(id, resolve);
+        });
+    }
+
+    /** The confirmation line under a process list. */
+    _buildEndBar() {
+        // The message on its own (wrapping) line, the buttons under it.
+        const box = new St.BoxLayout({ visible: false, vertical: true, style: 'spacing: 6px; padding-top: 8px;' });
+        const label = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em;', x_expand: true });
+        label.clutter_text.line_wrap = true;
+        label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        const buttons = new St.BoxLayout({ style: 'spacing: 8px;', x_align: Clutter.ActorAlign.END });
+        const confirm = new St.Button({ style_class: 'rp-end-confirm', label: 'End', can_focus: true });
+        const cancel = new St.Button({ style_class: 'rp-chip-bg rp-end-cancel', label: 'Cancel', can_focus: true });
+        buttons.add_child(confirm);
+        buttons.add_child(cancel);
+        box.add_child(label);
+        box.add_child(buttons);
+        const bar = { box, label, confirm, cancel, target: null, step: 'idle', run: 0 };
+        confirm.connect('clicked', () => {
+            if (bar.step === 'confirm') this._endGroup(bar, 'TERM');
+            else if (bar.step === 'force') this._endGroup(bar, 'KILL');
+        });
+        cancel.connect('clicked', () => this._hideEndBar(bar));
+        this._addClickAnimations(confirm);
+        this._addClickAnimations(cancel);
+        return bar;
+    }
+
+    _hideEndBar(bar) {
+        bar.run++;
+        bar.step = 'idle';
+        bar.target = null;
+        bar.box.visible = false;
+    }
+
+    _showEndBar(bar, text, { confirm = null, cancel = null } = {}) {
+        bar.label.text = text;
+        bar.confirm.visible = !!confirm;
+        if (confirm) bar.confirm.label = confirm;
+        bar.cancel.visible = !!cancel;
+        if (cancel) bar.cancel.label = cancel;
+        bar.box.visible = true;
+    }
+
+    /** First step: ask. The group is copied, so later re-sorting cannot change the target. */
+    _askEnd(bar, group) {
+        bar.run++;
+        bar.target = { comm: group.comm, count: group.count, members: group.members.map(m => ({ ...m })) };
+        bar.step = 'confirm';
+        const what = group.count > 1 ? `all ${group.count} ${group.comm} processes` : group.comm;
+        this._showEndBar(bar, `End ${what}? Unsaved work in it may be lost.`, { confirm: 'End', cancel: 'Cancel' });
+        bar.confirm.grab_key_focus();
+    }
+
+    /** Ask the processes to quit (TERM), or force them (KILL), then report what is left. */
+    async _endGroup(bar, signal) {
+        const run = ++bar.run;
+        const gen = this._gen;
+        const { comm } = bar.target;
+        const { mine, others } = liveMembers(bar.target.members, this._uid);
+        if (mine.length === 0) {
+            bar.step = 'done';
+            this._showEndBar(bar, others > 0
+                ? `${comm} belongs to another user and cannot be ended from here.`
+                : `${comm} has already exited.`, { cancel: 'Close' });
+            return;
+        }
+        bar.step = 'waiting';
+        this._showEndBar(bar, signal === 'TERM' ? `Asking ${comm} to quit…` : `Forcing ${comm} to quit…`);
+        const sent = await signalProcesses(mine, signal);
+        // Quitting cleanly can take a moment (saving, closing files).
+        if (!(await this._wait(signal === 'TERM' ? 5000 : 1000)) || gen !== this._gen || run !== bar.run) return;
+        const left = liveMembers(bar.target.members, this._uid).mine;
+        const note = !sent.ok && sent.error ? ` (${sent.error})` : '';
+        if (left.length === 0) {
+            bar.step = 'done';
+            this._showEndBar(bar, `${comm} ended.`);
+            if (await this._wait(3000) && gen === this._gen && run === bar.run) this._hideEndBar(bar);
+        } else if (signal === 'TERM') {
+            bar.step = 'force';
+            this._showEndBar(bar, `${left.length} of ${mine.length} ${comm} did not quit${note}. Force quit loses unsaved work.`,
+                { confirm: 'Force quit', cancel: 'Cancel' });
+            bar.confirm.grab_key_focus();
+        } else {
+            bar.step = 'done';
+            this._showEndBar(bar, `${left.length} ${comm} could not be ended${note}.`, { cancel: 'Close' });
+        }
     }
 
     // ── Overview Page ─────────────────────────────────────────────────────────
@@ -2454,6 +2692,26 @@ export default class ResourcePulseExtension extends Extension {
         this._addClickAnimations(backBtn);
         this._detailHeader.add_child(backBtn);
         this._detailHeader.add_child(this._detailHeaderTitleBox);
+        // Range of the page's charts: the live samples, the last hour, the last day.
+        const rangeBox = new St.BoxLayout({ style_class: 'rp-chip-bg rp-range-box', y_align: Clutter.ActorAlign.CENTER });
+        this._rangeButtons = {};
+        for (const range of Object.keys(RANGES)) {
+            const button = new St.Button({
+                style_class: 'rp-range',
+                label: RANGES[range]?.label ?? (this._spanLabel || 'live'),
+                can_focus: true,
+                toggle_mode: true,
+                accessible_name: range === 'live' ? 'Recent samples' : `Last ${RANGES[range].label}`,
+            });
+            button.connect('clicked', () => {
+                this._range = range;
+                this._applyRange();
+            });
+            rangeBox.add_child(button);
+            this._rangeButtons[range] = button;
+        }
+        this._detailHeader.add_child(rangeBox);
+        this._applyRange();
         this._addClickAnimations(optBtn);
         this._detailHeader.add_child(optBtn);
 
@@ -2629,6 +2887,11 @@ export default class ResourcePulseExtension extends Extension {
         statsRow.add_child(uptimeBox);
         box.add_child(statsRow);
 
+        const waitCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._cpuWait = this._detailRow('Waiting for CPU');
+        waitCard.add_child(this._cpuWait.row);
+        box.add_child(waitCard);
+
         // Top CPU Usage Card
         const procCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
         const procHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
@@ -2647,6 +2910,8 @@ export default class ResourcePulseExtension extends Extension {
 
         this._procList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
         procCard.add_child(this._procList);
+        this._procEnd = this._buildEndBar();
+        procCard.add_child(this._procEnd.box);
         box.add_child(procCard);
 
         return box;
@@ -2723,6 +2988,8 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._memSwap.row);
         this._memSwapActivity = this._detailRow('Swap Activity');
         statsCard.add_child(this._memSwapActivity.row);
+        this._memWait = this._detailRow('Waiting for memory');
+        statsCard.add_child(this._memWait.row);
         box.add_child(statsCard);
 
         const memProcCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
@@ -2740,6 +3007,8 @@ export default class ResourcePulseExtension extends Extension {
         memProcCard.add_child(memProcHead);
         this._memProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
         memProcCard.add_child(this._memProcList);
+        this._memProcEnd = this._buildEndBar();
+        memProcCard.add_child(this._memProcEnd.box);
         box.add_child(memProcCard);
 
         return box;
@@ -2887,7 +3156,24 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._dskWrite.row);
         this._dskUsage = this._detailRow('Busy (active time)');
         statsCard.add_child(this._dskUsage.row);
+        this._dskWait = this._detailRow('Waiting for disk');
+        statsCard.add_child(this._dskWait.row);
         box.add_child(statsCard);
+
+        // Top Disk Usage: read + write per process, sampled only on this page.
+        const ioCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        ioCard.add_child(new St.Label({ text: 'Top Disk Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 8px;' }));
+        this._dskProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
+        ioCard.add_child(this._dskProcList);
+        this._dskProcIdle = new St.Label({ text: 'None of your processes is reading or writing right now.', style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', visible: false });
+        this._dskProcIdle.clutter_text.line_wrap = true;
+        ioCard.add_child(this._dskProcIdle);
+        this._dskProcNote = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.75em; margin-top: 6px;', visible: false });
+        this._dskProcNote.clutter_text.line_wrap = true;
+        ioCard.add_child(this._dskProcNote);
+        this._dskProcEnd = this._buildEndBar();
+        ioCard.add_child(this._dskProcEnd.box);
+        box.add_child(ioCard);
 
         // Filesystem Mounts Card
         const mountsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
@@ -2928,6 +3214,11 @@ export default class ResourcePulseExtension extends Extension {
         statsCard.add_child(this._netSessionRx.row);
         this._netSessionTx = this._detailRow('Session Uploaded');
         statsCard.add_child(this._netSessionTx.row);
+        // Kept across sessions (network-usage.json); physical interfaces only.
+        this._netToday = this._detailRow('Today');
+        statsCard.add_child(this._netToday.row);
+        this._netMonth = this._detailRow('This month');
+        statsCard.add_child(this._netMonth.row);
         box.add_child(statsCard);
 
         // Per-interface breakdown card
@@ -3095,6 +3386,12 @@ export default class ResourcePulseExtension extends Extension {
 
     _updateDashboardUI(data) {
         if (!this._settings || !this._indicator) return;
+        // Pressure: the share of the last 10 s in which programs were stalled.
+        for (const [row, key] of [[this._cpuWait, 'cpu'], [this._memWait, 'memory'], [this._dskWait, 'io']]) {
+            if (!row) continue;
+            const some = data.psi?.[key]?.some;
+            row.val.text = Number.isFinite(some) ? `${some.toFixed(1)} % of the time` : 'n/a (no pressure figures from this kernel)';
+        }
         const tempUnit = this._settings.get_string('unit-temp') || 'C';
         const memUnit  = this._settings.get_string('unit-mem')  || 'GB';
         const useGiB   = memUnit === 'GiB';
@@ -3327,6 +3624,16 @@ export default class ResourcePulseExtension extends Extension {
             if (this._netTx) this._netTx.val.text = formatSpeed(net.total.txRate);
             if (this._netSessionRx) this._netSessionRx.val.text = formatBytes(net.sessionRx || 0, useGiB);
             if (this._netSessionTx) this._netSessionTx.val.text = formatBytes(net.sessionTx || 0, useGiB);
+            if (this._netToday) {
+                const now = GLib.DateTime.new_now_local();
+                const usage = this._netUsage;
+                const show = prefix => {
+                    const t = usage?.total(prefix);
+                    return t ? `↓ ${formatBytes(t.rx, useGiB)}  ↑ ${formatBytes(t.tx, useGiB)}` : '--';
+                };
+                this._netToday.val.text = show(now.format('%Y-%m-%d'));
+                this._netMonth.val.text = show(now.format('%Y-%m'));
+            }
 
             if (this._menuOpen && this._activeTab === 'network' && this._netIfaceList && net.interfaces) {
                 const activeIfaces = visibleInterfaces(net.interfaces);
@@ -3524,19 +3831,32 @@ export default class ResourcePulseExtension extends Extension {
         // A snapshot sorted for the other tab (or taken before the tab was
         // opened) is not shown as if it were current: the list is dimmed
         // until a sample for this tab arrives.
-        if (this._menuOpen && (this._activeTab === 'cpu' || this._activeTab === 'memory')) {
-            const isMemory = this._activeTab === 'memory';
-            const list = isMemory ? this._memProcList : this._procList;
+        const lists = {
+            cpu: [this._procList, '_procWidgets'],
+            memory: [this._memProcList, '_memProcWidgets'],
+            disk: [this._dskProcList, '_dskProcWidgets'],
+        };
+        if (this._menuOpen && lists[this._activeTab]) {
+            const [list, widgetsKey] = lists[this._activeTab];
             const fresh = data.procSort === this._activeTab && data.processes.length > 0;
+            // Disk: only processes that are reading or writing.
+            const rows = this._activeTab === 'disk' ? data.processes.filter(p => p.ioRate > 0) : data.processes;
             if (list) {
-                if (fresh)
-                    this._renderProcessListUI(list, isMemory ? '_memProcWidgets' : '_procWidgets', data.processes, isMemory);
+                if (fresh) this._renderProcessListUI(list, widgetsKey, rows, this._activeTab);
                 list.opacity = fresh ? 255 : 110;
+            }
+            if (this._activeTab === 'disk' && this._dskProcIdle && fresh) this._dskProcIdle.visible = rows.length === 0;
+            if (this._activeTab === 'disk' && this._dskProcNote && fresh) {
+                // Unprivileged: other users' counters are not readable. Said, not hidden.
+                this._dskProcNote.visible = data.ioDenied > 0;
+                this._dskProcNote.text = `Your processes only: ${data.ioDenied} processes of other users (system services) cannot be read without administrator rights.`;
             }
         }
     }
 
-    _renderProcessListUI(container, targetWidgetsKey, processes, isMemory = false) {
+    /** @param {'cpu'|'memory'|'disk'} mode what the rows show and are sorted by */
+    _renderProcessListUI(container, targetWidgetsKey, processes, mode = 'cpu') {
+        const isMemory = mode === 'memory';
         if (!container) return;
         if (!this[targetWidgetsKey]) this[targetWidgetsKey] = [];
 
@@ -3561,17 +3881,32 @@ export default class ResourcePulseExtension extends Extension {
                 const nameLbl = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em; font-weight: 500;', text: '' });
                 detailsCol.add_child(nameLbl);
 
-                const color = isMemory ? [0.569, 0.255, 0.675] : [0.208, 0.518, 0.894];
+                const color = isMemory ? [0.569, 0.255, 0.675] : mode === 'disk' ? [0.96, 0.83, 0.18] : [0.208, 0.518, 0.894];
                 const pbar = new ProgressBar(4, color[0], color[1], color[2]);
                 detailsCol.add_child(pbar);
 
                 item.add_child(detailsCol);
 
-                const statLbl = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.85em; font-weight: 600; text-align: right;', width: isMemory ? 76 : 52 });
+                const statLbl = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.85em; font-weight: 600; text-align: right;', width: mode === 'cpu' ? 52 : 76 });
                 statLbl.x_align = Clutter.ActorAlign.END;
                 item.add_child(statLbl);
 
-                item.connect('button-press-event', () => {
+                const endBtn = new St.Button({
+                    style_class: 'rp-end-button',
+                    can_focus: true,
+                    accessible_name: 'End process',
+                    y_align: Clutter.ActorAlign.CENTER,
+                    child: new St.Icon({ icon_name: 'window-close-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 12px;' }),
+                });
+                const widgets = { nameLbl, statLbl, pbar, endBtn, group: null };
+                endBtn.connect('clicked', () => {
+                    if (widgets.group) this._askEnd({ cpu: this._procEnd, memory: this._memProcEnd, disk: this._dskProcEnd }[mode], widgets.group);
+                });
+                item.add_child(endBtn);
+
+                item.connect('button-press-event', (actor, event) => {
+                    // The ✕ handles its own click; the row must not also act.
+                    if (endBtn.contains(global.stage.get_event_actor(event))) return Clutter.EVENT_PROPAGATE;
                     this._launchSystemMonitor('processes');
                     this._indicator.menu.close();
                     return Clutter.EVENT_STOP;
@@ -3579,7 +3914,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._addClickAnimations(item);
 
                 container.add_child(item);
-                this[targetWidgetsKey].push({ nameLbl, statLbl, pbar });
+                this[targetWidgetsKey].push(widgets);
             }
         }
 
@@ -3588,9 +3923,22 @@ export default class ResourcePulseExtension extends Extension {
             const w = this[targetWidgetsKey][i];
             if (!w) return;
             w.nameLbl.text = proc.count > 1 ? `${proc.comm}  ×${proc.count}` : proc.comm;
-            const valNum = isMemory ? proc.mem : proc.cpu;
-            w.statLbl.text = isMemory ? formatBytes(proc.rssBytes, useGiB) : `${valNum.toFixed(1)}%`;
-            w.pbar.setPercent(Math.min(100, valNum));
+            if (mode === 'disk') {
+                // Relative to the busiest row: there is no natural 100 %.
+                const top = processes[0]?.ioRate || 0;
+                w.statLbl.text = formatSpeed(proc.ioRate);
+                w.pbar.setPercent(top > 0 ? (proc.ioRate / top) * 100 : 0);
+            } else {
+                const valNum = isMemory ? proc.mem : proc.cpu;
+                w.statLbl.text = isMemory ? formatBytes(proc.rssBytes, useGiB) : `${valNum.toFixed(1)}%`;
+                w.pbar.setPercent(Math.min(100, valNum));
+            }
+            w.group = proc;
+            // Hidden but still taking its room, so the values stay aligned.
+            const endable = canEnd(proc, this._selfPid);
+            w.endBtn.opacity = endable ? 255 : 0;
+            w.endBtn.reactive = endable;
+            w.endBtn.can_focus = endable;
         });
     }
 }

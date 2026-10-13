@@ -8,7 +8,7 @@ import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime,
 import { RingBuffer } from '../lib/ringbuffer.js';
 import { RunningStats } from '../lib/stats.js';
 import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned } from '../lib/settingsmodel.js';
-import { parseStatBlob, cpuPercent, groupByName, ProcessSampler } from '../lib/process.js';
+import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses } from '../lib/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../lib/cpu.js';
 import { listDirAsync, runSubprocess, readFileAsync, noteReadError } from '../lib/utils.js';
 import { parseNetDev, counterDelta } from '../lib/network.js';
@@ -22,6 +22,9 @@ import { diagnose, minutesGained } from '../lib/diagnostics.js';
 import { batteryFromProperties, readBacklight } from '../lib/systemstate.js';
 import { appInfo } from '../lib/appnames.js';
 import { AlertMonitor, alertReadings, alertLine } from '../lib/alerts.js';
+import { parsePressure, PressureSampler } from '../lib/pressure.js';
+import { BucketSeries, RANGES } from '../lib/longhistory.js';
+import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../lib/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../lib/gpu.js';
@@ -156,6 +159,34 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(g.map(x => [x.comm, x.count, x.cpu, x.rss, x.rssBytes]), [['firefox', 3, 12.5, 450, 450 * 4096], ['bash', 1, 1, 10, 10 * 4096]], 'group: sums cpu and memory per name, keeps first-seen order');
     eq(g[0].pid, 10, 'group: keeps a representative pid');
     eq(groupByName([]), [], 'group: empty');
+    eq(g[0].members.map(m => m.pid), [10, 12, 13], 'group: keeps every member pid, for ending the group');
+    ok(canEnd({ comm: 'firefox', members: [{ pid: 10 }] }, 999), 'end: an ordinary app may be ended');
+    ok(!canEnd({ comm: 'gnome-shell', members: [{ pid: 10 }] }, 999), 'end: never the shell');
+    ok(!canEnd({ comm: 'Xwayland', members: [{ pid: 10 }] }, 999), 'end: never Xwayland');
+    ok(!canEnd({ comm: 'renamed', members: [{ pid: 999 }] }, 999), 'end: never a group holding our own pid');
+    ok(!canEnd({ comm: 'init', members: [{ pid: 1 }] }, 999), 'end: never pid 1');
+}
+
+// ── ending processes: identity from a fixture /proc ──
+{
+    const root = GLib.dir_make_tmp('rp-proc-XXXXXX');
+    const stat = (pid, state, start) => `${pid} (a b) ${state} 1 1 1 0 -1 0 0 0 0 0 5 5 0 0 20 0 1 0 ${start} 1000 10\n`;
+    for (const [pid, state, start] of [[100, 'S', 5000], [101, 'Z', 5001], [102, 'R', 7777]]) {
+        GLib.mkdir_with_parents(`${root}/${pid}`, 0o755);
+        GLib.file_set_contents(`${root}/${pid}/stat`, stat(pid, state, start));
+    }
+    const uid = Gio.Credentials.new().get_unix_user();
+    eq(processIdentity(100, root), { start: 5000, state: 'S', uid }, 'end: identity of a live process (start, state, owner)');
+    eq(processIdentity(101, root), null, 'end: a zombie counts as exited');
+    eq(processIdentity(103, root), null, 'end: a missing pid is exited, silently');
+    eq(liveMembers([{ pid: 100, start: 5000 }, { pid: 101, start: 5001 }, { pid: 102, start: 1 }, { pid: 103, start: 1 }], uid, root),
+        { mine: [100], others: 0 }, 'end: only live members with the same start time (102 is a reused pid)');
+    eq(liveMembers([{ pid: 100, start: 5000 }], uid + 1, root), { mine: [], others: 1 }, 'end: someone else\'s process is counted, not taken');
+    for (const pid of [100, 101, 102]) {
+        GLib.unlink(`${root}/${pid}/stat`);
+        GLib.rmdir(`${root}/${pid}`);
+    }
+    GLib.rmdir(root);
 }
 
 // ── collectors: network ──
@@ -403,6 +434,67 @@ docker0: 1 2 3
     eq([togglePinned(['cpu', 'memory'], 'gpu'), togglePinned(['cpu', 'memory'], 'cpu')], [['cpu', 'memory', 'gpu'], ['memory']], 'pins: toggling appends or removes');
 }
 
+// ── collectors: pressure (PSI) ──
+eq(parsePressure('some avg10=1.50 avg60=0.20 avg300=0.00 total=1234\nfull avg10=0.25 avg60=0.00 avg300=0.00 total=99\n'), { some: 1.5, full: 0.25 }, 'pressure: some and full avg10');
+eq(parsePressure('some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n'), { some: 0, full: null }, 'pressure: cpu before 5.13 has no full line');
+eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
+
+// ── longer history: buckets, gaps, capacity ──
+{
+    const M = 60e6;
+    const b = new BucketSeries(M, 4);
+    eq(b.length, 0, 'buckets: empty before any sample');
+    b.add(10, 0.1 * M);
+    b.add(30, 0.5 * M);
+    eq([b.length, b.get(0), b.peakAt(0)], [1, 20, 30], 'buckets: the open bucket shows its average and peak');
+    b.add(50, 1.2 * M);
+    eq([b.length, b.get(0), b.get(1)], [2, 20, 50], 'buckets: a new minute closes the previous one');
+    b.add(70, 3.5 * M);
+    eq([b.length, b.get(1), Number.isNaN(b.get(2)), b.get(3)], [4, 50, true, 70], 'buckets: a minute without samples is a gap (NaN), not 0');
+    b.add(90, 4.1 * M);
+    eq([b.length, b.get(0), b.get(3)], [4, 50, 90], 'buckets: the oldest drops out at capacity');
+    eq(b.max(), 90, 'buckets: scale from the peaks');
+    b.add(NaN, 4.2 * M);
+    eq(b.get(3), 90, 'buckets: a non-finite sample is ignored');
+    b.advance(100 * M);
+    eq([b.length, [0, 1, 2, 3].every(i => Number.isNaN(b.get(i)))], [4, true], 'buckets: a long silence leaves only gaps, bounded by capacity');
+    b.clear();
+    eq(b.length, 0, 'buckets: clear');
+    eq([RANGES.hour.capacity * RANGES.hour.bucketUs / 60e6, (RANGES.day.capacity - 1) * RANGES.day.bucketUs / 3600e6], [61, 24], 'buckets: an hour of minutes and a day of quarter hours');
+    eq([agoLabel(90, 60), agoLabel(3, 900), agoLabel(1, 60)], ['1h 30m ago', '45m ago', '1m ago'], 'ago: hours for the long ranges');
+}
+
+// ── network data per day ──
+{
+    const u = new NetUsage();
+    const ifs = (rx, tx, more = []) => [{ iface: 'wlp1', rxBytes: rx, txBytes: tx }, ...more];
+    eq(u.ingest(ifs(1000, 500), 'boot-a', '2026-10-15'), false, 'net usage: the first reading is only a baseline');
+    ok(u.ingest(ifs(4000, 700), 'boot-a', '2026-10-15'), 'net usage: traffic since the baseline is counted');
+    eq(u.total('2026-10-15'), { rx: 3000, tx: 200 }, 'net usage: today');
+    u.ingest(ifs(5000, 700), 'boot-a', '2026-10-16');
+    eq([u.total('2026-10-16'), u.total('2026-10')], [{ rx: 1000, tx: 0 }, { rx: 4000, tx: 200 }], 'net usage: a new day, and the month adds the days');
+    u.ingest(ifs(100, 50), 'boot-a', '2026-10-16');
+    eq(u.total('2026-10-16'), { rx: 1000, tx: 0 }, 'net usage: a counter that went backwards counts nothing');
+    u.ingest(ifs(900, 50), 'boot-b', '2026-10-16');
+    eq(u.total('2026-10-16'), { rx: 1000, tx: 0 }, 'net usage: after a restart the counters are a new baseline');
+    u.ingest(ifs(1900, 50, [{ iface: 'enx0', rxBytes: 7, txBytes: 7 }]), 'boot-b', '2026-10-16');
+    eq(u.total('2026-10-16'), { rx: 2000, tx: 0 }, 'net usage: a new interface starts with a baseline');
+    const back = NetUsage.fromJSON(JSON.stringify(u));
+    eq([back.bootId, back.total('2026-10'), back.counters.enx0], ['boot-b', { rx: 5000, tx: 200 }, { rx: 7, tx: 7 }], 'net usage: survives a save and load');
+    const many = new NetUsage();
+    many.ingest(ifs(0, 0), 'b', '2026-01-01');
+    for (let d = 1; d <= NET_DAYS_KEPT + 10; d++)
+        many.ingest(ifs(d * 10, 0), 'b', GLib.DateTime.new_utc(2026, 1, 1, 0, 0, 0).add_days(d).format('%Y-%m-%d'));
+    eq(many.days.length, NET_DAYS_KEPT, 'net usage: bounded to the days kept');
+    let threw = false;
+    try {
+        NetUsage.fromJSON('{"version": 9}');
+    } catch {
+        threw = true;
+    }
+    ok(threw, 'net usage: a foreign file is refused, not half-read');
+}
+
 // ── alerts: sustain, recovery, unavailable values, notification gap ──
 {
     const S = 1e6;
@@ -444,7 +536,7 @@ docker0: 1 2 3
     }, limits, unavailable);
     eq([r.cpu, r.memory, r.thermal, r.gpu, r.disk, r.pressure], [{ value: 50, threshold: 90 }, { value: 60, threshold: 90 }, null, null, null, null],
         'alerts: readings for what is missing are null, never 0');
-    const r2 = alertReadings({ dsk: { mounts: [{ percent: 97 }] }, psi: { memory: { full: 12.5 } }, thm: { packageTemp: 85, sensors: [{}] } }, limits, unavailable);
+    const r2 = alertReadings({ dsk: { mounts: [{ percent: 97 }] }, psi: { memory: { some: 12.5, full: 1 } }, thm: { packageTemp: 85, sensors: [{}] } }, limits, unavailable);
     eq([r2.disk, r2.pressure, r2.thermal], [{ value: 97, threshold: 95 }, { value: 12.5, threshold: 10 }, { value: 85, threshold: 80 }], 'alerts: disk, pressure and temperature readings');
     eq(alertLine({ value: 97.2, since: 0 }, 95 * S, { name: 'CPU', format: v => `${Math.round(v)} %` }), 'CPU 97 % for 2 min', 'alerts: line names the metric, value and duration');
 }
@@ -453,6 +545,46 @@ docker0: 1 2 3
 const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));
 (async () => {
+    {
+        // Ending real children: one quits on TERM, one ignores TERM and needs KILL.
+        const uid = Gio.Credentials.new().get_unix_user();
+        const spawn = argv => Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE);
+        const member = proc => {
+            const pid = Number(proc.get_identifier());
+            return { pid, start: processIdentity(pid).start };
+        };
+        const polite = spawn(['sleep', '30']);
+        const stubborn = spawn(['sh', '-c', 'trap "" TERM; while :; do sleep 0.2; done']);
+        await sleep(200);
+        const members = [member(polite), member(stubborn)];
+        eq(liveMembers(members, uid).mine.length, 2, 'end: both children are ours and alive');
+        const term = await signalProcesses(liveMembers(members, uid).mine, 'TERM');
+        ok(term.ok, `end: TERM sent (${term.error})`);
+        await new Promise(resolve => polite.wait_async(null, () => resolve()));
+        await sleep(300);
+        eq(liveMembers(members, uid).mine, [members[1].pid], 'end: after TERM only the one ignoring it is left');
+        ok((await signalProcesses([members[1].pid], 'KILL')).ok, 'end: KILL sent');
+        await new Promise(resolve => stubborn.wait_async(null, () => resolve()));
+        eq(liveMembers(members, uid).mine, [], 'end: none left after KILL');
+        // A pid at pid_max can never exist (pids stay below it), so no real
+        // process is ever signalled here.
+        const pidMax = Number(new TextDecoder().decode(GLib.file_get_contents('/proc/sys/kernel/pid_max')[1]));
+        const late = await signalProcesses([pidMax], 'TERM');
+        ok(!late.ok && late.error.length > 0, `end: a failed signal reports kill's error ('${late.error}')`);
+    }
+    {
+        // PSI from a fixture tree, and a kernel without it.
+        const dir = GLib.dir_make_tmp('rp-psi-XXXXXX');
+        for (const [name, avg] of [['cpu', '2.00'], ['memory', '30.50'], ['io', '0.10']])
+            GLib.file_set_contents(`${dir}/${name}`, `some avg10=${avg} avg60=0.00 avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n`);
+        const psi = await new PressureSampler(dir).sample();
+        eq([psi?.cpu.some, psi?.memory.some, psi?.io.some], [2, 30.5, 0.1], 'pressure: sampler reads cpu, memory and io');
+        const none = new PressureSampler(`${dir}/absent`);
+        eq(await none.sample(), null, 'pressure: no PSI on this kernel gives null, not zeros');
+        ok(none._missing, 'pressure: a missing PSI tree is not read again');
+        for (const name of ['cpu', 'memory', 'io']) GLib.unlink(`${dir}/${name}`);
+        GLib.rmdir(dir);
+    }
     const fds = async () => (await listDirAsync('/proc/self/fd')).length;
 
     // Optional reads: "not there" is silent, any other failure is logged once.

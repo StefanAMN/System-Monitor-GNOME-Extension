@@ -681,6 +681,157 @@ async function stuckCollector(rp) {
     check(!rp._outstanding.network && rp._lastNet?.interfaces, 'stuck collector: network did not recover');
 }
 
+// The 1 h / 24 h range with real clicks on the detail header, the network
+// day totals, and the Disk page's top list with a process writing to disk.
+async function historyAndUsage(rp) {
+    rp._indicator.menu.open();
+    rp._activeTab = 'cpu';
+    rp._updateTabVisibility();
+    await sleep(800);
+    const spark = rp._cpuSparkline;
+    const clickRange = async range => {
+        ensureActorVisibleInScrollView(rp._scrollView, rp._rangeButtons[range]);
+        await sleep(400);
+        await clickActor(rp._rangeButtons[range]);
+    };
+    await clickRange('hour');
+    check(rp._range === 'hour' && spark.history === rp._long.hour.cpu && spark.spanLabel === '1h',
+        `range: 1h click gave range ${rp._range}, span '${spark.spanLabel}'`);
+    // The run so far has lasted minutes: there are buckets with samples.
+    const h = spark.history;
+    const filled = Array.from({ length: h.length }, (_, i) => h.get(i)).filter(Number.isFinite).length;
+    check(h.length >= 2 && filled >= 2, `range: 1h CPU history has ${h.length} buckets, ${filled} with samples`);
+    await shot('range-1h');
+    await clickRange('day');
+    check(spark.history === rp._long.day.cpu && spark.spanLabel === '24h', `range: 24h shows '${spark.spanLabel}'`);
+    await clickRange('live');
+    check(spark.history === rp._hist.cpu && spark.spanLabel === rp._spanLabel, `range: back to live shows '${spark.spanLabel}'`);
+
+    rp._activeTab = 'network';
+    rp._updateTabVisibility();
+    await sleep(2500);
+    for (const row of [rp._netToday, rp._netMonth])
+        check(/^↓ [\d.]+ \w*B {2}↑ [\d.]+ \w*B$/.test(row.val.text), `net usage: row shows '${row.val.text}'`);
+
+    // A writer on a real disk (not tmpfs, where nothing reaches storage).
+    rp._activeTab = 'disk';
+    rp._updateTabVisibility();
+    const dir = GLib.build_filenamev([GLib.get_user_cache_dir(), `rp-io-test-${GLib.random_int_range(1000, 9999)}`]);
+    GLib.mkdir_with_parents(dir, 0o700);
+    GLib.spawn_command_line_sync(`ln -s /bin/sh ${dir}/rpdiskwriter`);
+    const writer = Gio.Subprocess.new([`${dir}/rpdiskwriter`, '-c',
+        `while :; do dd if=/dev/zero of=${dir}/blob bs=1M count=64 oflag=direct conv=fsync status=none; done`], Gio.SubprocessFlags.NONE);
+    try {
+        let row = null;
+        for (let i = 0; i < 30 && !row; i++) {
+            await sleep(400);
+            row = (rp._dskProcWidgets ?? []).find(w => w.group?.comm === 'dd' || w.group?.comm === 'rpdiskwriter');
+        }
+        const listed = (rp._dskProcWidgets ?? []).map(w => `${w.group?.comm} ${w.statLbl.text}`).join(', ');
+        if (!row && listed === '')
+            console.log('RP-UITEST disk list: no per-process I/O counters readable here; the writer check was not run');
+        else {
+            check(row && row.group.ioRate > 0, `disk list: the writer is not listed with a rate (${listed})`);
+            ensureActorVisibleInScrollView(rp._scrollView, rp._dskProcList);
+            await sleep(400);
+            await shot('disk-top');
+            console.log(`RP-UITEST disk list: ${listed}; note: '${rp._dskProcNote.visible ? rp._dskProcNote.text : ''}'`);
+        }
+    } finally {
+        writer.force_exit();
+        await sleep(300);
+        GLib.spawn_command_line_sync(`rm -rf ${dir}`);
+        rp._indicator.menu.close();
+        await sleep(300);
+    }
+}
+
+// Ending processes from the CPU page with real clicks: the ✕ asks first,
+// End stops a process that quits on request, Force quit stops one that
+// ignores the request, and Cancel leaves a process alone. The processes run
+// under their own names (symlinks to sh) so they are found in the list.
+async function endProcesses(rp) {
+    const dir = GLib.dir_make_tmp('rp-end-XXXXXX');
+    const named = name => {
+        GLib.spawn_command_line_sync(`ln -s /bin/sh ${dir}/${name}`);
+        return `${dir}/${name}`;
+    };
+    const spawned = [];
+    const spawn = (name, script) => {
+        const p = Gio.Subprocess.new([named(name), '-c', script], Gio.SubprocessFlags.NONE);
+        spawned.push(p);
+        return p;
+    };
+    const exited = p => new Promise(resolve => {
+        if (p.get_if_exited() || p.get_if_signaled()) resolve(true);
+        else p.wait_async(null, () => resolve(true));
+    });
+    const rowFor = async comm => {
+        for (let i = 0; i < 30; i++) {
+            const w = (rp._procWidgets ?? []).find(x => x.group?.comm === comm);
+            if (w) return w;
+            await sleep(300);
+        }
+        throw new Error(`end: ${comm} never appeared in the CPU list (${(rp._procWidgets ?? []).map(x => x.group?.comm).join(', ')})`);
+    };
+    const until = async (cond, ms) => {
+        for (let t = 0; t < ms && !cond(); t += 200) await sleep(200);
+        return cond();
+    };
+    const clickEnd = async w => {
+        ensureActorVisibleInScrollView(rp._scrollView, w.endBtn);
+        await sleep(400);
+        await clickActor(w.endBtn);
+    };
+    const bar = () => rp._procEnd;
+    const clickBar = async button => {
+        ensureActorVisibleInScrollView(rp._scrollView, button);
+        await sleep(400);
+        await clickActor(button);
+    };
+    try {
+        rp._indicator.menu.open();
+        rp._activeTab = 'cpu';
+        rp._updateTabVisibility();
+
+        // 1. Quits on request.
+        const polite = spawn('rpendpolite', 'while :; do :; done');
+        await clickEnd(await rowFor('rpendpolite'));
+        check(rp._indicator.menu.isOpen, 'end: clicking ✕ closed the menu (the row click went through)');
+        check(bar().box.visible && /^End rpendpolite\?/.test(bar().label.text), `end: confirmation is '${bar().box.visible ? bar().label.text : 'hidden'}'`);
+        await shot('end-confirm');
+        await clickBar(bar().confirm);
+        check(await until(() => bar().label.text === 'rpendpolite ended.', 9000), `end: after End the bar says '${bar().label.text}'`);
+        check(await Promise.race([exited(polite), sleep(1000).then(() => false)]), 'end: rpendpolite is still running');
+
+        // 2. Ignores the request: Force quit is offered and works.
+        const stubborn = spawn('rpendstubborn', 'trap "" TERM; while :; do :; done');
+        await clickEnd(await rowFor('rpendstubborn'));
+        await clickBar(bar().confirm);
+        check(await until(() => bar().step === 'force', 9000), `end: no Force quit offered ('${bar().label.text}')`);
+        check(/did not quit/.test(bar().label.text) && bar().confirm.label === 'Force quit', `end: force step reads '${bar().label.text}' / '${bar().confirm.label}'`);
+        await shot('end-force');
+        await clickBar(bar().confirm);
+        check(await until(() => bar().label.text === 'rpendstubborn ended.', 5000), `end: after Force quit the bar says '${bar().label.text}'`);
+        check(await Promise.race([exited(stubborn), sleep(1000).then(() => false)]), 'end: rpendstubborn is still running');
+
+        // 3. Cancel leaves it running.
+        const kept = spawn('rpendkept', 'while :; do :; done');
+        await clickEnd(await rowFor('rpendkept'));
+        await clickBar(bar().cancel);
+        check(!bar().box.visible, 'end: Cancel did not close the confirmation');
+        await sleep(1500);
+        check(!kept.get_if_exited() && !kept.get_if_signaled(), 'end: Cancel still ended the process');
+        console.log('RP-UITEST end: TERM, Force quit and Cancel work with real clicks');
+    } finally {
+        for (const p of spawned) p.force_exit();
+        rp._indicator.menu.close();
+        await sleep(300);
+        for (const name of ['rpendpolite', 'rpendstubborn', 'rpendkept']) GLib.unlink(`${dir}/${name}`);
+        GLib.rmdir(dir);
+    }
+}
+
 // A real CPU load past the limit: the ⚠ appears in the top bar, the pinned
 // CPU value turns red, the ⚠'s tooltip (real hover) names CPU, a notification
 // names the cause, clicking its banner opens the CPU page, and all of it
@@ -789,6 +940,11 @@ async function run() {
     ext.stateObj._indicator.menu.open();
     await sleep(300);
     checkTheme(ext.stateObj, false, 'dark');
+    // Pressure rows were filled while their pages were visited.
+    for (const row of ['_cpuWait', '_memWait', '_dskWait']) {
+        const text = ext.stateObj[row]?.val.text;
+        check(/^\d+\.\d % of the time$|^n\/a/.test(text ?? ''), `pressure: ${row} shows '${text}'`);
+    }
     ext.stateObj._indicator.menu.close();
 
     // Icons, in the session's own theme and in stock Adwaita.
@@ -811,6 +967,8 @@ async function run() {
     await keyboardOpensCards(ext.stateObj);
     await stuckCollector(ext.stateObj);
     await alertsRaise(ext.stateObj);
+    await endProcesses(ext.stateObj);
+    await historyAndUsage(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.
     const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
