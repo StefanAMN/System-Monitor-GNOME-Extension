@@ -2465,7 +2465,8 @@ export default class ResourcePulseExtension extends Extension {
         });
     }
 
-    _addClickAnimations(actor) {
+    /** @param {function(Clutter.Event): boolean} [skip] presses it accepts do not animate */
+    _addClickAnimations(actor, skip = null) {
         if (!actor) return;
         actor.set_pivot_point(0.5, 0.5);
 
@@ -2479,7 +2480,8 @@ export default class ResourcePulseExtension extends Extension {
             return Clutter.EVENT_PROPAGATE;
         });
 
-        actor.connect('button-press-event', () => {
+        actor.connect('button-press-event', (_actor, event) => {
+            if (skip?.(event)) return Clutter.EVENT_PROPAGATE;
             actor.ease({
                 scale_x: 0.92,
                 scale_y: 0.92,
@@ -3903,16 +3905,21 @@ export default class ResourcePulseExtension extends Extension {
                 endBtn.connect('clicked', () => {
                     if (widgets.group) this._askEnd({ cpu: this._procEnd, memory: this._memProcEnd, disk: this._dskProcEnd }[mode], widgets.group);
                 });
+
                 item.add_child(endBtn);
 
+                // A press on the ✕ is its own: the row neither opens System
+                // Monitor nor plays its press animation, which shrinks the
+                // row about its centre and would move the ✕ away from under
+                // the pointer before the release (losing the click).
+                const onEnd = event => endBtn.contains(global.stage.get_event_actor(event));
                 item.connect('button-press-event', (actor, event) => {
-                    // The ✕ handles its own click; the row must not also act.
-                    if (endBtn.contains(global.stage.get_event_actor(event))) return Clutter.EVENT_PROPAGATE;
+                    if (onEnd(event)) return Clutter.EVENT_PROPAGATE;
                     this._launchSystemMonitor('processes');
                     this._indicator.menu.close();
                     return Clutter.EVENT_STOP;
                 });
-                this._addClickAnimations(item);
+                this._addClickAnimations(item, onEnd);
 
                 container.add_child(item);
                 widgets.item = item;
