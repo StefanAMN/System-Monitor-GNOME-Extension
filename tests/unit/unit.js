@@ -28,7 +28,7 @@ import { AlertMonitor, alertReadings, alertLine } from '../../src/lib/engine/ale
 import { parsePressure, PressureSampler } from '../../src/lib/collectors/pressure.js';
 import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler } from '../../src/lib/collectors/machineusage.js';
 import { parseProcIo, AppIoSampler } from '../../src/lib/collectors/appio.js';
-import { componentView, bars, COMPONENTS } from '../../src/lib/engine/trackingview.js';
+import { componentView, bars, COMPONENTS, stepFor, zoomAbout, clampRange, MIN_SPAN_MS } from '../../src/lib/engine/trackingview.js';
 import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
 import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
@@ -1577,6 +1577,38 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         ok(long.fine.length <= MAX_FINE && long.fine.every(b => b.t > newest - FINE_KEPT_MS), `fine: ${long.fine.length} kept, none older than 48 h`);
         led.clear();
         eq([led.buckets.length, led.fine.length], [0, 0], 'fine: clearing the history clears them too');
+    }
+
+    // Bars at any step, and the zoom maths.
+    {
+        const H = 3600 * 1000;
+        const M = 60 * 1000;
+        const t0 = new Date(2026, 9, 25, 10, 0, 0).getTime();
+        eq([stepFor(t0, t0 + 2 * H, t0), stepFor(t0, t0 + 10 * H, t0), stepFor(t0, t0 + 24 * H, t0), stepFor(t0, t0 + 72 * H, t0)], [5 * M, 15 * M, H, 'day'],
+            'zoom: 5 min up to 4 h, 15 min up to 16 h, hours up to 2 days, days beyond');
+        eq(stepFor(t0, t0 + 2 * H, t0 + H), H, 'zoom: no five-minute totals at the start: hourly bars');
+        const fineBucket = (t, cpu) => ({ t, b: false, s: 300, cpu, mx: 1000, mu: 300000, ms: 300 });
+        const led = BatteryLedger.fromJSON(JSON.stringify({ version: 2, buckets: [{ t: t0, b: false, s: 3600, cpu: 60e6, a: {} }],
+            fine: [fineBucket(t0, 10e6), fineBucket(t0 + 5 * M, 20e6), fineBucket(t0 + 10 * M, 30e6)] }));
+        const add = (p, b) => { p.cpu += b.cpu; };
+        const five = bars(led, t0, t0 + 15 * M, false, () => ({ cpu: 0 }), add, 5 * M);
+        eq(five.map(p => [p.t - t0, p.cpu]), [[0, 10e6], [5 * M, 20e6], [10 * M, 30e6]], 'zoom: five-minute bars from the five-minute totals');
+        const quarter = bars(led, t0, t0 + 30 * M, false, () => ({ cpu: 0 }), add, 15 * M);
+        eq(quarter.map(p => p.cpu), [60e6, 0], 'zoom: 15-minute bars sum three five-minute totals');
+        eq(bars(led, t0, t0 + 2 * H, false, () => ({ cpu: 0 }), add, H).map(p => p.cpu), [60e6, 0], 'zoom: hourly bars from the hourly buckets');
+        const zoomed = componentView('cpu', led, { from: t0, now: t0 + 2 * H, cores: 1, viewFrom: t0, viewTo: t0 + 15 * M });
+        eq([zoomed.points.length, zoomed.points[0].step, zoomed.tiles.time], [3, 5 * M, 3600], 'zoom: the chart shows the zoomed part, the figures the whole period');
+
+        // Zooming: about the time under the pointer, inside the period, never under 30 minutes.
+        const lo = t0;
+        const hi = t0 + 24 * H;
+        eq(zoomAbout(lo, hi, t0 + 12 * H, 0.5, lo, hi), [t0 + 6 * H, t0 + 18 * H], 'zoom: in by half about the middle');
+        eq(zoomAbout(lo, hi, lo, 0.5, lo, hi), [lo, t0 + 12 * H], 'zoom: about the start, the start stays');
+        eq(zoomAbout(t0 + 6 * H, t0 + 18 * H, t0 + 12 * H, 4, lo, hi), [lo, hi], 'zoom: out past the period stops at the period');
+        const [a, b] = zoomAbout(t0 + 6 * H, t0 + 6 * H + 40 * M, t0 + 6 * H + 20 * M, 0.25, lo, hi);
+        eq(b - a, MIN_SPAN_MS, 'zoom: never narrower than 30 minutes');
+        eq(clampRange(hi - H, hi + H, lo, hi), [hi - 2 * H, hi], 'zoom: a range past the end is moved back inside');
+        eq(clampRange(lo - 5 * H, lo - 4 * H, lo, hi), [lo, lo + H], 'zoom: a range before the start is moved forward');
     }
 
     // Machine-wide counters for tracking: memory, swap, stall times.

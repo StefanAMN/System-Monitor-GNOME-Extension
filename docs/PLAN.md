@@ -1246,3 +1246,25 @@ Owner's request: hover any bar, not only hour-long ones, and zoom in and out on 
 - **Zoom**: drag across a chart to zoom into that stretch; Ctrl+wheel zooms about the pointer (the plain wheel scrolls the page, as the owner asked for the sliders); a Reset button returns to the period; keyboard + / - / 0. The span never goes below 30 minutes; the period change resets the zoom.
 - **Hover**: the bar under the pointer at whatever step is shown, its period to the minute.
 - **Proof**: unit tests of the fine buckets (by hand, pruning, old files), of the bars at each step and of the zoom maths; prefs-check: zoom by API and keys, steps and labels, hover at 5 minutes; test-ui: a real drag that zooms and a real Ctrl+wheel; overhead and soak unchanged.
+
+## Shell RSS growth on CI: the tracking readings one by one (branch `soak-variants`, 2026-10-25)
+
+`RP_SOAK_VARIANT` (test-soak, overhead driver) takes one tracker reading out: `no-tracking` (tracker never samples), `no-appio`, `no-memory` (units read without `memory.current`), `no-machine`, `no-network`; `all` is the normal soak. The job log says which variant ran and how many tracker samples it took. CI run 40167007885 (temporary branch `soak-bisect`, GNOME 50, 20 minutes, two runs each):
+
+| Variant | Run 1: RSS (MB), slope (MB/min) | Run 2 |
+| --- | --- | --- |
+| all (40 tracker samples) | 293.0 -> 330.9, **0.820** | 295.5 -> 320.2, 0.028 |
+| no-tracking (0 samples) | 294.1 -> 334.1, **0.840** | 293.8 -> 320.0, -0.263 |
+| no-appio | 294.6 -> 326.5, 0.353 | 299.9 -> 333.8, **0.609** |
+| no-memory | 295.6 -> 337.3, **1.927** | 296.8 -> 319.9, 0.282 |
+| no-machine | 297.9 -> 331.4, -0.062 | 297.9 -> 328.3, -0.154 |
+| no-network | 290.7 -> 333.5, -0.029 | 293.3 -> 331.3, 0.310 |
+
+- **Result: no tracking reading causes it.** With tracking off entirely (0 tracker samples) one run grew 0.84 MB/min and the other shrank; with everything on, one grew 0.82 and the other was flat. Every variant that took a reading out still has a run above or near the 0.5 limit except `no-machine`, whose two flat runs are within the spread the others show (four of twelve runs fail, spread across variants).
+- The JS heap census is flat in all twelve (about 3,760-3,807 objects, +0 to +1 per 100 polls in the second half), fds and actors flat: the growth is native, outside the JS heap, and its size varies between runs of the same code on GitHub's machines.
+- Nothing in the tracker is changed. Next, to tell the shell's own growth from the extension's polling: the same soak with the extension disabled (a `no-extension` baseline) several times on CI.
+
+## State (2026-10-25): chart zoom done
+
+- 8563a9c: five-minute totals. Then the zoom itself: `trackingview.js` (steps, `bars`, `clampRange`, `zoomAbout`, view range), `tracking.js` (zoom by drag / Ctrl+wheel / + - 0, zoom line with Reset, step-aware labels and hover, a new period drops the zoom).
+- Proof: lint clean; `test-unit` 560 passed; `test-i18n` passed; `test-ui` passed (prefs-check 272 of 272), with a real pointer drag across the battery chart's last two hours zooming into five-minute bars, a real Ctrl+wheel zooming out about the pointer and the plain wheel scrolling the page instead. On the way: the first run's 7 failures were the checks' own (the 14-day period still selected, a clamp case of 61 min, the period end read before a render took a new "now").

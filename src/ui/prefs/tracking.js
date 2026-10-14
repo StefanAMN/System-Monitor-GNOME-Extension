@@ -12,7 +12,7 @@ import PangoCairo from 'gi://PangoCairo';
 
 import { BatteryLedger, LedgerFormatError, DAYS_KEPT } from '../../lib/engine/batteryledger.js';
 import { ledgerPath, TRACK_INTERVAL_S } from '../../lib/engine/batterytracker.js';
-import { COMPONENTS, componentView } from '../../lib/engine/trackingview.js';
+import { COMPONENTS, componentView, bars, stepFor, fineFrom, zoomAbout, clampRange } from '../../lib/engine/trackingview.js';
 import { appInfo } from '../../lib/common/appnames.js';
 import { formatDuration, formatBytes, formatTemp } from '../../lib/common/format.js';
 import { _, fill, ngettext } from '../../lib/common/i18n.js';
@@ -152,21 +152,11 @@ function tileGrid(tiles) {
  * day (7 and 14 days); the part the processor used drawn inside in blue.
  * @returns {Array<{t: number, battery: number, processor: number}>} Wh per bar
  */
-export function drainPoints(ledger, from, now, batteryOnly) {
-    const perDay = now - from > 48 * HOUR_MS;
-    const step = perDay ? 24 * HOUR_MS : HOUR_MS;
-    const start = perDay ? new Date(new Date(from).setHours(0, 0, 0, 0)).getTime() : startOfHour(from);
-    const points = [];
-    for (let t = start; t <= now; t = perDay ? new Date(new Date(t).setDate(new Date(t).getDate() + 1)).getTime() : t + step)
-        points.push({ t, battery: 0, processor: 0 });
-    for (const b of ledger.buckets) {
-        if (b.t < start || (batteryOnly && !b.b)) continue;
-        const i = perDay ? points.findLastIndex(p => p.t <= b.t) : Math.floor((b.t - start) / step);
-        if (i < 0 || i >= points.length) continue;
-        points[i].battery += b.bw;
-        points[i].processor += b.pw - b.iw;
-    }
-    return points;
+export function drainPoints(ledger, from, to, batteryOnly, step = stepFor(from, to, fineFrom(ledger))) {
+    return bars(ledger, from, to, batteryOnly, () => ({ battery: 0, processor: 0 }), (p, b) => {
+        p.battery += b.bw;
+        p.processor += b.pw - b.iw;
+    }, step);
 }
 
 // Charts the pointer can read: the bar under it is highlighted and a box
@@ -180,13 +170,166 @@ export function barAt(x, width, left, count) {
     return Math.min(count - 1, Math.floor((x - left) / ((width - left) / count)));
 }
 
-/** The period a bar covers: "14:00–15:00", or the day for a chart of days. */
+/** A bar's length in ms ('day' bars: a day). */
+function stepMs(points) {
+    const step = points[0]?.step;
+    if (typeof step === 'number') return step;
+    if (step === 'day') return 24 * HOUR_MS;
+    return points.length > 1 ? points[1].t - points[0].t : HOUR_MS;
+}
+
+/** The axis label of the bar starting at t: the day, the hour, or hour and minutes. */
+function axisLabel(points, t) {
+    const d = GLib.DateTime.new_from_unix_local(Math.floor(t / 1000));
+    const step = stepMs(points);
+    if (step > HOUR_MS) return `${d.get_day_of_month()}.${d.get_month()}`;
+    return d.format(step < HOUR_MS ? '%H:%M' : '%H:00');
+}
+
+/** The period a bar covers: "14:00–15:00", "14:05–14:10", or the day for a chart of days. */
 export function barPeriod(points, i) {
     const t = points[i]?.t;
     if (t === undefined) return '';
-    const perDay = points.length > 1 && points[1].t - points[0].t > HOUR_MS;
+    const step = stepMs(points);
     const start = GLib.DateTime.new_from_unix_local(Math.floor(t / 1000));
-    return perDay ? start.format('%a %e %b').replace(/\s+/g, ' ') : `${start.format('%H:00')}–${start.add_hours(1).format('%H:00')}`;
+    if (step > HOUR_MS) return start.format('%a %e %b').replace(/\s+/g, ' ');
+    const end = start.add_seconds(step / 1000);
+    const pattern = step < HOUR_MS ? '%H:%M' : '%H:00';
+    return `${start.format(pattern)}–${end.format(pattern)}`;
+}
+
+/** "5-minute bars", "15-minute bars", "hourly bars", "daily bars". */
+function stepName(points) {
+    const step = stepMs(points);
+    if (step > HOUR_MS) return _('daily bars');
+    if (step === HOUR_MS) return _('hourly bars');
+    return fill(_('{n}-minute bars'), { n: Math.round(step / 60000) });
+}
+
+/** The time under x in a chart whose bars start at `left`. */
+export function timeAt(x, width, left, points) {
+    if (points.length === 0) return 0;
+    const start = points[0].t;
+    const end = points[points.length - 1].t + stepMs(points);
+    const f = Math.max(0, Math.min(1, (x - left) / Math.max(1, width - left)));
+    return start + f * (end - start);
+}
+
+/**
+ * Zoom on a chart: drag across it to zoom into that stretch; Ctrl+wheel
+ * zooms about the pointer (the plain wheel is left to scroll the page); +, -
+ * and 0 from the keyboard. `chart` holds the view ({from, to} or null),
+ * `bounds()` the period and `points()` the bars shown; `onChange` redraws.
+ */
+function zoomable(area, left, chart, bounds, points, onChange) {
+    const setView = ([from, to]) => {
+        const [lo, hi] = bounds();
+        chart.view = from <= lo && to >= hi ? null : { from, to };
+        chart.hover?.set(-1);
+        onChange();
+    };
+    chart.zoomTo = (from, to) => {
+        const [lo, hi] = bounds();
+        setView(clampRange(Math.min(from, to), Math.max(from, to), lo, hi));
+    };
+    chart.zoomBy = (factor, centre = null) => {
+        const [lo, hi] = bounds();
+        const [from, to] = chart.view ? [chart.view.from, chart.view.to] : [lo, hi];
+        setView(zoomAbout(from, to, centre ?? (from + to) / 2, factor, lo, hi));
+    };
+    chart.reset = () => setView(bounds());
+    chart.selection = null;
+    const drag = new Gtk.GestureDrag({ button: Gdk.BUTTON_PRIMARY });
+    drag.connect('drag-begin', (_g, x) => {
+        chart.selection = { x0: x, x1: x };
+    });
+    drag.connect('drag-update', (_g, dx) => {
+        if (!chart.selection) return;
+        chart.selection.x1 = chart.selection.x0 + dx;
+        area.queue_draw();
+    });
+    drag.connect('drag-end', (_g, dx) => {
+        const sel = chart.selection;
+        chart.selection = null;
+        area.queue_draw();
+        // A short drag is a click: nothing to zoom into.
+        if (!sel || Math.abs(dx) < 8) return;
+        const width = area.get_width();
+        const shown = points();
+        chart.zoomTo(timeAt(sel.x0, width, left, shown), timeAt(sel.x0 + dx, width, left, shown));
+    });
+    area.add_controller(drag);
+    let pointerX = null;
+    const motion = new Gtk.EventControllerMotion();
+    motion.connect('motion', (_c, x) => {
+        pointerX = x;
+    });
+    motion.connect('leave', () => {
+        pointerX = null;
+    });
+    area.add_controller(motion);
+    const wheel = new Gtk.EventControllerScroll({ flags: Gtk.EventControllerScrollFlags.VERTICAL });
+    wheel.connect('scroll', (controller, _dx, dy) => {
+        if (!(controller.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK) || !dy) return false;
+        const centre = pointerX === null ? null : timeAt(pointerX, area.get_width(), left, points());
+        chart.zoomBy(dy > 0 ? 1.25 : 0.8, centre);
+        return true;
+    });
+    area.add_controller(wheel);
+    const keys = new Gtk.EventControllerKey();
+    keys.connect('key-pressed', (_c, keyval) => {
+        const shown = points();
+        const hovered = chart.hover?.index >= 0 ? shown[chart.hover.index] : null;
+        const centre = hovered ? hovered.t + stepMs(shown) / 2 : null;
+        if (keyval === Gdk.KEY_plus || keyval === Gdk.KEY_equal || keyval === Gdk.KEY_KP_Add) chart.zoomBy(0.5, centre);
+        else if (keyval === Gdk.KEY_minus || keyval === Gdk.KEY_KP_Subtract) chart.zoomBy(2, centre);
+        else if (keyval === Gdk.KEY_0 || keyval === Gdk.KEY_KP_0) chart.reset();
+        else return false;
+        return true;
+    });
+    area.add_controller(keys);
+    chart.zoomControllers = { drag, wheel, keys };
+}
+
+/** The stretch being dragged across, over the chart. */
+function paintSelection(area, cr, height, chart) {
+    const sel = chart?.selection;
+    if (!sel || Math.abs(sel.x1 - sel.x0) < 2) return;
+    cr.setSourceRGBA(0.208, 0.518, 0.894, 0.18);
+    cr.rectangle(Math.min(sel.x0, sel.x1), 0, Math.abs(sel.x1 - sel.x0), height - 18);
+    cr.fill();
+    cr.setSourceRGBA(0.208, 0.518, 0.894, 0.8);
+    cr.rectangle(Math.min(sel.x0, sel.x1), 0, 1, height - 18);
+    cr.rectangle(Math.max(sel.x0, sel.x1) - 1, 0, 1, height - 18);
+    cr.fill();
+}
+
+/**
+ * The header's zoom line: the range shown and the bar size, with a Reset
+ * button while zoomed.
+ */
+function zoomHeader() {
+    const box = new Gtk.Box({ spacing: 8, css_classes: ['rp-zoom-line'] });
+    const label = new Gtk.Label({ xalign: 0, hexpand: true, wrap: true, css_classes: ['rp-tile-detail'] });
+    const reset = new Gtk.Button({ label: _('Reset zoom'), css_classes: ['flat', 'rp-zoom-reset'], valign: Gtk.Align.CENTER });
+    box.append(label);
+    box.append(reset);
+    box.update = (chart, points) => {
+        if (points.length === 0) {
+            label.label = '';
+            reset.visible = false;
+            return;
+        }
+        const name = stepName(points);
+        const span = fill(_('{from}–{to}'), { from: axisLabel(points, points[0].t), to: axisLabel(points, points[points.length - 1].t + stepMs(points)) });
+        label.label = chart.view
+            ? fill(_('Zoomed: {span} · {bars}'), { span, bars: name })
+            : fill(_('{bars} · drag across the chart, or Ctrl+scroll, to zoom'), { bars: `${name[0].toUpperCase()}${name.slice(1)}` });
+        reset.visible = !!chart.view;
+    };
+    box.label = label;
+    box.reset = reset;
+    return box;
 }
 
 /**
@@ -310,14 +453,11 @@ function drawDrain(area, cr, width, height, points, hover = null) {
     });
     if (points.length > 0) {
         cr.setSourceRGBA(fg.red, fg.green, fg.blue, 1);
-        const fmt = t => {
-            const d = new Date(t);
-            return points.length > 0 && points[1] && points[1].t - points[0].t > HOUR_MS
-                ? `${d.getDate()}.${d.getMonth() + 1}` : `${String(d.getHours()).padStart(2, '0')}:00`;
-        };
+        const fmt = t => axisLabel(points, t);
         text(fmt(points[0].t), left, height);
         text(fmt(points[points.length - 1].t), width, height, true);
     }
+    paintSelection(area, cr, height, hover?.chart);
     if (hover) paintHover(area, cr, width, height, left, points.length, hover);
     cr.$dispose();
 }
@@ -364,13 +504,11 @@ function drawBars(area, cr, width, height, chart, hover = null) {
     });
     if (points.length > 1) {
         cr.setSourceRGBA(fg.red, fg.green, fg.blue, 1);
-        const fmt = t => {
-            const d = new Date(t);
-            return points[1].t - points[0].t > HOUR_MS ? `${d.getDate()}.${d.getMonth() + 1}` : `${String(d.getHours()).padStart(2, '0')}:00`;
-        };
+        const fmt = t => axisLabel(points, t);
         text(fmt(points[0].t), left, height);
         text(fmt(points[points.length - 1].t), width, height, true);
     }
+    paintSelection(area, cr, height, hover?.chart);
     if (hover) paintHover(area, cr, width, height, left, points.length, hover);
     cr.$dispose();
 }
@@ -639,12 +777,19 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     chartBox.append(chartHead);
     const area = new Gtk.DrawingArea({ content_height: 140, hexpand: true, css_classes: ['rp-chart-area'] });
     rows.chart = { area, box: chartBox, points: [] };
-    area.update_property([Gtk.AccessibleProperty.LABEL], [_('Battery use, one bar per hour or day; Left and Right step through the bars')]);
+    area.update_property([Gtk.AccessibleProperty.LABEL], [_('Battery use over time; Left and Right step through the bars, plus and minus zoom, 0 shows the whole period')]);
     rows.chart.hover = hoverable(area, CHART_LEFT.drain, () => rows.chart.points.length, i => {
         const p = rows.chart.points[i];
         return { title: barPeriod(rows.chart.points, i), lines: [['#2ec27e', _('battery'), formatWh(p.battery)], ['#3584e4', _('processor'), formatWh(p.processor)]] };
     });
     area.set_draw_func((a, cr, width, height) => drawDrain(a, cr, width, height, rows.chart.points, rows.chart.hover));
+    rows.chart.hover.chart = rows.chart;
+    rows.chart.view = null;
+    rows.chart.bounds = [0, 0];
+    zoomable(area, CHART_LEFT.drain, rows.chart, () => rows.chart.bounds, () => rows.chart.points, () => render());
+    rows.chart.zoomLine = zoomHeader();
+    rows.chart.zoomLine.reset.connect('clicked', () => rows.chart.reset());
+    chartBox.append(rows.chart.zoomLine);
     chartBox.append(area);
     batteryBox.append(chartBox);
 
@@ -679,7 +824,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     barsBox.append(barsHead);
     const barsArea = new Gtk.DrawingArea({ content_height: 140, hexpand: true, css_classes: ['rp-chart-area'] });
     rows.bars = { area: barsArea, box: barsBox, chart: null, title: barsTitle };
-    barsArea.update_property([Gtk.AccessibleProperty.LABEL], [_('One bar per hour or day; Left and Right step through the bars')]);
+    barsArea.update_property([Gtk.AccessibleProperty.LABEL], [_('Use over time; Left and Right step through the bars, plus and minus zoom, 0 shows the whole period')]);
     rows.bars.hover = hoverable(barsArea, CHART_LEFT.bars, () => rows.bars.chart?.points.length ?? 0, i => {
         const chart = rows.bars.chart;
         const p = chart.points[i];
@@ -691,6 +836,13 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     barsArea.set_draw_func((a, cr, width, height) => {
         if (rows.bars.chart) drawBars(a, cr, width, height, rows.bars.chart, rows.bars.hover);
     });
+    rows.bars.hover.chart = rows.bars;
+    rows.bars.view = null;
+    rows.bars.bounds = [0, 0];
+    zoomable(barsArea, CHART_LEFT.bars, rows.bars, () => rows.bars.bounds, () => rows.bars.chart?.points ?? [], () => render());
+    rows.bars.zoomLine = zoomHeader();
+    rows.bars.zoomLine.reset.connect('clicked', () => rows.bars.reset());
+    barsBox.append(rows.bars.zoomLine);
     barsBox.append(barsArea);
     componentBox.append(barsBox);
     rows.componentEmpty = new Gtk.Label({ xalign: 0, wrap: true, css_classes: ['dim-label'] });
@@ -762,8 +914,12 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         showTile(rows.rest, batteryOnly && sum.hasEnergy && sum.batteryWh > 0);
         showTile(rows.gap, sum.gapWh > 0);
         for (const key of ['used', 'drain', 'runtime']) showTile(rows[key], batteryOnly);
-        rows.chart.points = drainPoints(history.ledger, startOfHour(period.from(now)), now, batteryOnly);
-        rows.chart.box.visible = batteryOnly && rows.chart.points.some(p => p.battery > 0);
+        // The chart shows the period, or the part of it zoomed into.
+        rows.chart.bounds = [startOfHour(period.from(now)), now];
+        const [chartFrom, chartTo] = rows.chart.view ? [rows.chart.view.from, rows.chart.view.to] : rows.chart.bounds;
+        rows.chart.points = drainPoints(history.ledger, chartFrom, chartTo, batteryOnly);
+        rows.chart.box.visible = batteryOnly && (!!rows.chart.view || rows.chart.points.some(p => p.battery > 0));
+        rows.chart.zoomLine.update(rows.chart, rows.chart.points);
         rows.chart.area.queue_draw();
 
         list.remove_all();
@@ -791,7 +947,9 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     /** One component other than the battery, over [from, now]. */
     const renderComponent = (component, from, now, tracking) => {
         const spec = specsNow()[component];
-        const view = componentView(component, history.ledger, { from, now, cores: GLib.get_num_processors() });
+        rows.bars.bounds = [from, now];
+        const [viewFrom, viewTo] = rows.bars.view ? [rows.bars.view.from, rows.bars.view.to] : rows.bars.bounds;
+        const view = componentView(component, history.ledger, { from, now, cores: GLib.get_num_processors(), viewFrom, viewTo });
         componentGroup.title = spec.title;
         componentGroup.description = spec.description ?? '';
         rows.componentView = view;
@@ -818,6 +976,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
             key.swatch.opacity = (spec.nested ? i === 0 : i === 1) ? 0.5 : 1;
         });
         barsBox.visible = view.has;
+        rows.bars.zoomLine.update(rows.bars, view.points);
         barsArea.queue_draw();
         rows.componentEmpty.visible = !view.has;
         rows.componentEmpty.label = tracking
@@ -847,7 +1006,12 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         }
     };
 
-    rows.period.connect('notify::selected', render);
+    rows.period.connect('notify::selected', () => {
+        // A zoom belongs to the period it was made in.
+        rows.chart.view = null;
+        rows.bars.view = null;
+        render();
+    });
     const unitId = settings.connect('changed::unit-temp', render);
     rows.batteryOnly.connect('notify::active', render);
     const trackingId = settings.connect('changed::battery-tracking', () => {
