@@ -28,6 +28,10 @@ const SOAK_ONLY = GLib.getenv('RP_SOAK_ONLY') === '1';
 // Test-only: keep one small object per reading, as a leak would, to prove
 // the heap census catches it.
 const SOAK_LEAK = GLib.getenv('RP_SOAK_LEAK') === '1';
+// Which of the tracker's readings the soak runs with (to find what grows):
+// all, no-tracking, no-appio (per-app disk), no-memory (per-app memory),
+// no-machine (memory, swap, stall and disk counters), no-network.
+const SOAK_VARIANT = GLib.getenv('RP_SOAK_VARIANT') || 'all';
 // A JavaScript cell kind (Object, Array, Function, ...) leaks when it grows
 // by more than this many cells per 100 polls in both halves of the steady
 // phase; a cache that fills once grows in one half only.
@@ -283,8 +287,20 @@ async function soak() {
     const ext = rp();
     if (SOAK_ONLY) {
         ext._settings.set_strv('pinned-metrics', ALL_METRICS);
-        ext._settings.set_boolean('battery-tracking', true);
+        ext._settings.set_boolean('battery-tracking', SOAK_VARIANT !== 'no-tracking');
     }
+    // A variant takes one reading out of the running tracker.
+    const tracker = ext._tracker;
+    if (tracker) {
+        if (SOAK_VARIANT === 'no-appio') tracker._appIo = null;
+        if (SOAK_VARIANT === 'no-machine') tracker._machine = null;
+        if (SOAK_VARIANT === 'no-network') tracker._network = null;
+        if (SOAK_VARIANT === 'no-memory') {
+            const sample = tracker._usage.sample.bind(tracker._usage);
+            tracker._usage.sample = opts => sample({ ...opts, withMemory: false });
+        }
+    }
+    const samplesBefore = tracker?.ledger ? tracker.ledger.summarize().seconds : 0;
     const kept = [];
     if (SOAK_LEAK) {
         const present = ext._present;
@@ -344,6 +360,8 @@ async function soak() {
     const last = steady[steady.length - 1];
     const rssSlope = medianSlope(steady.map(s => ({ t: s.t, v: s.rss })));
     report(`soak ${SOAK_S}s @1s interval, menu open, tabs cycling: shell CPU ${cpu.toFixed(2)}% (incl. idle shell)${SOAK_LEAK ? `, planted leak of ${kept.length} objects` : ''}`);
+    const trackedS = ext._tracker?.ledger ? ext._tracker.ledger.summarize().seconds - samplesBefore : 0;
+    report(`soak variant ${SOAK_VARIANT}: tracking ${ext._tracker ? 'on' : 'off'}, ${Math.round(trackedS / 30)} tracker samples during the soak`);
     report(`soak RSS ${all[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, slope after the first half ${rssSlope.toFixed(3)} MB/min (median of pairs)`);
     report(`soak fds ${first.fds} -> ${last.fds}, menu actors ${first.actors} -> ${last.actors}, sparklines ${first.sparks} -> ${last.sparks}`);
 
