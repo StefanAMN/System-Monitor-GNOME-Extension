@@ -24,6 +24,7 @@ import { appInfo } from '../lib/appnames.js';
 import { AlertMonitor, alertReadings, alertLine } from '../lib/alerts.js';
 import { parsePressure, PressureSampler } from '../lib/pressure.js';
 import { BucketSeries, RANGES } from '../lib/longhistory.js';
+import { ema, smoothReading, interpolateReading } from '../lib/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../lib/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
@@ -493,6 +494,42 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
         threw = true;
     }
     ok(threw, 'net usage: a foreign file is refused, not half-read');
+}
+
+// ── display smoothing: averaging and gliding between readings ──
+{
+    eq([ema(10, 30, 0.5), ema(NaN, 30, 0.5), ema(undefined, 7), ema(4, NaN)].map(v => Number.isNaN(v) ? 'NaN' : v), [20, 30, 7, 'NaN'], 'smooth: ema, and no previous value means the reading itself');
+    const raw = (cpu, mem, rx) => ({
+        cpu: { total: cpu, cores: [cpu, cpu], loadavg: [1.25, 1, 0.5], hardwareModel: 'X' },
+        mem: { percent: mem, used: mem * 1e8 },
+        net: { total: { rxRate: rx, txRate: 0 }, interfaces: { wlp1: { rxRate: rx, txRate: 0, isVirtual: false } } },
+        dsk: { readRate: 0, writeRate: 100, diskPercent: 10, mounts: [{ percent: 50 }] },
+        gpu: { present: true, percent: 40 },
+        processes: [{ comm: 'a', cpu: 5 }],
+    });
+    const a = raw(10, 20, 1000);
+    eq(smoothReading(null, a), a, 'smooth: the first reading is shown as it is');
+    const b = raw(90, 80, 3000);
+    const sb = smoothReading(a, b, 0.5);
+    eq([sb.cpu.total, sb.cpu.cores, sb.net.total.rxRate, sb.net.interfaces.wlp1.rxRate, sb.mem.percent],
+        [50, [50, 50], 2000, 2000, 80], 'smooth: CPU and network rates averaged, memory untouched');
+    eq([b.cpu.total, b.net.total.rxRate], [90, 3000], 'smooth: the raw reading is not modified (alerts and history use it)');
+    ok(sb.processes === b.processes && sb.cpu.loadavg === b.cpu.loadavg, 'smooth: everything else is the reading itself');
+
+    const half = interpolateReading(a, b, 0.5);
+    eq([half.cpu.total, half.cpu.cores, half.mem.percent, half.mem.used, half.net.total.rxRate, half.dsk.mounts[0].percent],
+        [50, [50, 50], 50, 5e9, 2000, 50], 'glide: numbers halfway at t = 0.5');
+    ok(half.cpu.loadavg === b.cpu.loadavg || half.cpu.loadavg.join() === '1.25,1,0.5', 'glide: load averages are not blended (printed as they are)');
+    ok(half.processes === b.processes, 'glide: process lists switch at once, never mixing two processes');
+    eq(half.cpu.hardwareModel, 'X', 'glide: text fields are the new reading\'s');
+    ok(interpolateReading(a, b, 1) === b && interpolateReading(a, b, 7) === b, 'glide: at the end, exactly the reading');
+    ok(interpolateReading(null, b, 0.2) === b, 'glide: nothing shown yet means the reading');
+    eq(interpolateReading(a, b, -1).cpu.total, 10, 'glide: before the start, the starting value');
+    const c = raw(30, 30, 0);
+    c.cpu.cores = [1, 2, 3];
+    eq(interpolateReading(a, c, 0.5).cpu.cores, [1, 2, 3], 'glide: a core count change switches at once');
+    const gone = interpolateReading(a, { ...b, gpu: { present: false, percent: null } }, 0.5);
+    eq(gone.gpu, { present: false, percent: null }, 'glide: a value that became unavailable is not blended');
 }
 
 // ── alerts: sustain, recovery, unavailable values, notification gap ──

@@ -30,6 +30,7 @@ import { RingBuffer } from './lib/ringbuffer.js';
 import { AlertMonitor, alertReadings, alertLine } from './lib/alerts.js';
 import { PressureSampler } from './lib/pressure.js';
 import { BucketSeries, RANGES } from './lib/longhistory.js';
+import { smoothReading, interpolateReading } from './lib/smoothing.js';
 import { loadNetUsage, saveNetUsage, netUsagePath, readBootId } from './lib/netusage.js';
 import { RunningStats } from './lib/stats.js';
 import { ResizeHandle, Sparkline, ProgressBar } from './ui/widgets.js';
@@ -61,6 +62,10 @@ const ALERT_GPU_EVERY_US = 30e6;
 const BACKGROUND_EVERY_US = 60e6;
 // Network day totals are written at most this often (and on disable).
 const NET_USAGE_SAVE_US = 5 * 60e6;
+// Gliding between readings: frames per second while the menu is open; with
+// it closed only the top bar moves, in this many steps per interval.
+const GLIDE_FRAME_MS = 66;
+const GLIDE_TOPBAR_STEPS = 4;
 // Share of time (PSI "some", 10 s average) in which programs waited for
 // memory that raises an alert: well past the occasional reclaim stall.
 const PRESSURE_LIMIT = 20;
@@ -112,6 +117,15 @@ export default class ResourcePulseExtension extends Extension {
         this._thm = new ThermalSampler();
         this._gpu = new GpuSampler();
         this._psi = new PressureSampler();
+        // What the panel shows: a glide from _shownFrom to _shownTo over one
+        // interval, starting at _shownAt. Raw readings stay in _lastData.
+        this._shownFrom = null;
+        this._shownTo = null;
+        this._shownAt = 0;
+        this._smoothPrev = null;
+        this._glideId = 0;
+        this._glidePeriod = 0;
+        this._histPushAt = 0;
         // Network data per day: counted from the file's last counters once loaded.
         this._netUsage = null;
         this._netUsageDirty = false;
@@ -265,6 +279,8 @@ export default class ResourcePulseExtension extends Extension {
         this._menuOpen = false;
         this._openStateId = this._indicator.menu.connect('open-state-changed', (menu, open) => {
             this._menuOpen = open;
+            // Frame rate follows the menu: every frame open, top bar only closed.
+            if (this._glideId) this._runGlide();
             if (open) {
                 this._updateMenuDimensions();
                 this._hideTooltip();
@@ -512,6 +528,9 @@ export default class ResourcePulseExtension extends Extension {
         this._notifySource?.destroy();
         this._notifySource = null;
         this._alerts = null;
+        if (this._glideId) GLib.source_remove(this._glideId);
+        this._glideId = 0;
+        this._shownFrom = this._shownTo = this._smoothPrev = null;
         // Counters since the last save; the next enable counts from here.
         if (this._netUsage) this._saveNetUsage();
         this._netUsage = null;
@@ -1063,9 +1082,75 @@ export default class ResourcePulseExtension extends Extension {
         });
     }
 
-    _render(data) {
+    _render(data, topBarOnly = false) {
         this._updateTopBarUI(data);
-        this._updateDashboardUI(data);
+        if (!topBarOnly) this._updateDashboardUI(data);
+    }
+
+    _smoothOn() {
+        return this._settings?.get_boolean('smooth-transitions') ?? false;
+    }
+
+    /** The reading as shown right now: part of the way through the glide. */
+    _shownNow(now = GLib.get_monotonic_time()) {
+        if (!this._shownTo) return null;
+        const t = this._intervalUs > 0 ? (now - this._shownAt) / this._intervalUs : 1;
+        return interpolateReading(this._shownFrom, this._shownTo, t);
+    }
+
+    /**
+     * A new reading: glide from what is shown now to it (CPU, GPU, network
+     * and disk lightly smoothed first) over one polling interval, so the
+     * values arrive as the next reading does.
+     */
+    _present(data) {
+        const now = GLib.get_monotonic_time();
+        // A sample was just added: the charts start their slide from here.
+        if (this._menuOpen) this._scrollCharts(now);
+        if (!this._smoothOn()) {
+            this._shownFrom = null;
+            this._shownTo = data;
+            this._smoothPrev = null;
+            this._render(data);
+            return;
+        }
+        const target = smoothReading(this._smoothPrev, data);
+        this._smoothPrev = target;
+        this._shownFrom = this._shownNow(now);
+        this._shownTo = target;
+        this._shownAt = now;
+        this._render(this._shownNow(now));
+        this._runGlide();
+    }
+
+    /** Frames until the glide and the charts' scroll are done; restarted for the menu's rate. */
+    _runGlide() {
+        const period = this._menuOpen ? GLIDE_FRAME_MS : Math.max(100, Math.round(this._intervalUs / 1000 / GLIDE_TOPBAR_STEPS));
+        if (this._glideId && this._glidePeriod === period) return;
+        if (this._glideId) GLib.source_remove(this._glideId);
+        this._glidePeriod = period;
+        this._glideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, period, () => {
+            const now = GLib.get_monotonic_time();
+            const done = !this._smoothOn() || now - this._shownAt >= this._intervalUs;
+            const shown = done ? this._shownTo : this._shownNow(now);
+            if (shown) this._render(shown, !this._menuOpen);
+            if (this._menuOpen) this._scrollCharts(now, done);
+            if (done) {
+                this._glideId = 0;
+                return GLib.SOURCE_REMOVE;
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    /** Live charts slide by the time since their last sample (one step per interval). */
+    _scrollCharts(now, done = false) {
+        const on = this._smoothOn() && !done;
+        const phase = on && this._intervalUs > 0 ? Math.min(1, (now - this._histPushAt) / this._intervalUs) : 1;
+        for (const spark of this._sparklines) {
+            if (!spark.is_mapped()) continue;
+            spark.setPhase(spark.history === this._hist[spark.histKey] ? phase : 1);
+        }
     }
 
     _pushHistory(key, value, now) {
@@ -1075,6 +1160,7 @@ export default class ResourcePulseExtension extends Extension {
         if (last && now - last > 2.5 * this._intervalUs) this._hist[key].clear();
         this._histStamp[key] = now;
         this._hist[key].push(value);
+        this._histPushAt = now;
     }
 
     _recordHistory(data, need, now) {
@@ -1218,7 +1304,7 @@ export default class ResourcePulseExtension extends Extension {
                 ? MIN_RESAMPLE_US
                 : MIN_RESAMPLE_US - (now - this._lastPollTime);
             if (wait > 0) {
-                if (this._lastData) this._render(this._lastData);
+                if (this._lastData) this._render(this._shownNow() ?? this._lastData);
                 this._deferPoll(wait);
                 return;
             }
@@ -1351,7 +1437,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._recordLong(data, need, now);
             }
             this._lastData = data;
-            this._render(data);
+            this._present(data);
             this._updateAlerts(data, now);
             // Fetch the second reading now instead of at the next tick.
             if (procWarmingUp) this._deferPoll(MIN_RESAMPLE_US);

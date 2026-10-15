@@ -65,6 +65,11 @@
       <summary>Disk Space Alert Threshold</summary>
       <description>Percentage of space used on / that raises an alert.</description>
     </key>
+    <key name="smooth-transitions" type="b">
+      <default>true</default>
+      <summary>Smooth Changes</summary>
+      <description>Shown values glide to each new reading over one polling interval; noisy rates are lightly averaged. Alerts and history use the raw readings.</description>
+    </key>
     <key name="alert-notify" type="b">
       <default>true</default>
       <summary>Alert Notifications</summary>

@@ -209,6 +209,10 @@ export const Sparkline = GObject.registerClass({
             formatValue: v => `${Math.round(v)}%`
         }, options);
         this.sampleSeconds = 0;
+        // 0..1 through the interval since the last sample: the series is
+        // drawn shifted right by the rest of one step, so it slides left
+        // smoothly instead of jumping a step per sample.
+        this.phase = 1;
         this._hoverX = -1;
         this.connect('repaint', this._draw.bind(this));
         this.connect('notify::mapped', () => this.refresh());
@@ -234,6 +238,14 @@ export const Sparkline = GObject.registerClass({
     _setHoverX(x) {
         if (this._hoverX !== x) {
             this._hoverX = x;
+            this.refresh();
+        }
+    }
+
+    setPhase(phase) {
+        const p = Math.max(0, Math.min(1, phase));
+        if (p !== this.phase) {
+            this.phase = p;
             this.refresh();
         }
     }
@@ -330,7 +342,12 @@ export const Sparkline = GObject.registerClass({
         const step = graphW / (hist.capacity - 1);
         const right = padL + graphW;
         const base = padT + graphH;
-        const firstX = right - (n - 1) * step;
+        const shift = (1 - this.phase) * step;
+        const firstX = right - (n - 1) * step + shift;
+        // The point sliding in starts beyond the right edge: keep it inside.
+        cr.save();
+        cr.rectangle(padL, 0, graphW, padT + graphH + 1);
+        cr.clip();
         const yOf = v => base - (Math.min(max, Math.max(0, v)) / max) * graphH;
         // Runs of consecutive samples; a NaN (a bucket nothing was read in)
         // breaks the line instead of dropping it to zero.
@@ -378,11 +395,13 @@ export const Sparkline = GObject.registerClass({
             }
         }
 
-        const hover = this._hoverX >= 0 ? hoverIndex(this._hoverX, padL, graphW, hist.capacity, n) : -1;
+        cr.restore();
+
+        const hover = this._hoverX >= 0 ? hoverIndex(this._hoverX - shift, padL, graphW, hist.capacity, n) : -1;
         if (hover >= 0) {
             const raw = hist.get(hover);
             const has = Number.isFinite(raw);
-            const x = padL + graphW - (n - 1 - hover) * step;
+            const x = padL + graphW - (n - 1 - hover) * step + shift;
             const y = has ? yOf(raw) : base;
 
             cr.setLineWidth(1);
