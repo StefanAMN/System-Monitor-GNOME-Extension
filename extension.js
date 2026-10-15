@@ -125,7 +125,6 @@ export default class ResourcePulseExtension extends Extension {
         this._smoothPrev = null;
         this._glideId = 0;
         this._glidePeriod = 0;
-        this._histPushAt = 0;
         // Network data per day: counted from the file's last counters once loaded.
         this._netUsage = null;
         this._netUsageDirty = false;
@@ -1082,9 +1081,14 @@ export default class ResourcePulseExtension extends Extension {
         });
     }
 
-    _render(data, topBarOnly = false) {
+    /**
+     * @param {boolean} [topBarOnly] menu closed: the panel is not drawn
+     * @param {boolean} [frame] a glide frame, not a new reading: the charts
+     *   (Cairo, costly to repaint) change only with a new sample
+     */
+    _render(data, topBarOnly = false, frame = false) {
         this._updateTopBarUI(data);
-        if (!topBarOnly) this._updateDashboardUI(data);
+        if (!topBarOnly) this._updateDashboardUI(data, frame);
     }
 
     _smoothOn() {
@@ -1105,8 +1109,6 @@ export default class ResourcePulseExtension extends Extension {
      */
     _present(data) {
         const now = GLib.get_monotonic_time();
-        // A sample was just added: the charts start their slide from here.
-        if (this._menuOpen) this._scrollCharts(now);
         if (!this._smoothOn()) {
             this._shownFrom = null;
             this._shownTo = data;
@@ -1133,8 +1135,7 @@ export default class ResourcePulseExtension extends Extension {
             const now = GLib.get_monotonic_time();
             const done = !this._smoothOn() || now - this._shownAt >= this._intervalUs;
             const shown = done ? this._shownTo : this._shownNow(now);
-            if (shown) this._render(shown, !this._menuOpen);
-            if (this._menuOpen) this._scrollCharts(now, done);
+            if (shown) this._render(shown, !this._menuOpen, true);
             if (done) {
                 this._glideId = 0;
                 return GLib.SOURCE_REMOVE;
@@ -1143,15 +1144,6 @@ export default class ResourcePulseExtension extends Extension {
         });
     }
 
-    /** Live charts slide by the time since their last sample (one step per interval). */
-    _scrollCharts(now, done = false) {
-        const on = this._smoothOn() && !done;
-        const phase = on && this._intervalUs > 0 ? Math.min(1, (now - this._histPushAt) / this._intervalUs) : 1;
-        for (const spark of this._sparklines) {
-            if (!spark.is_mapped()) continue;
-            spark.setPhase(spark.history === this._hist[spark.histKey] ? phase : 1);
-        }
-    }
 
     _pushHistory(key, value, now) {
         // A metric that was not sampled for a while (unpinned with the menu
@@ -1160,7 +1152,6 @@ export default class ResourcePulseExtension extends Extension {
         if (last && now - last > 2.5 * this._intervalUs) this._hist[key].clear();
         this._histStamp[key] = now;
         this._hist[key].push(value);
-        this._histPushAt = now;
     }
 
     _recordHistory(data, need, now) {
@@ -3472,7 +3463,7 @@ export default class ResourcePulseExtension extends Extension {
 
     // ── Dashboard Update ──────────────────────────────────────────────────────
 
-    _updateDashboardUI(data) {
+    _updateDashboardUI(data, frame = false) {
         if (!this._settings || !this._indicator) return;
         // Pressure: the share of the last 10 s in which programs were stalled.
         for (const [row, key] of [[this._cpuWait, 'cpu'], [this._memWait, 'memory'], [this._dskWait, 'io']]) {
@@ -3913,7 +3904,7 @@ export default class ResourcePulseExtension extends Extension {
             }
         }
 
-        for (const spark of this._sparklines) spark.refresh();
+        if (!frame) for (const spark of this._sparklines) spark.refresh();
 
         // ── Top Processes (CPU & Memory tabs) ──
         // A snapshot sorted for the other tab (or taken before the tab was

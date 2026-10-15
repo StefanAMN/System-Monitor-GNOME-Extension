@@ -767,7 +767,7 @@ async function historyAndUsage(rp) {
 // Values glide to each reading over one polling interval: with polling
 // paused, two known readings are shown; memory (not averaged) passes
 // through in-between values and lands exactly on the reading, CPU lands on
-// the average of the two. The live charts slide instead of stepping.
+// the average of the two, and the bars follow.
 async function smoothGlide(rp) {
     check(rp._settings.get_boolean('smooth-transitions'), 'glide: smooth changes are off by default');
     rp._indicator.menu.open();
@@ -800,16 +800,9 @@ async function smoothGlide(rp) {
         check(mem() === 80, `glide: memory ended at ${mem()}, not the reading 80`);
         check(cpu() === 50, `glide: CPU ended at ${cpu()}, not the average 50 of 10 and 90`);
         check(rp._topBarWidgets.memory.label.text === '80%', `glide: top bar memory ends at '${rp._topBarWidgets.memory.label.text}'`);
+        check(rp._summaryCards.memory.pbar.pct === 80, `glide: the memory bar ends at ${rp._summaryCards.memory.pbar.pct} %`);
         console.log(`RP-UITEST glide: memory 20 -> ${seen.join(' ')} -> ${mem()} over ${(rp._intervalUs / 1e6).toFixed(0)} s`);
 
-        // Charts: a sample was just added, so they start shifted and slide in.
-        rp._histPushAt = GLib.get_monotonic_time();
-        rp._present(reading(80, 90));
-        await sleep(200);
-        const spark = rp._summaryCards.cpu.spark ?? rp._sparklines.find(sp => sp.histKey === 'cpu' && sp.is_mapped());
-        check(spark && spark.phase > 0 && spark.phase < 1, `glide: the CPU chart is not sliding (phase ${spark?.phase})`);
-        await sleep(rp._intervalUs / 1000);
-        check(spark.phase === 1, `glide: the CPU chart did not come to rest (phase ${spark.phase})`);
     } finally {
         rp._startPolling();
         rp._indicator.menu.close();
