@@ -32,9 +32,13 @@ const SOAK_LEAK = GLib.getenv('RP_SOAK_LEAK') === '1';
 // all, no-tracking, no-appio (per-app disk), no-memory (per-app memory),
 // no-machine (memory, swap, stall and disk counters), no-network; or
 // no-extension: the extension disabled, the same loop on the bare shell, to
-// tell the shell's own RSS growth from the extension's.
+// tell the shell's own RSS growth from the extension's; menu-closed: 1 s
+// polls and the top bar only; no-polling: the menu open and its tabs
+// cycling with polling paused (after one visit to every tab).
 const SOAK_VARIANT = GLib.getenv('RP_SOAK_VARIANT') || 'all';
 const SOAK_BARE = SOAK_VARIANT === 'no-extension';
+const SOAK_MENU = SOAK_VARIANT !== 'menu-closed';
+const SOAK_PAUSED = SOAK_VARIANT === 'no-polling';
 // A JavaScript cell kind (Object, Array, Function, ...) leaks when it grows
 // by more than this many cells per 100 polls in both halves of the steady
 // phase; a cache that fills once grows in one half only.
@@ -314,7 +318,24 @@ async function soak() {
         };
     }
     ext._settings.set_int('poll-interval', 1);
-    ext._indicator.menu.open();
+    if (SOAK_MENU) ext._indicator.menu.open();
+    // Polls that ran during the soak; with polling paused, every page is
+    // built with real readings first.
+    let polls = 0;
+    let paused = false;
+    const poll = ext._poll;
+    ext._poll = function (...args) {
+        if (paused) return Promise.resolve();
+        polls++;
+        return poll.apply(this, args);
+    };
+    if (SOAK_PAUSED) {
+        for (const name of TABS) {
+            showTab(ext, name);
+            await sleep(2500);
+        }
+        paused = true;
+    }
     const t0 = GLib.get_monotonic_time();
     const c0 = cpuTicks();
     // Samples go into arrays allocated now: a record kept per step would
@@ -331,9 +352,10 @@ async function soak() {
     const censusAt = [SOAK_S / 4, SOAK_S * 5 / 8, SOAK_S];
     const censuses = [];
     let tab = 0;
+    const pollsBefore = polls;
     for (let elapsed = 0; elapsed < SOAK_S; elapsed += 15) {
         for (let k = 0; k < 3; k++) {
-            showTab(ext, TABS[tab++ % TABS.length]);
+            if (SOAK_MENU) showTab(ext, TABS[tab++ % TABS.length]);
             await sleep(5000);
         }
         System.gc();
@@ -349,6 +371,8 @@ async function soak() {
             censuses.push({ t, cells: await heapCensus() });
     }
     const cpu = ((cpuTicks() - c0) / CLK_TCK / ((GLib.get_monotonic_time() - t0) / 1e6)) * 100;
+    const soakPolls = polls - pollsBefore;
+    delete ext._poll;
     showTab(ext, 'overview');
     ext._indicator.menu.close();
     ext._settings.set_int('poll-interval', 2);
@@ -363,7 +387,7 @@ async function soak() {
     const first = steady[0];
     const last = steady[steady.length - 1];
     const rssSlope = medianSlope(steady.map(s => ({ t: s.t, v: s.rss })));
-    report(`soak ${SOAK_S}s @1s interval, menu open, tabs cycling: shell CPU ${cpu.toFixed(2)}% (incl. idle shell)${SOAK_LEAK ? `, planted leak of ${kept.length} objects` : ''}`);
+    report(`soak ${SOAK_S}s @1s interval, ${SOAK_MENU ? 'menu open, tabs cycling' : 'menu closed'}, ${soakPolls} polls${SOAK_PAUSED ? ' (paused)' : ''}: shell CPU ${cpu.toFixed(2)}% (incl. idle shell)${SOAK_LEAK ? `, planted leak of ${kept.length} objects` : ''}`);
     const trackedS = ext._tracker?.ledger ? ext._tracker.ledger.summarize().seconds - samplesBefore : 0;
     report(`soak variant ${SOAK_VARIANT}: tracking ${ext._tracker ? 'on' : 'off'}, ${Math.round(trackedS / 30)} tracker samples during the soak`);
     report(`soak RSS ${all[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, slope after the first half ${rssSlope.toFixed(3)} MB/min (median of pairs)`);
