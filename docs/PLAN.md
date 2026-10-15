@@ -1268,3 +1268,16 @@ Owner's request: hover any bar, not only hour-long ones, and zoom in and out on 
 
 - 8563a9c: five-minute totals. Then the zoom itself: `trackingview.js` (steps, `bars`, `clampRange`, `zoomAbout`, view range), `tracking.js` (zoom by drag / Ctrl+wheel / + - 0, zoom line with Reset, step-aware labels and hover, a new period drops the zoom).
 - Proof: lint clean; `test-unit` 560 passed; `test-i18n` passed; `test-ui` passed (prefs-check 272 of 272), with a real pointer drag across the battery chart's last two hours zooming into five-minute bars, a real Ctrl+wheel zooming out about the pointer and the plain wheel scrolling the page instead. On the way: the first run's 7 failures were the checks' own (the 14-day period still selected, a clamp case of 61 min, the period end read before a render took a new "now").
+
+## The bare shell against the soak (2026-10-25)
+
+`RP_SOAK_VARIANT=no-extension` (82f9575) disables the extension and runs the soak's loop on the shell alone: the same 15 s steps, collections, RSS / fd samples, heap censuses and RSS rule. CI run 40173256286 (temporary branch `soak-baseline`, GNOME 50, 20 minutes, three runs each):
+
+| Variant | Run 1: RSS (MB), slope (MB/min) | Run 2 | Run 3 | Shell CPU |
+| --- | --- | --- | --- | --- |
+| all (menu open, 1 s polls, tabs cycling) | 293.3 -> 320.7, 0.116 | 296.5 -> 326.4, **0.725** | 297.0 -> 348.2, **1.941** | 4.9-6.4 % |
+| no-extension | 267.9 -> 270.8, 0.002 | 265.3 -> 273.5, 0.001 | 264.8 -> 272.9, 0.000 | 0.13-0.15 % |
+
+- **Result: the shell alone does not grow.** Three of three bare runs are flat to the thousandth (heap 3,170 -> 3,174 objects); the soak grows in two of three, by up to 1.9 MB/min, with the JS heap flat (3,796 -> 3,808).
+- So the growth needs the extension's work, but not the tracker (the `no-tracking` runs grew as much): it is native memory spent by the menu being open and repainted every second (graphs, process rows, Pango layouts, St textures) or by the 1 s collectors (the process sampler's subprocesses). The bare loop exercises none of these, so it bounds the shell, not the cause.
+- Next, to split the remaining cause: the soak with the menu closed (collectors and the top bar only) against the menu open with polling paused.
