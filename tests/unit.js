@@ -24,7 +24,7 @@ import { appInfo } from '../lib/appnames.js';
 import { AlertMonitor, alertReadings, alertLine } from '../lib/alerts.js';
 import { parsePressure, PressureSampler } from '../lib/pressure.js';
 import { BucketSeries, RANGES } from '../lib/longhistory.js';
-import { ema, smoothReading, interpolateReading } from '../lib/smoothing.js';
+import { ema, smoothReading, interpolateReading, glideBuffer } from '../lib/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../lib/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../lib/batteryledger.js';
 import { upowerState, batteryHealth } from '../lib/battery.js';
@@ -528,6 +528,23 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     const c = raw(30, 30, 0);
     c.cpu.cores = [1, 2, 3];
     eq(interpolateReading(a, c, 0.5).cpu.cores, [1, 2, 3], 'glide: a core count change switches at once');
+    // A reused buffer: same values as a fresh result, no reading modified,
+    // stale keys dropped.
+    const aCopy = JSON.stringify(a);
+    const bCopy = JSON.stringify(b);
+    const buf = glideBuffer();
+    const r1 = interpolateReading(a, b, 0.25, buf);
+    eq([r1 === buf, r1.cpu.total, r1.net.interfaces.wlp1.rxRate], [true, 30, 1500], 'glide buffer: written in place');
+    const r2 = interpolateReading(a, b, 0.75, buf);
+    eq([r2 === buf, r2.cpu.total, r2.cpu.cores], [true, 70, [70, 70]], 'glide buffer: reused on the next frame');
+    eq([JSON.stringify(a) === aCopy, JSON.stringify(b) === bCopy], [true, true], 'glide buffer: neither reading is modified');
+    const b2 = { ...b, net: { ...b.net, interfaces: {} } };
+    const r3 = interpolateReading(a, b2, 0.5, buf);
+    eq(Object.keys(r3.net.interfaces), [], 'glide buffer: an interface that went away is dropped');
+    const c2 = { ...b, gpu: { present: false, percent: null } };
+    interpolateReading({ ...a, gpu: undefined }, c2, 0.5, buf);
+    interpolateReading(a, b, 0.5, buf);
+    eq(c2.gpu, { present: false, percent: null }, 'glide buffer: a reading\'s own object taken as it is is never written later');
     const gone = interpolateReading(a, { ...b, gpu: { present: false, percent: null } }, 0.5);
     eq(gone.gpu, { present: false, percent: null }, 'glide: a value that became unavailable is not blended');
 }
