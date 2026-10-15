@@ -795,7 +795,7 @@ async function smoothGlide(rp) {
         }
         await sleep(450);
         const between = new Set(seen.filter(v => v > 20 && v < 80));
-        check(between.size >= 4, `glide: memory showed ${[...between].join(', ')} on the way (want ≥ 4 in-between values)`);
+        check(between.size >= 5, `glide: memory showed ${[...between].join(', ')} on the way (want ≥ 4 in-between values)`);
         check(seen.every((v, i) => i === 0 || v >= seen[i - 1]), `glide: memory went back on the way (${seen.join(', ')})`);
         check(mem() === 80, `glide: memory ended at ${mem()}, not the reading 80`);
         check(cpu() === 50, `glide: CPU ended at ${cpu()}, not the average 50 of 10 and 90`);

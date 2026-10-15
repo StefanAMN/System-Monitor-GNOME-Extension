@@ -425,54 +425,53 @@ export const Sparkline = GObject.registerClass({
 
 export const ProgressBar = GObject.registerClass({
     GTypeName: 'ResourcePulseProgressBar',
-}, class ProgressBar extends St.Widget {
-    // Plain actors, not Cairo: a bar is redrawn many times a second while
-    // values glide, and repainting a Cairo canvas at that rate cost about
-    // 7 % of a core per bar (measured), against about 0.2 % for this.
+}, class ProgressBar extends St.DrawingArea {
     _init(height = 6, r = 0.2, g = 0.51, b = 0.89) {
         super._init({ style_class: 'resource-pulse-progress-track', height, x_expand: true });
         this.pct = 0;
         this.r = r; this.g = g; this.b = b;
-        this._height = height;
-        // The pill track in the theme's `color`, over the CSS background, as the canvas drew it.
-        this._track = new St.Widget();
-        this._fill = new St.Widget();
-        this.add_child(this._track);
-        this.add_child(this._fill);
-        this.connect('style-changed', () => this._restyle());
+        this.connect('repaint', this._draw.bind(this));
+        this.connect('style-changed', () => {
+            if (this.is_mapped()) this.queue_repaint();
+        });
+        this.connect('notify::mapped', () => {
+            if (this.is_mapped()) this.queue_repaint();
+        });
     }
-
-    _restyle() {
-        const { fg, fgAlpha, darken } = themeColors(this);
-        const radius = `border-radius: ${this._height / 2}px;`;
-        const rgb = v => Math.round(v * 255);
-        this._track.style = `${radius} background-color: rgba(${rgb(fg[0])}, ${rgb(fg[1])}, ${rgb(fg[2])}, ${fgAlpha});`;
-        this._fill.style = `${radius} background-color: rgb(${rgb(this.r * darken)}, ${rgb(this.g * darken)}, ${rgb(this.b * darken)});`;
-    }
-
     setColor(r, g, b) {
         if (this.r !== r || this.g !== g || this.b !== b) {
             this.r = r; this.g = g; this.b = b;
-            if (this.get_stage()) this._restyle();
+            if (this.is_mapped()) this.queue_repaint();
         }
     }
-
     setPercent(pct) {
         pct = Math.max(0, Math.min(100, pct));
         if (this.pct !== pct) {
             this.pct = pct;
-            this.queue_relayout();
+            if (this.is_mapped()) this.queue_repaint();
         }
     }
+    _draw(area) {
+        const cr = area.get_context();
+        const [w, h] = area.get_surface_size();
+        cr.save();
+        
+        // Track
+        const { fg, fgAlpha, darken } = themeColors(this);
+        cr.setSourceRGBA(fg[0], fg[1], fg[2], fgAlpha);
+        cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
+        cr.arc(w - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
+        cr.fill();
 
-    vfunc_allocate(box) {
-        this.set_allocation(box);
-        const w = box.get_width();
-        const h = box.get_height();
-        this._track.allocate(new Clutter.ActorBox({ x1: 0, y1: 0, x2: w, y2: h }));
-        // At least a dot, as the canvas drew it.
-        const fillW = Math.min(w, Math.max(h, w * (this.pct / 100)));
-        this._fill.allocate(new Clutter.ActorBox({ x1: 0, y1: 0, x2: fillW, y2: h }));
+        // Fill
+        const fillW = Math.max(h, w * (this.pct / 100));
+        cr.setSourceRGBA(this.r * darken, this.g * darken, this.b * darken, 1.0);
+        cr.arc(h/2, h/2, h/2, Math.PI/2, Math.PI*1.5);
+        cr.arc(fillW - h/2, h/2, h/2, -Math.PI/2, Math.PI/2);
+        cr.fill();
+
+        cr.restore();
+        cr.$dispose();
     }
 });
 
