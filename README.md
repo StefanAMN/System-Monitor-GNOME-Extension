@@ -20,7 +20,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **Disk Users**: The Disk page lists the processes reading and writing right now.
 - **Data per Day and Month**: The Network page shows today's and this month's traffic on physical interfaces, kept in `~/.local/share/resource-pulse/network-usage.json` (62 days).
 - **Copy Report**: Diagnostics can copy its findings and the machine's state as text.
-- **Smooth Changes**: Shown values and bars glide to each new reading over one update interval instead of jumping (charts still step once per reading); CPU, GPU, network and disk speeds are lightly averaged. Alerts and history use the raw readings. A switch in Settings turns it off.
+- **Smooth Changes**: In the open panel, values and bars glide to each new reading over one update interval instead of jumping (charts still step once per reading); CPU, GPU, network and disk speeds are lightly averaged, also in the top bar, which changes once per reading to stay within the 1 % idle budget. Alerts and history use the raw readings. A switch in Settings turns it off.
 - **Keyboard**: Down or Tab from the top-bar button enters the panel; Tab moves between cards and buttons, Return or Space opens a card, Left / Right move between detail pages, Backspace goes back to the overview, Escape closes the panel.
 - **Hardware-Friendly Fallback**: Automatically degrades and hides battery, RAPL power draw, thermal zone, or GPU details if the hardware is not present.
 
