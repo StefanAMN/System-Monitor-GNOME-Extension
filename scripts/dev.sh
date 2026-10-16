@@ -425,10 +425,12 @@ run_driver() {
     local LANG_ENV=()
     if [ -n "${RP_UI_LANGUAGE:-}" ]; then LANG_ENV=(LANG=en_US.UTF-8 LC_ALL= LANGUAGE="$RP_UI_LANGUAGE"); fi
 
+    # RP_SHELL_ENV="VAR=value ..." is extra environment for gnome-shell only
+    # (allocator or renderer settings, to tell where the soak's RSS goes).
     start_log_stream "$LOG" "$SANDBOX/session.log"
     env "${LANG_ENV[@]}" XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" RP_UITEST_SHOTS="$SANDBOX/shots" \
     dbus-run-session -- bash -c '
-        gnome-shell --headless --virtual-monitor 1280x720 >> "'"$LOG"'" 2>&1 &
+        env ${RP_SHELL_ENV:-} gnome-shell --headless --virtual-monitor 1280x720 >> "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
         trap "kill $SHELL_PID 2>/dev/null; wait $SHELL_PID 2>/dev/null" EXIT INT TERM
         sleep 3
@@ -679,7 +681,7 @@ cmd_test_compat() {
             mkdir -p "$art"
             chmod 777 "$art"
             # shellcheck disable=SC2086
-            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts -e RP_SOAK_LEAK="${RP_SOAK_LEAK:-0}" -e RP_SOAK_VARIANT="${RP_SOAK_VARIANT:-all}" "${EXTRA[@]}" \
+            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts -e RP_SOAK_LEAK="${RP_SOAK_LEAK:-0}" -e RP_SOAK_VARIANT="${RP_SOAK_VARIANT:-all}" -e RP_SHELL_ENV="${RP_SHELL_ENV:-}" "${EXTRA[@]}" \
                     "$img" ./scripts/dev.sh $t > "$art.log" 2>&1; then
                 line="$line|$name pass"
             else

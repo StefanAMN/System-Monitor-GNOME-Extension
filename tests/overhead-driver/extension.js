@@ -389,7 +389,8 @@ async function soak() {
     const rssSlope = medianSlope(steady.map(s => ({ t: s.t, v: s.rss })));
     report(`soak ${SOAK_S}s @1s interval, ${SOAK_MENU ? 'menu open, tabs cycling' : 'menu closed'}, ${soakPolls} polls${SOAK_PAUSED ? ' (paused)' : ''}: shell CPU ${cpu.toFixed(2)}% (incl. idle shell)${SOAK_LEAK ? `, planted leak of ${kept.length} objects` : ''}`);
     const trackedS = ext._tracker?.ledger ? ext._tracker.ledger.summarize().seconds - samplesBefore : 0;
-    report(`soak variant ${SOAK_VARIANT}: tracking ${ext._tracker ? 'on' : 'off'}, ${Math.round(trackedS / 30)} tracker samples during the soak`);
+    report(`soak variant ${SOAK_VARIANT}: tracking ${ext._tracker ? 'on' : 'off'}, ${Math.round(trackedS / 30)} tracker samples during the soak; ` +
+        `shell env ${['MALLOC_ARENA_MAX', 'LP_NUM_THREADS'].map(k => `${k}=${GLib.getenv(k) ?? '-'}`).join(' ')}`);
     report(`soak RSS ${all[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, slope after the first half ${rssSlope.toFixed(3)} MB/min (median of pairs)`);
     report(`soak fds ${first.fds} -> ${last.fds}, menu actors ${first.actors} -> ${last.actors}, sparklines ${first.sparks} -> ${last.sparks}`);
 
