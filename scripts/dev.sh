@@ -569,6 +569,16 @@ cmd_test_overhead() {
 # quiet machine; RP_SOAK_LEAK=1 plants a leak to prove they catch one.
 cmd_test_soak() {
     export RP_SOAK_ONLY=1
+    # Software rendering (llvmpipe: CI and headless shells) rasterizes on
+    # several threads, and how much of their memory the shell keeps differs
+    # from run to run: the same code soaked at -0.23 to +1.94 MB/min, five of
+    # twelve CI runs over the limit. On one thread nine of nine stayed under
+    # 0.31 MB/min (docs/PLAN.md). A GPU is not affected. RP_SHELL_ENV=none
+    # soaks with the threads.
+    case "${RP_SHELL_ENV:-}" in
+        "") export RP_SHELL_ENV=LP_NUM_THREADS=0 ;;
+        none) export RP_SHELL_ENV= ;;
+    esac
     cmd_test_overhead "${1:-1200}"
 }
 
