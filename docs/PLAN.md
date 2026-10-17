@@ -1310,3 +1310,26 @@ Variants (5c5724c): `menu-closed` (1 s polls, all 8 metrics in the top bar, no m
 - **Cause:** llvmpipe, the software renderer the CI and headless shells paint with, rasterizes on several threads; how much of their memory the shell keeps differs from run to run while the menu is painted. Fewer malloc arenas do not change it; one render thread does. With threads, 5 of the 12 normal soaks this session went over 0.5 MB/min (ending at 320-348 MB); on one thread 9 of 9 stayed under 0.31 and ended within 4 MB of each other. The JS heap is flat throughout, the bare shell is flat, and the collectors with the menu closed are flat: no leak in the extension. A GPU does not use llvmpipe, so users are not affected.
 - **Fix:** `test-soak` runs the shell with `LP_NUM_THREADS=0` unless `RP_SHELL_ENV` says otherwise (`RP_SHELL_ENV=none` soaks with the threads). The RSS limit stays at 0.5 MB/min, now with room above the spread. `test-overhead` (CPU budgets) keeps the default renderer.
 - **Proof:** the nine soaks above, and the master CI soak through the default (run 40182606593, 6e94715): `LP_NUM_THREADS=0` reached the shell, RSS 291.2 -> 311.0 MB, slope 0.087 MB/min, heap 3,805 -> 3,813 objects; every job green (GNOME 46-50, memory soak).
+
+## Tracking and Diagnostics with less text (branch `quieter-pages`, 2026-10-25)
+
+Owner: "reconstruct the UI for the tracking and diagnostics to include less text". Presentation only (src/ui/prefs/tracking.js, diagnostics.js, agent.js, style.js); no figure, finding or setting changes.
+
+### Design
+- **Tracking, top:** one row: "Usage tracking", the status as its subtitle ("Recording · 3h 20m"), then an info button (what is recorded, how often, how long kept, local only), a clear-history icon button and the switch. Replaces the paragraph, the Status row and the History row.
+- **Period and battery-only:** one line under the tabs: segmented period buttons (24 h · Today · 7 days · 14 days) and an "On battery" toggle (battery view only). Replaces the "Report" group.
+- **Summary:** no title or paragraph; the energy-sharing explanation moves to the tooltips of the tiles it explains. Tile details keep a number or a short qualifier only ("of all cores", "of the time", "estimate"); repeated wording of the title goes.
+- **Charts:** the zoom line is the bar size alone ("Hourly bars", the zoom hint in its tooltip); zoomed: "12:00–14:00 · 5-minute bars" and an icon Reset button.
+- **Apps:** no "Most first"; rows read "3 min CPU · 1 min GPU · 40 % background"; "{n} more" without a subtitle; short empty and no-apps texts.
+- **Diagnostics:** no intro paragraph; "Findings" with Check again and Copy report as icon buttons in its header. Each finding is a collapsed row: its title, the saving as a short subtitle ("≈0.6 W · +24 min per charge"), its action button; the detail and evidence open beneath. The copied report keeps the full sentences.
+- **Agent:** a one-line description; the full account of what is sent stays in the first-run confirmation, which is unchanged. No subtitle on the prompt row; shorter command and none-found texts.
+
+### Proof
+- prefs-check updated for the new texts and widgets (status, segmented period, battery toggle, icon buttons, expander findings with detail, zoom line); all of it passes in the nested shell, with the period segment, the battery toggle, a finding's expander and Copy report clicked by the real pointer.
+- Screenshots of both pages in light and dark (prefs-check SHOW), and rendered-pixel checks under the hostile stand-in and Orchis themes; every new popover/tooltip surface checked.
+- test-i18n (every string translated), pot regenerated, lint, unit tests.
+
+### State (2026-10-25): done
+- Built as designed; one deviation: the "what is recorded" and "where findings come from" texts are tooltips on info icons (no popovers, so no new transient surface for themes to paint).
+- Proof: lint clean; `test-unit` passed; `test-i18n` passed (every string translated); `test-ui` passed with prefs-check 273 of 273 in the nested shell, the real pointer choosing "7 days", switching "On battery" off and on, opening a finding to its detail and pressing Copy report; prefs-check under the owner's Orchis-Pink theme 287 of 287 (`gjs -m tests/ui-driver/prefs-check.js "$PWD/src"`). The dropdown look check moved from Tracking's Period (now segments) to the agent's dropdown.
+- On the way: the pointer clicks after the chart's wheel check missed because the test set the scroll position while the wheel's scrolling still moved the page; the test now holds the page at the top until it settles. Focus stayed on the top row throughout, so users see no jump.

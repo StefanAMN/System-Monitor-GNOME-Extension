@@ -39,6 +39,15 @@ export function estimateText(estimate) {
         : fill(_('Saves about {watts} W.'), { watts });
 }
 
+/** The same, short, for a finding's subtitle: "≈0.6 W · +24 min per charge". */
+export function estimateShort(estimate) {
+    if (!estimate) return '';
+    const watts = estimate.watts < 0.1 ? estimate.watts.toFixed(2) : estimate.watts.toFixed(1);
+    return estimate.minutes !== null
+        ? fill(_('≈{watts} W · +{minutes} min per charge'), { watts, minutes: Math.round(estimate.minutes) })
+        : fill(_('≈{watts} W'), { watts });
+}
+
 /**
  * The findings and the machine's state as plain text, for pasting into a
  * bug report or a question.
@@ -115,21 +124,23 @@ export function buildDiagnosticsPage(history, {
     readMachine = () => readMachineInfo(),
 } = {}) {
     const page = new Adw.PreferencesPage({ title: _('Diagnostics'), name: 'diagnostics', icon_name: 'dialog-information-symbolic' });
-    const intro = new Adw.PreferencesGroup({
-        description: _('Based on the last 7 days of usage tracking and on how the machine is set up now. Advice about apps and memory needs tracking to be on.'),
-    });
-    page.add(intro);
-    const buttons = new Gtk.Box({ spacing: 8, halign: Gtk.Align.START });
-    const again = new Gtk.Button({ label: _('Check again') });
-    const copy = new Gtk.Button({ label: _('Copy report'), tooltip_text: _('Copy the findings and the machine\'s state as text') });
-    buttons.append(again);
-    buttons.append(copy);
-    intro.add(buttons);
-
-    const found = new Adw.PreferencesGroup({
-        title: _('Found by Resource Pulse'),
-        description: _('Worked out on this computer from the tracked figures. Nothing is sent anywhere.'),
-    });
+    // The findings, with Check again and Copy report as icons in the header;
+    // where they come from is the title's tooltip.
+    const found = new Adw.PreferencesGroup({ title: _('Findings') });
+    const basis = _('From the last 7 days of usage tracking and how the machine is set up now, worked out on this computer. Advice about apps and memory needs tracking to be on.');
+    const header = new Gtk.Box({ spacing: 4, valign: Gtk.Align.CENTER });
+    const icon = (name, tooltip) => {
+        const button = new Gtk.Button({ icon_name: name, tooltip_text: tooltip, css_classes: ['flat'] });
+        button.update_property([Gtk.AccessibleProperty.LABEL], [tooltip]);
+        header.append(button);
+        return button;
+    };
+    const info = new Gtk.Image({ icon_name: 'dialog-information-symbolic', tooltip_text: basis, css_classes: ['dim-label'], margin_end: 4 });
+    info.update_property([Gtk.AccessibleProperty.LABEL], [basis]);
+    header.append(info);
+    const again = icon('view-refresh-symbolic', _('Check again'));
+    const copy = icon('edit-copy-symbolic', _('Copy report'));
+    found.set_header_suffix(header);
     page.add(found);
     const nothing = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
     const nothingRow = new Adw.ActionRow({ title: _('Checking…') });
@@ -164,14 +175,18 @@ export function buildDiagnosticsPage(history, {
     const agent = settings ? buildAgentGroup(settings, { makeReport, ...agentOpts }) : null;
     if (agent) page.add(agent.group);
 
+    // A finding: its title and the saving; what it means and the figures
+    // behind it open beneath.
     const row = finding => {
-        const lines = [finding.detail, finding.evidence, estimateText(finding.estimate)].filter(Boolean);
-        const r = new Adw.ActionRow({ title: finding.title, subtitle: lines.join('\n'), subtitle_lines: 0 });
+        const r = new Adw.ExpanderRow({ title: finding.title, subtitle: estimateShort(finding.estimate) });
         r.findingId = finding.id;
-        r.add_prefix(new Gtk.Image({
-            icon_name: SEVERITY_ICONS[finding.severity], valign: Gtk.Align.START, margin_top: 12,
-            css_classes: [`rp-finding-${finding.severity}`],
-        }));
+        r.add_prefix(new Gtk.Image({ icon_name: SEVERITY_ICONS[finding.severity], css_classes: [`rp-finding-${finding.severity}`] }));
+        r.detailLabel = new Gtk.Label({
+            label: [finding.detail, finding.evidence].filter(Boolean).join('\n'),
+            xalign: 0, wrap: true, selectable: true, css_classes: ['dim-label'],
+            margin_top: 10, margin_bottom: 10, margin_start: 12, margin_end: 12,
+        });
+        r.add_row(r.detailLabel);
         if (finding.action) r.add_css_class('rp-finding-actionable');
         if (finding.action) {
             const button = new Gtk.Button({ label: finding.action.label, valign: Gtk.Align.CENTER });
@@ -181,7 +196,7 @@ export function buildDiagnosticsPage(history, {
                     if (finding.action.kind === 'power-profile') await switchProfile(finding.action.value);
                     else if (finding.action.kind === 'open-power-settings') launch(['gnome-control-center', 'power']);
                 } catch (e) {
-                    r.subtitle = `${r.subtitle}\n${fill(_('Could not do it: {error}'), { error: e.message })}`;
+                    r.subtitle = fill(_('Could not do it: {error}'), { error: e.message });
                 }
                 await refresh();
             });
@@ -203,7 +218,7 @@ export function buildDiagnosticsPage(history, {
         const advice = state.findings.some(f => f.area !== 'data' && f.severity !== 'info');
         nothing.visible = !advice;
         nothingRow.title = state.system ? _('Nothing to improve was found') : _('Checking…');
-        nothingRow.subtitle = history.ledger.buckets.length === 0 ? _('Start tracking on the Tracking page for advice about apps and memory.') : '';
+        nothingRow.subtitle = history.ledger.buckets.length === 0 ? _('Switch on tracking for advice about apps') : '';
     };
 
     const refresh = async () => {
@@ -243,11 +258,13 @@ export function buildDiagnosticsPage(history, {
         // set_text() is not introspectable; a bytes provider is the same thing.
         const bytes = new GLib.Bytes(new TextEncoder().encode(reportText(state.findings, state.system)));
         copy.get_clipboard().set_content(Gdk.ContentProvider.new_for_bytes('text/plain;charset=utf-8', bytes));
-        copy.label = _('Copied');
+        copy.icon_name = 'object-select-symbolic';
+        copy.tooltip_text = _('Copied');
         if (copiedId) GLib.source_remove(copiedId);
         copiedId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
             copiedId = 0;
-            copy.label = _('Copy report');
+            copy.icon_name = 'edit-copy-symbolic';
+            copy.tooltip_text = _('Copy report');
             return GLib.SOURCE_REMOVE;
         });
     });

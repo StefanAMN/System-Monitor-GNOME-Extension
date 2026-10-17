@@ -54,15 +54,15 @@ export function buildAgentGroup(settings, {
 } = {}) {
     const group = new Adw.PreferencesGroup({
         title: _('Fix with an agent'),
-        description: _('Writes the findings above, with the figures behind them, to report.md and opens a coding agent in a terminal, asking it to fix them. The agent sends the report to its own service, and asks before it changes anything.'),
+        description: _('A coding agent reads the findings from report.md and offers fixes.'),
     });
 
     // Agent: the presets found on PATH, then a command of the user's own.
     const agents = [...findAgents(which), { id: 'custom', name: _('Custom command') }];
     const agentRow = new Adw.ComboRow({ title: _('Agent'), model: Gtk.StringList.new(agents.map(a => a.name)) });
-    if (agents.length === 1) agentRow.subtitle = fill(_('None of {agents} was found; enter the command that starts yours.'), { agents: AGENTS.map(a => a.name).join(', ') });
+    if (agents.length === 1) agentRow.subtitle = fill(_('{agents} not found'), { agents: AGENTS.map(a => a.name).join(', ') });
     group.add(agentRow);
-    const commandRow = new Adw.EntryRow({ title: _('Command, with {prompt} where the prompt goes') });
+    const commandRow = new Adw.EntryRow({ title: _('Command ({prompt} = the prompt)') });
     settings.bind('agent-command', commandRow, 'text', Gio.SettingsBindFlags.DEFAULT);
     group.add(commandRow);
 
@@ -70,7 +70,7 @@ export function buildAgentGroup(settings, {
     const terminalRow = new Adw.ComboRow({ title: _('Terminal'), model: Gtk.StringList.new(terminals.map(t => t.name)) });
     group.add(terminalRow);
 
-    const promptRow = new Adw.ExpanderRow({ title: _('Prompt'), subtitle: _('What the agent is asked to do') });
+    const promptRow = new Adw.ExpanderRow({ title: _('Prompt') });
     const promptView = new Gtk.TextView({
         wrap_mode: Gtk.WrapMode.WORD_CHAR, top_margin: 8, bottom_margin: 8, left_margin: 10, right_margin: 10,
         css_classes: ['rp-prompt'],
