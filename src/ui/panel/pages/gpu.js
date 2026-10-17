@@ -5,14 +5,15 @@ import St from 'gi://St';
 
 import { ProgressBar } from '../widgets.js';
 import { _, fill } from '../../../lib/common/i18n.js';
+import { VERTICAL } from '../compat.js';
 
 export class GpuPage {
     _buildGpuDetails() {
-        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const box = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 10px;' });
 
         this._gpuHwCard = new St.BoxLayout({
             style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;',
-            vertical: true,
+            ...VERTICAL,
             x_expand: true
         });
 
@@ -21,7 +22,7 @@ export class GpuPage {
         // Brand Chip Badge
         this._gpuChipBox = new St.BoxLayout({
             style: 'background-color: #107c41; border-radius: 6px; padding: 6px 10px;',
-            vertical: true
+            ...VERTICAL
         });
         this._gpuChipLabel1 = new St.Label({ text: 'GEFORCE', style: 'font-size: 0.65em; color: #a0f0c8; font-weight: 300;' });
         this._gpuChipLabel2 = new St.Label({ text: 'RTX', style: 'font-size: 0.9em; color: #ffffff; font-weight: bold;' });
@@ -29,7 +30,7 @@ export class GpuPage {
         this._gpuChipBox.add_child(this._gpuChipLabel2);
         hwTop.add_child(this._gpuChipBox);
 
-        const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
+        const hwDesc = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 4px;', x_expand: true });
         this._gpuModelName = new St.Label({ text: _('Graphics Processor'), style_class: 'rp-fg', style: 'font-size: 1.05em; font-weight: bold;' });
         // Model names are long ("Intel Alder Lake-UP3 GT2 [Iris Xe Graphics]"):
         // wrap onto a second line instead of cutting the name off.
@@ -46,17 +47,17 @@ export class GpuPage {
         const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
         this._gpuHwStatsRow = hwStatsRow;
 
-        const clockBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        const clockBox = new St.BoxLayout({ ...VERTICAL, x_expand: true });
         clockBox.add_child(new St.Label({ text: _('Clock'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._gpuHwClockVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         clockBox.add_child(this._gpuHwClockVal);
 
-        const tempBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        const tempBox = new St.BoxLayout({ ...VERTICAL, x_expand: true });
         tempBox.add_child(new St.Label({ text: _('Temperature'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._gpuHwTempVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         tempBox.add_child(this._gpuHwTempVal);
 
-        const powerBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        const powerBox = new St.BoxLayout({ ...VERTICAL, x_expand: true });
         powerBox.add_child(new St.Label({ text: _('Power'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._gpuHwPowerVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         powerBox.add_child(this._gpuHwPowerVal);
@@ -71,15 +72,15 @@ export class GpuPage {
 
         // Every GPU, when there is more than one (a hybrid laptop): the card
         // above shows the busiest one.
-        this._gpuAllCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true, visible: false });
+        this._gpuAllCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL, visible: false });
         this._gpuAllCard.add_child(new St.Label({ text: _('All GPUs'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
-        this._gpuListBox = new St.BoxLayout({ vertical: true });
+        this._gpuListBox = new St.BoxLayout({ ...VERTICAL });
         this._gpuAllCard.add_child(this._gpuListBox);
         this._gpuListKeys = null;
         box.add_child(this._gpuAllCard);
 
         // 2. GPU Usage Sparkline Card
-        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         this._gpuSparkCard = sparkCard;
         sparkCard.add_child(new St.Label({ text: _('GPU Utilization (%)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._gpuSparkline = this._newSparkline('gpu', 100, { showGrid: true, color: [0.2, 0.82, 0.48, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
@@ -88,7 +89,7 @@ export class GpuPage {
         box.add_child(sparkCard);
 
         // 3. VRAM Card (if dedicated or shared VRAM reported)
-        this._gpuVramCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        this._gpuVramCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         const vramHead = new St.BoxLayout({ style: 'margin-bottom: 6px;', y_align: Clutter.ActorAlign.CENTER });
         vramHead.add_child(new St.Label({ text: _('Video Memory (VRAM)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
         this._gpuVramPctLbl = new St.Label({ text: '--%', style_class: 'rp-fg', style: 'font-size: 0.85em; font-weight: bold;' });
@@ -98,7 +99,7 @@ export class GpuPage {
         this._gpuVramBar = new ProgressBar(6, 0.2, 0.82, 0.48);
         this._gpuVramCard.add_child(this._gpuVramBar);
 
-        const vramStatsBox = new St.BoxLayout({ vertical: true, style: 'margin-top: 8px;' });
+        const vramStatsBox = new St.BoxLayout({ ...VERTICAL, style: 'margin-top: 8px;' });
         this._gpuVramUsed = this._detailRow(_('Used / Total'));
         vramStatsBox.add_child(this._gpuVramUsed.row);
         this._gpuVramFree = this._detailRow(_('Free VRAM'));
@@ -107,7 +108,7 @@ export class GpuPage {
         box.add_child(this._gpuVramCard);
 
         // 4. Performance & Thermal Stats Card
-        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         this._gpuStatsCard = statsCard;
         statsCard.add_child(new St.Label({ text: _('Performance & Sensors'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
         this._gpuUsage = this._detailRow(_('Core Utilization'));
@@ -125,7 +126,7 @@ export class GpuPage {
         // 5. Inactive / None Fallback Notice
         this._gpuInactiveCard = new St.BoxLayout({
             style_class: 'rp-base', style: 'border-radius: 12px; padding: 16px;',
-            vertical: true,
+            ...VERTICAL,
             visible: false
         });
         const inactTitle = new St.Label({

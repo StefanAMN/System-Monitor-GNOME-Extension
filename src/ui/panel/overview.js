@@ -10,6 +10,7 @@ import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import { ProgressBar } from './widgets.js';
 import { CARD_SLOT_HEIGHT } from './constants.js';
 import { _ } from '../../lib/common/i18n.js';
+import { VERTICAL } from './compat.js';
 
 export class OverviewMethods {
     _sanitizeCardOrder(list) {
@@ -59,7 +60,7 @@ export class OverviewMethods {
         const [r, g, b] = color;
         const box = new St.BoxLayout({
             style_class: `resource-pulse-metric-card tint-${key}`,
-            vertical: true, reactive: true, can_focus: true, x_expand: true,
+            ...VERTICAL, reactive: true, can_focus: true, x_expand: true,
             // Named with its value by _nameValues (a11y.js).
             accessible_name: label, accessible_role: Atk.Role.PUSH_BUTTON
         });
@@ -567,7 +568,7 @@ export class OverviewMethods {
     }
 
     _buildOverview() {
-        this._overviewPage = new St.BoxLayout({ vertical: true, x_expand: true, y_expand: true });
+        this._overviewPage = new St.BoxLayout({ ...VERTICAL, x_expand: true, y_expand: true });
 
         // Header container (System Overview, Refresh, Menu)
         const headerBox = new St.BoxLayout({ style: 'margin-bottom: 12px;', y_align: Clutter.ActorAlign.CENTER });
@@ -633,12 +634,12 @@ export class OverviewMethods {
         this._attachCardsToGrid(this._cardOrder);
 
         // Hardware Info Card
-        this._hwCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px; margin-top: 10px;', vertical: true, x_expand: true });
+        this._hwCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px; margin-top: 10px;', ...VERTICAL, x_expand: true });
 
         const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
 
         // Dynamic Chip badge
-        this._chipBox = new St.BoxLayout({ style: 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;', vertical: true });
+        this._chipBox = new St.BoxLayout({ style: 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;', ...VERTICAL });
         this._chipLabel1 = new St.Label({ text: 'intel', style: 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;' });
         this._chipLabel2 = new St.Label({ text: 'CORE', style: 'font-size: 0.9em; color: #ffffff; font-weight: bold;' });
         this._chipLabel3 = new St.Label({ text: 'i5', style: 'font-size: 1.1em; color: #5bc3ff; font-weight: bold;' });
@@ -647,7 +648,7 @@ export class OverviewMethods {
         this._chipBox.add_child(this._chipLabel3);
         hwTop.add_child(this._chipBox);
 
-        const hwDesc = new St.BoxLayout({ vertical: true, style: 'spacing: 4px;', x_expand: true });
+        const hwDesc = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 4px;', x_expand: true });
         this._hwName = new St.Label({ text: _('Intel Processor'), style_class: 'rp-fg', style: 'font-size: 1.05em; font-weight: bold;' });
         this._hwStats = new St.Label({ text: _('Cores & Threads'), style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });
         hwDesc.add_child(this._hwName);
@@ -658,17 +659,17 @@ export class OverviewMethods {
         // Hardware Sub Stats (Uptime, Load Average, OS)
         const hwStatsRow = new St.BoxLayout({ style: 'margin-top: 10px; spacing: 16px;', x_expand: true });
 
-        const uptimeBox = new St.BoxLayout({ vertical: true });
+        const uptimeBox = new St.BoxLayout({ ...VERTICAL });
         uptimeBox.add_child(new St.Label({ text: _('Uptime'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._hwUptimeVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
         uptimeBox.add_child(this._hwUptimeVal);
 
-        const loadBox = new St.BoxLayout({ vertical: true, x_expand: true });
+        const loadBox = new St.BoxLayout({ ...VERTICAL, x_expand: true });
         loadBox.add_child(new St.Label({ text: _('Load Average'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._hwLoadVal = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
         loadBox.add_child(this._hwLoadVal);
 
-        const osBox = new St.BoxLayout({ vertical: true });
+        const osBox = new St.BoxLayout({ ...VERTICAL });
         osBox.add_child(new St.Label({ text: _('OS'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._hwOsVal = new St.Label({ text: `GNOME ${Config.PACKAGE_VERSION.split('.')[0]}`, style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold;' });
         osBox.add_child(this._hwOsVal);

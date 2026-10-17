@@ -3,17 +3,18 @@
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import { _ } from '../../../lib/common/i18n.js';
+import { VERTICAL } from '../compat.js';
 
 export class MemoryPage {
     _buildMemoryDetails() {
-        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
-        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const box = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 10px;' });
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         sparkCard.add_child(new St.Label({ text: _('Memory Usage'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._memSparkline = this._newSparkline('mem', 100, { showGrid: true, color: [0.569, 0.255, 0.675, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._memSparkline.x_expand = true;
         sparkCard.add_child(this._memSparkline);
         box.add_child(sparkCard);
-        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         statsCard.add_child(new St.Label({ text: _('Stats'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
         this._memUsed = this._detailRow(_('Used / Total'));
         statsCard.add_child(this._memUsed.row);
@@ -29,7 +30,7 @@ export class MemoryPage {
         statsCard.add_child(this._memWait.row);
         box.add_child(statsCard);
 
-        const memProcCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const memProcCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         const memProcHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
         memProcHead.add_child(new St.Label({ text: _('Top Memory Usage'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
         const memShowAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: _('Show All'), reactive: true, can_focus: true, accessible_name: _('Show all processes in System Monitor') });
@@ -44,7 +45,7 @@ export class MemoryPage {
         memProcCard.add_child(memProcHead);
         const memSearch = this._buildProcFilter('memory');
         memProcCard.add_child(memSearch.entry);
-        this._memProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
+        this._memProcList = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 6px;' });
         memProcCard.add_child(this._memProcList);
         memProcCard.add_child(memSearch.noMatch);
         this._memProcEnd = this._buildEndBar();

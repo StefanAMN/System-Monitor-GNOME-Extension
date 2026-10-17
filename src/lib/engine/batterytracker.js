@@ -106,6 +106,8 @@ export class BatteryTracker {
         this._timerId = 0;
         // A reading in progress runs in idle callbacks: none may outlive the tracker.
         this._appIo?.cancel();
+        this._usage.cancel?.();
+        this._gpu?.cancel?.();
         if (this._focusHandle !== null) this._focus.disconnect(this._focusHandle);
         this._focusHandle = null;
         if (!this.ledger) return;

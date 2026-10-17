@@ -6,13 +6,14 @@ import St from 'gi://St';
 import { appInfo as ledgerAppInfo } from '../../../lib/common/appnames.js';
 import { _, fill } from '../../../lib/common/i18n.js';
 import { batteryStateLabel } from '../../../lib/common/format.js';
+import { VERTICAL } from '../compat.js';
 
 export class BatteryPage {
     _buildBatteryDetails() {
-        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const box = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 10px;' });
         
         // Percent History
-        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         sparkCard.add_child(new St.Label({ text: _('Charge Level History (%)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._batSparkline = this._newSparkline('bat', 90, { showGrid: true, color: [0.18, 0.76, 0.494, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batSparkline.x_expand = true;
@@ -20,14 +21,14 @@ export class BatteryPage {
         box.add_child(sparkCard);
 
         // Power Rate History (W)
-        const rateCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const rateCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         rateCard.add_child(new St.Label({ text: _('Charge/Discharge Rate (W)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._batRateSparkline = this._newSparkline('batRate', 90, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._batRateSparkline.x_expand = true;
         rateCard.add_child(this._batRateSparkline);
         box.add_child(rateCard);
 
-        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const statsCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         statsCard.add_child(new St.Label({ text: _('Stats'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
         this._batState  = this._detailRow(_('State'));
         statsCard.add_child(this._batState.row);
@@ -45,9 +46,9 @@ export class BatteryPage {
 
         // Each battery, when there is more than one; the figures above are
         // for all of them together.
-        this._batListCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true, visible: false });
+        this._batListCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL, visible: false });
         this._batListCard.add_child(new St.Label({ text: _('Batteries'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
-        this._batListBox = new St.BoxLayout({ vertical: true });
+        this._batListBox = new St.BoxLayout({ ...VERTICAL });
         this._batListCard.add_child(this._batListBox);
         this._batListNames = null;
         box.add_child(this._batListCard);

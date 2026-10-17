@@ -6,7 +6,7 @@
 //
 // HAL layer: returns the kernel's 10-second averages as numbers (percent of
 // time); nothing is formatted here.
-import { readFileAsync, noteReadError } from '../common/utils.js';
+import { readProcFile, noteReadError } from '../common/utils.js';
 
 const RESOURCES = ['cpu', 'memory', 'io'];
 
@@ -42,7 +42,7 @@ export class PressureSampler {
         const out = {};
         for (const key of RESOURCES) {
             try {
-                out[key] = parsePressure(await readFileAsync(`${this._root}/${key}`));
+                out[key] = parsePressure(readProcFile(`${this._root}/${key}`));
             } catch (e) {
                 // ENOENT: no PSI here, a normal kernel configuration. EOPNOTSUPP
                 // (psi=0 on the command line) and anything else are logged once.

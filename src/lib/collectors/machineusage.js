@@ -5,7 +5,7 @@
 // deltas whatever the interval was.
 //
 // HAL layer: plain numbers in bytes and µs; nothing is formatted here.
-import { readFileAsync, getSysconf, noteReadError } from '../common/utils.js';
+import { readProcFile, getSysconf, noteReadError } from '../common/utils.js';
 import { parseDiskstats } from './disk.js';
 
 /** The value in kB after `key:` in /proc/meminfo, as bytes; null when absent. */
@@ -77,7 +77,7 @@ export class MachineUsageSampler {
 
     async _read(path) {
         try {
-            return await readFileAsync(path);
+            return readProcFile(path);
         } catch (e) {
             noteReadError(e);
             return null;

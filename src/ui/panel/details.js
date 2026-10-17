@@ -6,6 +6,7 @@ import St from 'gi://St';
 
 import { RANGES } from '../../lib/engine/longhistory.js';
 import { _, fill, N_, translated } from '../../lib/common/i18n.js';
+import { VERTICAL } from './compat.js';
 
 // The detail pages' titles, as on the overview cards.
 const PAGE_TITLES = translated({
@@ -16,7 +17,7 @@ const PAGE_TITLES = translated({
 export class DetailsMethods {
     _buildDetails() {
         this._detailArea = new St.BoxLayout({
-            vertical: true,
+            ...VERTICAL,
             style_class: 'resource-pulse-detail-area',
             x_expand: true,
             y_expand: true

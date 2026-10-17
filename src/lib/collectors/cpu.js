@@ -1,4 +1,4 @@
-import { readFileAsync, noteReadError, logOnce } from '../common/utils.js';
+import { readFileAsync, readProcFile, noteReadError, logOnce } from '../common/utils.js';
 import { _ } from '../common/i18n.js';
 
 /**
@@ -152,7 +152,7 @@ export class CpuSampler {
     async sample(detailed = false, wantFreq = true) {
         await this._detectHardware();
         try {
-            const content = await readFileAsync('/proc/stat');
+            const content = readProcFile('/proc/stat');
             let totalCpu = 0;
             const cores = [];
 
@@ -180,7 +180,7 @@ export class CpuSampler {
             // Load average
             let loadavg = [0, 0, 0];
             try {
-                const loadContent = await readFileAsync('/proc/loadavg');
+                const loadContent = readProcFile('/proc/loadavg');
                 const loadParts = loadContent.trim().split(/\s+/).slice(0, 3).map(Number);
                 if (loadParts.length === 3 && !loadParts.some(isNaN)) {
                     loadavg = loadParts;
@@ -190,7 +190,7 @@ export class CpuSampler {
             // Uptime
             let uptime = 0;
             try {
-                const uptimeContent = await readFileAsync('/proc/uptime');
+                const uptimeContent = readProcFile('/proc/uptime');
                 uptime = parseFloat(uptimeContent.trim().split(/\s+/)[0]) || 0;
             } catch (e) { noteReadError(e); }
 

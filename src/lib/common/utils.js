@@ -23,6 +23,20 @@ export function readFileAsync(path) {
     });
 }
 
+/**
+ * A /proc file's text, read synchronously. Only for procfs, which the kernel
+ * makes in memory as it is read: an asynchronous GIO read of such a small
+ * file costs about 0.14 ms of thread hand-offs, many times the read itself
+ * (tests/bench/tracker_cost.js). Never for sysfs (a battery or sensor
+ * attribute can wait on firmware) or a real file. Throws as
+ * GLib.file_get_contents does (GLib.FileError).
+ * @param {string} path
+ * @returns {string}
+ */
+export function readProcFile(path) {
+    return textDecoder.decode(GLib.file_get_contents(path)[1]);
+}
+
 const reportedReadErrors = new Set();
 const loggedOnce = new Set();
 

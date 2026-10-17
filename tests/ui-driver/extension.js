@@ -14,6 +14,13 @@ const TABS = ['overview', 'cpu', 'memory', 'battery', 'power', 'disk', 'network'
 let started = false;
 let enabledAt = 0;
 
+// The seat virtual input devices are made on: the stage's backend, as
+// GNOME 51 (which removed Clutter.get_default_backend()) wants it.
+function seat() {
+    const backend = global.stage.context?.get_backend?.() ?? Clutter.get_default_backend();
+    return backend.get_default_seat();
+}
+
 function sleep(ms) {
     return new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
         resolve();
@@ -51,7 +58,7 @@ async function shot(name) {
 let pointer = null;
 async function clickActor(actor) {
     if (!pointer) {
-        pointer = Clutter.get_default_backend().get_default_seat()
+        pointer = seat()
             .create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     }
     const [x, y] = actor.get_transformed_position();
@@ -90,7 +97,7 @@ async function bringForward(metaWindow) {
 // client gives the point in its surface, the window's buffer rect says where
 // that surface is on the stage.
 async function clickInWindow(metaWindow, x, y) {
-    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     const rect = metaWindow.get_buffer_rect();
     const now = () => GLib.get_monotonic_time();
     // Two motions: the first event of a just-created virtual pointer only places it.
@@ -106,7 +113,7 @@ async function clickInWindow(metaWindow, x, y) {
 
 // The pointer moved over a point inside a client's window, nothing pressed.
 async function hoverInWindow(metaWindow, x, y) {
-    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     const rect = metaWindow.get_buffer_rect();
     const now = () => GLib.get_monotonic_time();
     pointer.notify_absolute_motion(now(), rect.x + x - 6, rect.y + y);
@@ -118,8 +125,8 @@ async function hoverInWindow(metaWindow, x, y) {
 // Wheel clicks over a point inside a client's window (as clickInWindow),
 // with Ctrl held down when `ctrl`.
 async function scrollInWindow(metaWindow, x, y, direction, ctrl = false) {
-    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
-    keyboard ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    keyboard ??= seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
     const rect = metaWindow.get_buffer_rect();
     const now = () => GLib.get_monotonic_time();
     pointer.notify_absolute_motion(now(), rect.x + x + 2, rect.y + y + 2);
@@ -145,7 +152,7 @@ async function scrollInWindow(metaWindow, x, y, direction, ctrl = false) {
 // steps (past GTK's drag threshold, slowly enough for the client to follow),
 // release. Points are in the window's surface, as for clickInWindow.
 async function dragInWindow(metaWindow, x1, y1, x2, y2) {
-    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     const rect = metaWindow.get_buffer_rect();
     const now = () => GLib.get_monotonic_time();
     const at = (x, y) => pointer.notify_absolute_motion(now(), rect.x + x, rect.y + y);
@@ -425,7 +432,7 @@ function eachDescendant(actor, visit) {
 let keyboard = null;
 async function pressKey(keyval, settle = 600) {
     if (!keyboard) {
-        keyboard = Clutter.get_default_backend().get_default_seat()
+        keyboard = seat()
             .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
     }
     keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.PRESSED);
@@ -674,7 +681,7 @@ async function topBarFits(rp) {
     const collapsedKey = s.labels[s.shown.length].key;
 
     // A collapsed metric still tells its value: on hover, in the tooltip.
-    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
     const box = rp._topBarWidgets[collapsedKey].box;
     const [bx, by] = box.get_transformed_position();
     // The tooltip is composed when the pointer enters; a poll may change
