@@ -76,7 +76,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   ├── unit/                 # scripts/dev.sh test-unit (plain gjs)
 │   ├── ui-driver/            # scripts/dev.sh test-ui (isolated headless shell; hostile-gtk.css stands in for a third-party theme)
 │   ├── overhead-driver/      # scripts/dev.sh test-overhead
-│   ├── compat/               # scripts/dev.sh test-compat (GNOME 46-49 in containers)
+│   ├── compat/               # scripts/dev.sh test-compat (GNOME 46-50 in containers)
 │   └── bench/                # scripts/dev.sh benchmark
 ├── scripts/dev.sh            # Install, test, lint, pack
 └── docs/                     # spec.md (original spec), PLAN.md (milestones and verification)
@@ -95,12 +95,16 @@ npm ci && ./scripts/dev.sh lint   # ESLint (development dependency only; the ext
 RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
 ./scripts/dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
 ./scripts/dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 10 min leak soak
-./scripts/dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one)
+./scripts/dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one, 50 also works)
 ./scripts/dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```
 
-Every push and pull request runs the lint and the unit tests on GitHub Actions (`.github/workflows/ci.yml`). The UI tests need GNOME Shell and are run locally.
+GitHub Actions (`.github/workflows/ci.yml`):
+- every push runs the lint and the unit tests;
+- pushes to `master`, pull requests and `v*` tags also run `test-compat` on GNOME Shell 46, 47, 48, 49 and 50, one job each. A failing job names the failing check on the run's page and keeps its logs and screenshots as an artifact;
+- Actions › CI › Run workflow runs all of it on any branch;
+- a `v*` tag that passes is packed (`scripts/dev.sh pack`) and published as a GitHub release with the `.zip` (tags with a `-`, such as `v1.2-rc1`, as pre-releases).
 
 ## Known limits
 
@@ -121,14 +125,14 @@ Every push and pull request runs the lint and the unit tests on GitHub Actions (
 ### 1. Compile Schemas
 After checking out or modifying GSettings, compile the schemas:
 ```bash
-glib-compile-schemas schemas/
+glib-compile-schemas src/schemas/
 ```
 
 ### 2. Dev Symlink
-Symlink the extension folder into your local GNOME Shell extensions directory; the directory name must be the UUID from `metadata.json`:
+Symlink the extension folder (`src/`) into your local GNOME Shell extensions directory; the directory name must be the UUID from `metadata.json`. `./scripts/dev.sh` does this for you:
 ```bash
 mkdir -p ~/.local/share/gnome-shell/extensions/
-ln -sfn "$(pwd)" ~/.local/share/gnome-shell/extensions/resource-pulse@stefanamn.github.io
+ln -sfn "$(pwd)/src" ~/.local/share/gnome-shell/extensions/resource-pulse@stefanamn.github.io
 ```
 
 ### 3. Reload GNOME Shell
@@ -145,9 +149,13 @@ gnome-extensions enable resource-pulse@stefanamn.github.io
 
 To bundle the extension for upload or sharing:
 ```bash
-gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons --extra-source=LICENSE
+./scripts/dev.sh pack
 ```
-This generates `resource-pulse@stefanamn.github.io.shell-extension.zip`.
+This generates `resource-pulse@stefanamn.github.io.shell-extension.zip` in the repository root. Each GitHub release has the same zip attached; install one with:
+```bash
+gnome-extensions install --force resource-pulse@stefanamn.github.io.shell-extension.zip
+```
+then log out and back in, and enable it.
 
 ## License
 

@@ -1,8 +1,13 @@
 name: CI
 
+# Every push gets the quick check (lint, syntax, unit tests). The UI tests on
+# every supported GNOME Shell run for master, pull requests, release tags and
+# manual runs (Actions > CI > Run workflow, on any branch). A tag v* that
+# passes them is packed and published as a GitHub release.
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   check:
@@ -16,8 +21,7 @@ jobs:
           cache: npm
 
       # gjs runs the unit tests; glib-compile-schemas builds the settings
-      # schema they inspect. The UI tests need GNOME Shell 50 and stay local
-      # (./scripts/dev.sh test-ui).
+      # schema they inspect.
       - name: Install gjs
         run: |
           sudo apt-get update
@@ -28,3 +32,67 @@ jobs:
         run: npm run lint
       - name: Syntax and unit tests
         run: ./scripts/dev.sh test-unit
+
+  # The same container tests as './scripts/dev.sh test-compat' on a laptop:
+  # one Fedora image per shell (tests/compat), each running the unit,
+  # headless and UI tests with software rendering.
+  shells:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+    name: GNOME ${{ matrix.gnome }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        gnome: [46, 47, 48, 49, 50]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install glib tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libglib2.0-bin
+
+      - name: Unit, headless and UI tests
+        env:
+          RP_COMPAT_OUT: ${{ runner.temp }}/compat
+        run: ./scripts/dev.sh test-compat ${{ matrix.gnome }}
+
+      - name: Keep the logs and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gnome-${{ matrix.gnome }}-logs
+          path: ${{ runner.temp }}/compat
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, shells]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # gnome-extensions (part of gnome-shell) packs the zip; node checks
+      # the syntax first.
+      - name: Install the packing tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnome-shell libglib2.0-bin nodejs
+
+      - name: Pack
+        run: ./scripts/dev.sh pack
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          zip="resource-pulse@stefanamn.github.io.shell-extension.zip"
+          unzip -l "$zip"
+          # v1.2-rc1 and the like are marked as pre-releases.
+          pre=()
+          case "$TAG" in *-*) pre=(--prerelease) ;; esac
+          gh release create "$TAG" "$zip" --title "Resource Pulse $TAG" --generate-notes "${pre[@]}"
