@@ -27,21 +27,25 @@ export const METRIC_COLORS = {
     thermal: '#ff7800', gpu: '#33d17a', network: '#e01b24',
 };
 
-// The whole window takes the panel's CPU card look: navy surfaces with a thin
-// blue border in dark, pale blue in light.
+// The window in the panel's family, kept calm for reading: charcoal (dark)
+// or near-white (light) surfaces with only a hint of blue, faint neutral
+// borders, off-white text, and the blue accent kept for what can be used
+// (switches, the selected tab, buttons, highlights). The first version used
+// navy surfaces with blue borders on every card and pure white text, which
+// the owner found too contrasty and tiring.
 export function palette(dark) {
     return dark
         ? {
-            window: '#141b26', header: '#18212f', card: '#1f2937', hover: '#26354a', popover: '#1f2937',
-            fg: '#ffffff', dim: '#a0a0b8', border: 'rgba(53, 132, 228, 0.4)', divider: 'rgba(53, 132, 228, 0.18)',
-            accentText: '#78aeed', track: 'rgba(255, 255, 255, 0.08)', button: 'rgba(53, 132, 228, 0.18)',
-            buttonHover: 'rgba(53, 132, 228, 0.30)', selected: 'rgba(53, 132, 228, 0.32)',
+            window: '#16191f', header: '#1a1e25', card: '#1f242c', hover: '#262c35', popover: '#1f242c',
+            fg: '#e4e7eb', dim: '#9ba1ab', border: 'rgba(255, 255, 255, 0.08)', divider: 'rgba(255, 255, 255, 0.06)',
+            accentText: '#8ab4ea', track: 'rgba(255, 255, 255, 0.08)', button: 'rgba(255, 255, 255, 0.07)',
+            buttonHover: 'rgba(255, 255, 255, 0.11)', selected: 'rgba(53, 132, 228, 0.22)',
         }
         : {
-            window: '#f3f7fd', header: '#e4eefb', card: '#eaf2fd', hover: '#dbe8fa', popover: '#f3f7fd',
-            fg: '#241f31', dim: '#5e5c64', border: 'rgba(53, 132, 228, 0.45)', divider: 'rgba(53, 132, 228, 0.2)',
-            accentText: '#1c71d8', track: 'rgba(0, 0, 0, 0.08)', button: 'rgba(53, 132, 228, 0.12)',
-            buttonHover: 'rgba(53, 132, 228, 0.22)', selected: 'rgba(53, 132, 228, 0.2)',
+            window: '#f5f6f8', header: '#eceef2', card: '#fcfcfd', hover: '#eef1f5', popover: '#fcfcfd',
+            fg: '#2a2d33', dim: '#61656d', border: 'rgba(0, 0, 0, 0.09)', divider: 'rgba(0, 0, 0, 0.06)',
+            accentText: '#1c71d8', track: 'rgba(0, 0, 0, 0.08)', button: 'rgba(0, 0, 0, 0.05)',
+            buttonHover: 'rgba(0, 0, 0, 0.09)', selected: 'rgba(53, 132, 228, 0.14)',
         };
 }
 
@@ -107,7 +111,7 @@ window.rp-window viewswitcher button:hover { background-color: ${p.button}; }
 window.rp-window viewswitcher button:checked,
 window.rp-window viewswitcher button:checked:hover {
     background-color: ${p.selected};
-    color: ${dark ? '#ffffff' : '#1c71d8'};
+    color: ${dark ? p.fg : '#1c71d8'};
 }
 window.rp-window .boxed-list,
 window.rp-window .card {

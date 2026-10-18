@@ -641,3 +641,15 @@ How: the panel sets `prefs-page` just before it opens the window, and the Extens
 Proof:
 - prefs-check: from the Extensions app the window has `settings` only. A panel request on that open window adds the tabs and shows the page asked for, and the request is cleared. From the panel, all three tabs open on the page asked for.
 - test-ui: the real Extensions-app path (`openExtensionPrefs` with no page) opens the window, and the screenshot shows no tabs and no back button. ⋮ still opens all three tabs.
+
+## Calmer window colours (branch `calmer-window`, 2026-10-18)
+
+Owner's report: the settings window's blue was too contrasty and tiring. Changed in `ui/prefsstyle.js`:
+- Surfaces are charcoal (light mode: near-white) with only a hint of blue, instead of navy (light: pale blue).
+- Card borders are faint neutral lines instead of blue.
+- Text is off-white instead of pure white.
+- Neutral buttons have a grey tint.
+- The blue accent stays on switches, the selected tab and highlights.
+- The coloured stat tiles keep their metric tints, as in the panel.
+
+Proof: the rendered-colour check passes in dark and light under the stand-in theme and under the owner's Orchis-Pink. That check reads the background, header, card, a checked switch (still the extension's blue) and the text. Screenshots of every tab in both variants.
