@@ -1,4 +1,4 @@
-// Test-only driver, loaded by `./dev.sh test-overhead` inside an isolated
+// Test-only driver, loaded by `./scripts/dev.sh test-overhead` inside an isolated
 // headless shell. It runs in the gnome-shell process, so /proc/self is the
 // shell: the extension's cost is the difference between windows with it
 // disabled and enabled. CPU includes reaped children (cutime/cstime), so

@@ -27,63 +27,65 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 ## File Structure
 
 ```
-├── extension.js          # Extension lifecycle, polling engine, indicator and dashboard
-├── prefs.js              # Preferences entry point (window built in ui/prefswindow.js)
-├── stylesheet.css        # CSS styles for custom layouts and dashboard cards
-├── metadata.json         # Extension metadata
-├── schemas/              # GSettings schema definition
-├── docs/spec.md          # Original product spec (PLAN.md tracks milestones and verification)
-├── icons/                # Bundled symbolic icons (thermal, CPU fallback)
-├── ui/
-│   ├── widgets.js        # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
-│   ├── prefswindow.js    # The window: settings only from the Extensions app, all tabs from the panel
-│   ├── prefsstyle.js     # The preferences window's stylesheet (panel look, blue accent)
-│   ├── prefsrows.js      # Preferences rows (GTK side, never loaded by the shell)
-│   ├── prefsbattery.js   # Tracking tab: switch, history, battery report (GTK side)
-│   └── prefsdiagnostics.js # Diagnostics tab (GTK side)
-├── lib/                  # Collectors (no UI code) and pure helpers
-│   ├── cpu.js  memory.js  battery.js  power.js
-│   ├── disk.js  network.js  thermal.js  gpu.js
-│   ├── process.js        # Per-process CPU / memory / disk I/O; ending processes
-│   ├── pressure.js       # Time spent waiting for CPU, memory, disk (PSI)
-│   ├── alerts.js         # Sustained-threshold alerts
-│   ├── longhistory.js    # 1 h / 24 h bucketed history (average and peak)
-│   ├── smoothing.js      # Display-only averaging and gliding between readings
-│   ├── netusage.js       # Network data per day, kept on disk
-│   ├── appusage.js       # CPU time per app from the session's cgroups
-│   ├── gpuusage.js       # GPU busy time per app from DRM fdinfo
-│   ├── batteryledger.js  # Energy per app: attribution, hourly buckets, file
-│   ├── batterytracker.js # Runs the ledger every 30 s in the shell
-│   ├── diagnostics.js    # Rules for the Diagnostics tab
-│   ├── systemstate.js    # Battery health, charge limit, power mode, backlight
-│   ├── appnames.js       # App names and icons from desktop entries
-│   ├── ringbuffer.js     # Fixed-capacity history buffer
-│   ├── format.js         # Unit formatting
-│   ├── settingsmodel.js  # The user-facing settings, described once for both settings UIs
-│   ├── present.js        # Pure presentation decisions (n/a, icons, scales, hover)
-│   ├── stats.js          # Time-weighted running mean / peak (power session stats)
-│   ├── raplfix.js        # The single privileged (pkexec) action
-│   └── utils.js          # Async file, directory and subprocess helpers
-└── tests/
-    ├── unit.js           # ./dev.sh test-unit  (plain gjs)
-    ├── benchmark_runner.js, workload_generator.py   # ./dev.sh benchmark
-    ├── overhead-driver/  # ./dev.sh test-overhead (isolated headless shell)
-    └── ui-driver/        # ./dev.sh test-ui    (isolated headless shell; hostile-gtk.css stands in for a third-party theme)
+├── src/                      # The extension itself: what is installed and packed
+│   ├── extension.js          # Lifecycle, polling engine, indicator and dashboard
+│   ├── prefs.js              # Preferences entry point (window built in ui/prefs/window.js)
+│   ├── metadata.json  stylesheet.css
+│   ├── schemas/              # GSettings schema
+│   ├── icons/                # Bundled symbolic icons (thermal, CPU fallback)
+│   ├── lib/
+│   │   ├── collectors/       # Read the system; raw numbers, no UI (HAL layer)
+│   │   │   ├── cpu.js  memory.js  battery.js  power.js  disk.js  network.js  thermal.js  gpu.js
+│   │   │   ├── process.js     # Per-process CPU / memory / disk I/O; ending processes
+│   │   │   ├── pressure.js    # Time spent waiting for CPU, memory, disk (PSI)
+│   │   │   ├── appusage.js    # CPU time per app from the session's cgroups
+│   │   │   ├── gpuusage.js    # GPU busy time per app from DRM fdinfo
+│   │   │   └── systemstate.js # Battery health, charge limit, power mode, backlight
+│   │   ├── engine/           # Turn readings into results over time (aggregator layer)
+│   │   │   ├── alerts.js      # Sustained-threshold alerts
+│   │   │   ├── longhistory.js # 1 h / 24 h bucketed history (average and peak)
+│   │   │   ├── smoothing.js   # Display-only averaging and gliding between readings
+│   │   │   ├── ringbuffer.js  stats.js
+│   │   │   ├── netusage.js    # Network data per day, kept on disk
+│   │   │   ├── batteryledger.js  batterytracker.js   # Energy per app, every 30 s
+│   │   │   └── diagnostics.js # Rules for the Diagnostics tab
+│   │   └── common/           # Shared helpers
+│   │       ├── settingsmodel.js  # The user-facing settings, described once
+│   │       ├── present.js     # Pure presentation decisions (n/a, icons, scales, hover)
+│   │       ├── format.js  utils.js  appnames.js
+│   │       └── raplfix.js     # The single privileged (pkexec) action
+│   └── ui/
+│       ├── panel/            # Shell side: the top bar and the panel
+│       │   └── widgets.js     # Cairo widgets: Sparkline, ProgressBar, ResizeHandle
+│       └── prefs/            # GTK side: the preferences window (never loaded by the shell)
+│           ├── window.js      # Settings only from the Extensions app, all tabs from the panel
+│           ├── rows.js  tracking.js  diagnostics.js
+│           └── style.js       # The window's stylesheet
+├── tests/
+│   ├── unit/                 # scripts/dev.sh test-unit (plain gjs)
+│   ├── ui-driver/            # scripts/dev.sh test-ui (isolated headless shell; hostile-gtk.css stands in for a third-party theme)
+│   ├── overhead-driver/      # scripts/dev.sh test-overhead
+│   ├── compat/               # scripts/dev.sh test-compat (GNOME 46-49 in containers)
+│   └── bench/                # scripts/dev.sh benchmark
+├── scripts/dev.sh            # Install, test, lint, pack
+└── docs/                     # spec.md (original spec), PLAN.md (milestones and verification)
 ```
+
+The installed extension is a symlink to `src/` (`scripts/dev.sh` creates it).
 
 ## Testing
 
 ```bash
 # Shell and session logs go to files; add --show-logs (anywhere on the line) to stream them here:
-#   ./dev.sh test --show-logs
-npm ci && ./dev.sh lint   # ESLint (development dependency only; the extension has no npm dependencies)
-./dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
-./dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
-RP_KEEP=1 ./dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
-./dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
-./dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 10 min leak soak
-./dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./dev.sh test-compat 46 for one)
-./dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
+#   ./scripts/dev.sh test --show-logs
+npm ci && ./scripts/dev.sh lint   # ESLint (development dependency only; the extension has no npm dependencies)
+./scripts/dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
+./scripts/dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
+RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
+./scripts/dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
+./scripts/dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 10 min leak soak
+./scripts/dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one)
+./scripts/dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```
 

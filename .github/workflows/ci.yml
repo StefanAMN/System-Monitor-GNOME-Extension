@@ -17,7 +17,7 @@ jobs:
 
       # gjs runs the unit tests; glib-compile-schemas builds the settings
       # schema they inspect. The UI tests need GNOME Shell 50 and stay local
-      # (./dev.sh test-ui).
+      # (./scripts/dev.sh test-ui).
       - name: Install gjs
         run: |
           sudo apt-get update
@@ -27,4 +27,4 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Syntax and unit tests
-        run: ./dev.sh test-unit
+        run: ./scripts/dev.sh test-unit

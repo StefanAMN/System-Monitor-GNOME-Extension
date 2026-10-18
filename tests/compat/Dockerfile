@@ -1,4 +1,4 @@
-# An older GNOME Shell to run the tests against: ./dev.sh test-compat
+# An older GNOME Shell to run the tests against: ./scripts/dev.sh test-compat
 # Fedora release -> GNOME Shell: 39 -> 45, 40 -> 46, 41 -> 47, 42 -> 48, 43 -> 49
 ARG FEDORA=41
 FROM registry.fedoraproject.org/fedora:${FEDORA}
