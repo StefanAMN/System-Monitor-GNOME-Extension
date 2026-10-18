@@ -167,6 +167,9 @@ window.rp-window popover list > row { background-color: transparent; color: ${p.
 window.rp-window popover listview > row:selected,
 window.rp-window popover listview > row:hover,
 window.rp-window popover list > row:hover { background-color: ${p.selected}; }
+/* The same for a dropdown's current value, an inline list in its row. */
+window.rp-window row.combo listview.inline,
+window.rp-window row.combo listview.inline > row { background-color: transparent; color: inherit; }
 window.rp-window .rp-brand { font-weight: 800; }
 window.rp-window .rp-brand-icon { color: ${ACCENT}; }
 window.rp-window .rp-tile {
