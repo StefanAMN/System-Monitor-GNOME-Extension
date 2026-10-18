@@ -517,9 +517,32 @@ async function prefsWindow(rp) {
     rp._activeTab = 'overview';
     rp._updateTabVisibility();
     await sleep(600);
-    await clickActor(rp._overviewMenuBtn);
-    for (let i = 0; i < 40 && !titled(); i++) await sleep(250);
-    check(titled(), 'prefs: the menu button did not open the window');
+    // The first request fails as it does when GNOME's preferences service
+    // is quitting (window closed and opened again within a second): the
+    // extension must say so and try again, and the window must still open.
+    const bus = Gio.DBus.session;
+    let requests = 0;
+    bus.call = function (...args) {
+        if (args[3] === 'OpenExtensionPrefs' && ++requests === 1) {
+            const done = args[args.length - 1];
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                done({ call_finish: () => { throw new Error('simulated: the service is quitting'); } }, null);
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+        return Object.getPrototypeOf(bus).call.apply(bus, args);
+    };
+    try {
+        await clickActor(rp._overviewMenuBtn);
+        for (let i = 0; i < 40 && !titled(); i++) await sleep(250);
+    } finally {
+        delete bus.call;
+    }
+    // The first request failed, so an open window means the extension sent
+    // it again (its warning is in the shell log).
+    check(requests === 2, `prefs: ${requests} window requests, expected the failed one and one retry`);
+    check(titled(), 'prefs: the menu button did not open the window after a failed first request');
     check(!rp._indicator.menu.isOpen, 'prefs: the menu stayed open over the window');
     for (let i = 0; i < 20 && rp._settings.get_string('prefs-page') !== ''; i++) await sleep(150);
     check(rp._settings.get_string('prefs-page') === '', `prefs: the window did not take the Settings page ('${rp._settings.get_string('prefs-page')}')`);

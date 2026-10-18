@@ -62,3 +62,7 @@ export const SPARK_SCALES = {
     netRx: KBS_SCALE,
     netTx: KBS_SCALE
 };
+// Opening the preferences window: tries, and the pause between them, when
+// GNOME's preferences service is quitting as the request arrives.
+export const PREFS_OPEN_ATTEMPTS = 3;
+export const PREFS_RETRY_MS = 500;
