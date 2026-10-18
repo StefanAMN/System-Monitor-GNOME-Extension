@@ -682,3 +682,109 @@ Proof:
 - The stand-in theme now paints lists white as Orchis does.
 - The switch check now searches the whole switch for the accent: Orchis's thin 32 × 14 track made the fixed sample point land on the card in light mode, although the switch was blue.
 - prefs-check run directly under Orchis: 136 / 136. test-ui passes with the stand-in theme and with Orchis.
+
+## Next areas (plan, 2026-10-18; awaiting the owner's approval)
+
+Owner's order: 1, 2, 5 first, then the rest. Each area gets its own branch and commits and is merged only after its proof has run.
+
+### Area 1: the full tests on GitHub (CI) and release builds
+
+Today CI runs lint and unit tests only. The UI tests and GNOME 46–49 run only on the owner's laptop, so a push cannot catch a broken panel.
+
+- **Workflow:** `.github/workflows/ci.yml` gets a job matrix over GNOME 46, 47, 48, 49 and 50. The jobs reuse `tests/compat` (Fedora containers; 50 = Fedora 44, added to `compat_fedora` in `scripts/dev.sh`) and run unit, headless and UI tests with software rendering, in parallel. A new `scripts/dev.sh test-compat-one <version>` lets each job run one version.
+- **On failure:** the job uploads the screenshots and shell log as an artifact, and the job summary names the failing check.
+- **Releases:** a workflow on tags `v*` runs the matrix, packs the `.zip` (`scripts/dev.sh pack`) and attaches it to a GitHub release.
+- **When it runs:** pushes to `master` and pull requests get the full matrix; other branches get lint and unit tests (fast). The 10-minute soak is not in CI until area 5 makes it reliable, and then only on `master`.
+- **Edge cases:**
+  - Runners have 4 cores; the tests size their CPU burners from the core count, which already copes.
+  - Docker image builds are cached between runs (buildx and the GitHub cache) to keep a run near 10–15 minutes.
+  - A Fedora mirror failing is retried once, as seen locally.
+- **Proof:**
+  1. The workflow runs green on a branch push.
+  2. A throwaway branch with a deliberately broken panel (one click handler removed) turns it red with the right check named, and that branch is then deleted.
+  3. A test tag produces a release with the `.zip`; then the tag and release are deleted.
+
+### Area 2: accessibility (screen readers)
+
+Only 2 of the panel's interactive items have names a screen reader can announce. The rest are bare icons or cards.
+
+- **Names and roles:**
+  - every top-bar metric ("CPU 7 percent"), kept in step with its value;
+  - the ⚠ ("Alerts: CPU 97 percent for 1 minute");
+  - overview cards ("CPU, 7 percent, opens CPU details");
+  - every button (back, ⋮, refresh, range, Show All, End, Force quit, Cancel, System Monitor, resize corners);
+  - process rows (name and value);
+  - detail rows, where the value is announced together with its label.
+- **Roles:** set where St offers them: buttons, toggle for the range chips, list items. Layer: UI only, with no collectors involved. Names are set when the text changes, not per frame (no measurable cost).
+- **Edge cases:**
+  - names must follow the glide's shown value without re-announcing every frame, so the accessible name is updated on readings only;
+  - hidden rows (spare process rows, the ⚠ when off) must not be announced.
+- **Proof:**
+  - **Automated:** a test client walks the shell's accessibility tree over AT-SPI (`gi://Atspi`, in the sandbox with toolkit accessibility on). It asserts that every focusable or clickable panel element has a non-empty name and a role. It fails if a new unnamed button is added.
+  - **Versions:** the check runs in the GNOME 46–50 containers. St's accessibility API changed across versions, so it is checked on each.
+  - **Manual:** an Orca run on the owner's machine, which I cannot do; it is listed as not run until the owner tries it.
+
+### Area 5: a memory check that can be trusted
+
+The 10-minute soak's RSS slope fails intermittently (0.48–0.72 MB/min) while 30-minute runs show a plateau (0.077, 0.151). It measures the garbage collector settling, not leaks.
+
+- **Primary check (new):** count live JavaScript objects with `System.dumpHeap()` at the start of the steady phase and at its end, grouped by kind (arrays, plain objects, GObject wrappers by class). A leak, meaning something kept per poll, grows a count steadily. Allocator retention does not.
+  - Threshold: no group grows by more than a fixed small margin per 100 polls, checked on two intervals so a one-off cache fill does not count.
+- **Secondary check:** RSS stays a sanity bound, measured after a settling period (the first 10 minutes are ignored) with a robust slope (Theil–Sen), in a 20-minute default soak.
+- **Edge cases:** heap dumps are large (tens of MB), so they are written to the sandbox, parsed by a small script and deleted. Dumping pauses the shell, so it happens outside the CPU measurement windows.
+- **Proof:**
+  1. A deliberate leak, behind a test-only setting the driver turns on (one array element per poll kept forever), must fail the new check within the soak.
+  2. The current code must pass it three times in a row.
+  3. Only then does the soak join CI on `master`.
+
+### Area 3: translations
+
+The interface is English only, and no file uses gettext.
+
+- **Wiring:** `gettext` / `ngettext` through the extension's own domain (`gettext-domain` in metadata; `Extension.gettext` in the shell, `ExtensionPreferences` in the window).
+  - Sentences with numbers use full sentences with placeholders, so word order can change per language.
+  - `po/` with a `.pot` extracted by `scripts/dev.sh pot` (xgettext); `.mo` files built into `src/locale` by pack and test.
+- **Scope:** about 70 literal UI strings plus the diagnostics, notification and alert sentences (about 250 in total).
+- **Edge cases:**
+  - metric names in the top bar must keep the width reservation working (measured per language);
+  - units stay as symbols.
+- **Proof:** a pseudo-language that wraps every translated string in markers is installed in the sandbox. The UI test reads every visible label in the panel and window and fails on any text without the markers (an untranslated string). Screenshots in a real translation are also checked.
+- **Decision needed:** which language(s) first.
+
+### Area 4: ready for extensions.gnome.org
+
+- **Audit:** go through the current review guidelines item by item (fetched at the time, since they change) and fix what does not comply. Likely items:
+  - the 5 synchronous `/proc` reads in the shell (an owner-approved exception today; reviewers may ask for async);
+  - the pkexec RAPL fix (reviewers question privileged helpers; it may need to become documented manual steps);
+  - log volume;
+  - metadata (description, URL, versions);
+  - the packed zip's contents.
+- **Proof:** the checklist recorded here with each item's state, a pack and install from the `.zip` on GNOME 50 and in the containers, and the overhead soak after any change to the reads.
+- **Not mine to do:** the submission itself goes through the owner's account.
+
+### Area 6: more than one battery or GPU
+
+- **Batteries:**
+  - the top bar uses UPower's combined DisplayDevice, which is already read for some values;
+  - the Battery page lists each battery (BAT0, BAT1) with its own level and health;
+  - tracking uses the combined energy.
+- **GPUs:**
+  - the collector returns every GPU (DRM cards and `nvidia-smi` lines), and the GPU page shows one card per GPU;
+  - the top bar shows the busiest one or a chosen one (new setting);
+  - alerts consider each.
+- **Edge cases:**
+  - a dGPU that is powered down (runtime PM): reading it must not wake it (sysfs runtime status is checked first);
+  - batteries added or removed (docks).
+- **Proof:** fixtures for two DRM cards, two `nvidia-smi` lines and two UPower batteries in unit tests; UI tests with injected readings, like the existing GPU page test. Real hybrid-graphics hardware is not available, which will be stated.
+
+### Area 7: smaller improvements
+
+1. **Process lists:**
+   - search (a filter field on the CPU, Memory and Disk pages; while it has text, the sampler returns all groups instead of the top 5, only while that page is open) and sorting by CPU, memory or I/O;
+   - proof: unit tests on filtering, a UI test typing a name with real key events, and an overhead measurement with search active.
+2. **Session totals across the screen lock:**
+   - network session totals and the power average and peak persist for the login session (keyed by `XDG_SESSION_ID` and the boot id, like the daily network totals), so a lock no longer resets them;
+   - proof: unit tests and a disable/enable cycle in the UI test keeping the figures.
+3. **Settings export, import and reset:**
+   - a "Backup" group in Settings: export to a JSON file, import with validation against the schema (unknown keys and bad values rejected and listed), and reset all with a confirmation;
+   - proof: a prefs-check round trip, a rejected malformed file, and reset restoring the defaults.
