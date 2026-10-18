@@ -65,24 +65,41 @@ export class TopbarMethods {
                 // Reserve room for the widest value so neighbours in the
                 // panel do not shift every time a digit is gained or lost.
                 // Measured with the label's real font once it is styled.
+                // A metric this machine cannot provide shows 'n/a' for
+                // good, and room for numbers would only be a gap after it.
                 const template = labelTemplate(key, templateOpts);
-                label.connect('style-changed', () => {
-                    // The handler can run before St pushes the themed font
-                    // into the ClutterText, so take the font from the theme
-                    // node; measuring with the stale one over-reserved.
-                    const layout = label.clutter_text.create_pango_layout(template);
-                    layout.set_font_description(label.get_theme_node().get_font());
-                    const [width] = layout.get_pixel_size();
-                    // Via CSS so St widens minimum and natural size together;
-                    // setting only the Clutter min-width aborts the shell.
-                    const style = `min-width: ${width}px;`;
-                    if (width > 0 && label.style !== style) {
+                const reserve = () => {
+                    let style = null;
+                    if (label.text !== 'n/a') {
+                        // Not styled off the stage; style-changed measures
+                        // once it is.
+                        if (!label.get_stage()) return;
+                        // The handler can run before St pushes the themed font
+                        // into the ClutterText, so take the font from the theme
+                        // node; measuring with the stale one over-reserved.
+                        const layout = label.clutter_text.create_pango_layout(template);
+                        layout.set_font_description(label.get_theme_node().get_font());
+                        const [width] = layout.get_pixel_size();
+                        if (width <= 0) return;
+                        // Via CSS so St widens minimum and natural size together;
+                        // setting only the Clutter min-width aborts the shell.
+                        style = `min-width: ${width}px;`;
+                    }
+                    if (label.style !== style) {
                         label.style = style;
                         // The reserved width is part of what the panel is
                         // asked for; styling happens during layout, so
                         // re-fit after it.
                         this._queueFitTopBar();
                     }
+                };
+                label.connect('style-changed', reserve);
+                // Into or out of 'n/a': the reserved room follows.
+                let unavailable = false;
+                label.connect('notify::text', () => {
+                    if ((label.text === 'n/a') === unavailable) return;
+                    unavailable = !unavailable;
+                    reserve();
                 });
                 box.add_child(label);
             }

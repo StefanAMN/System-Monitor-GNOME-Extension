@@ -359,13 +359,27 @@ async function renderedLook(shown) {
         const combo = shown.rows['unit-temp'];
         const popover = findAll(combo, w => w instanceof Gtk.Popover)[0];
         popover.popup();
-        await sleep(500);
-        const options = findAll(popover, w => w.get_css_name() === 'row');
-        const option = options[1] ?? options[0];
-        const popShot = render(popover);
-        const [okOption, at] = option ? option.compute_point(popover, new Graphene.Point().init(option.get_width() - 4, option.get_height() / 2)) : [false, null];
-        const listBg = okOption && popShot ? popShot.at(at.x, at.y) : [0, 0, 0, 0];
-        ok(near(listBg, p.popover), `look (${variant}): an open dropdown's list is ${show(listBg)}, not ${p.popover}`);
+        // Rendered from its contents node, which paints the surface: the
+        // popover itself is a native surface and renders nothing this way
+        // on GTK 4.18 (GNOME 48). Waited for until it has drawn with its
+        // options laid out: the first opening can take a while on GTK 4.18
+        // and 4.20, more so under software rendering on a busy CI runner.
+        let options = [];
+        let option = null;
+        let surface = popover;
+        let popShot = null;
+        for (let waited = 0; waited < 5000 && !popShot; waited += 100) {
+            await sleep(100);
+            options = findAll(popover, w => w.get_css_name() === 'row');
+            option = options[1] ?? options[0];
+            surface = findAll(popover, w => w.get_css_name() === 'contents')[0] ?? popover;
+            if (popover.get_mapped() && option?.get_width() > 0) popShot = render(surface);
+        }
+        const [okOption, at] = option ? option.compute_point(surface, new Graphene.Point().init(option.get_width() - 4, option.get_height() / 2)) : [false, null];
+        const listBg = okOption && popShot ? popShot.at(at.x, at.y) : null;
+        ok(listBg && near(listBg, p.popover), listBg
+            ? `look (${variant}): an open dropdown's list is ${show(listBg)}, not ${p.popover}`
+            : `look (${variant}): the dropdown's list was not on screen after 5 s (mapped ${popover.get_mapped()}, ${options.length} options)`);
         const optionLabel = option && findAll(option, w => w instanceof Gtk.Label)[0];
         const optionText = optionLabel && render(optionLabel);
         let optionInk = null;
@@ -376,8 +390,8 @@ async function renderedLook(shown) {
             }
         }
         const lum = c => (c[0] + c[1] + c[2]) / 3;
-        ok(optionInk && Math.abs(lum(optionInk) - lum(listBg)) > 110,
-            `look (${variant}): dropdown text ${optionInk ? show(optionInk) : 'not drawn'} on ${show(listBg)} is not readable`);
+        ok(optionInk && listBg && Math.abs(lum(optionInk) - lum(listBg)) > 110,
+            `look (${variant}): dropdown text ${optionInk ? show(optionInk) : 'not drawn'} on ${listBg ? show(listBg) : 'no list'} is not readable`);
         popover.popdown();
         await sleep(200);
     }

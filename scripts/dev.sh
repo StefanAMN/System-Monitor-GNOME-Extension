@@ -460,7 +460,9 @@ cmd_test_unit() {
 #   extension loads and its UI works on that shell, not its readings.
 #   RP_COMPAT_OUT=<dir> keeps the logs there (CI uploads it on failure);
 #   a failed test also leaves its sandbox's log and screenshots in
-#   <dir>/gnome-<version>-<test>/.
+#   <dir>/gnome-<version>-<test>/. RP_COMPAT_NO_BATTERY=1 hides this
+#   machine's batteries from the containers, as on a desktop (or on
+#   GitHub's runners).
 # ------------------------------------------------------------------------------
 compat_fedora() {
     case "$1" in
@@ -504,7 +506,10 @@ cmd_test_compat() {
     else
         OUT="$(mktemp -d /tmp/rp-compat.XXXXXX)"
     fi
-    local SUMMARY=() FAILS=()
+    local SUMMARY=() FAILS=() EXTRA=()
+    if [ "${RP_COMPAT_NO_BATTERY:-0}" = "1" ]; then
+        EXTRA=(--tmpfs /sys/class/power_supply)
+    fi
     for v in "${VERSIONS[@]}"; do
         if ! fed="$(compat_fedora "$v")"; then
             log_error "No container image known for GNOME Shell $v"
@@ -539,7 +544,7 @@ cmd_test_compat() {
             mkdir -p "$art"
             chmod 777 "$art"
             # shellcheck disable=SC2086
-            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts \
+            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts "${EXTRA[@]}" \
                     "$img" ./scripts/dev.sh $t > "$art.log" 2>&1; then
                 line="$line|$name pass"
             else
