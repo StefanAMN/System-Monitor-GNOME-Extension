@@ -671,3 +671,14 @@ Found during R2's container runs: the intermittent "the battery line did not ope
 Proof:
 - The UI test makes the first request fail (as the quitting service did) and clicks ⋮ with the real pointer. Two requests are made, the warning is in the shell log, and the window opens.
 - GNOME 47 container: 3 of 3 runs pass after the fix, against 3 of 3 failures before.
+
+## Dropdown lists readable under third-party themes (branch `fix-popover`, 2026-10-18)
+
+Owner's report: Tracking › Report › Period showed its options as off-white text on a bright background. Reproduced by rendering an open dropdown under the owner's Orchis-Pink theme. The popover frame was dark, but Orchis paints every `listview` and `list` white (`listview, list { background-color: #FFFFFF }`), and the window's stylesheet only coloured `popover > contents`. Fix: inside the window, lists, `.view`, scrolled windows and rows in popovers are transparent with the window's text colour, so they sit on the popover's surface.
+
+Proof:
+- prefs-check opens a real dropdown (Temperature; Period is the same widget) in dark and light. It reads the list's background (must be the popover colour) and the option text's contrast against it (difference above 110).
+- Against the old stylesheet under Orchis this fails exactly as reported: `rgb(228, 231, 235)` on `rgb(255, 255, 255)`. With the fix it passes.
+- The stand-in theme now paints lists white as Orchis does.
+- The switch check now searches the whole switch for the accent: Orchis's thin 32 × 14 track made the fixed sample point land on the card in light mode, although the switch was blue.
+- prefs-check run directly under Orchis: 136 / 136. test-ui passes with the stand-in theme and with Orchis.

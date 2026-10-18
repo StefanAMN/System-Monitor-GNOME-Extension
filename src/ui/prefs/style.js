@@ -154,8 +154,19 @@ window.rp-window popover > arrow {
     color: ${p.fg};
     border: 1px solid ${p.border};
 }
+/* Lists draw on the surface they sit on: themes such as Orchis paint every
+   listview and list white, which left a dropdown's options (Tracking ›
+   Period) as off-white text on white. */
+window.rp-window popover listview,
+window.rp-window popover list,
+window.rp-window popover .view,
+window.rp-window popover scrolledwindow,
+window.rp-window popover viewport { background-color: transparent; color: ${p.fg}; }
+window.rp-window popover listview > row,
+window.rp-window popover list > row { background-color: transparent; color: ${p.fg}; }
 window.rp-window popover listview > row:selected,
-window.rp-window popover listview > row:hover { background-color: ${p.selected}; }
+window.rp-window popover listview > row:hover,
+window.rp-window popover list > row:hover { background-color: ${p.selected}; }
 window.rp-window .rp-brand { font-weight: 800; }
 window.rp-window .rp-brand-icon { color: ${ACCENT}; }
 window.rp-window .rp-tile {
