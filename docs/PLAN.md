@@ -687,6 +687,11 @@ Proof:
 
 Owner's order: 1, 2, 5 first, then the rest. Each area gets its own branch and commits and is merged only after its proof has run.
 
+Owner's decision (2026-10-19, after area 1 was merged): "continue with the other areas without asking me next". Each area is therefore merged into `master` and pushed once its proof has passed. The open questions are settled with the defaults below, each noted in its area:
+- translations: the template for every language, plus the language this machine's locale settings use if it is not English (decided in area 3);
+- several GPUs: the busiest one in the top bar;
+- extensions.gnome.org: the RAPL fix keeps its pkexec helper only if the review rules allow it.
+
 ### Area 1: the full tests on GitHub (CI) and release builds
 
 Today CI runs lint and unit tests only. The UI tests and GNOME 46–49 run only on the owner's laptop, so a push cannot catch a broken panel.

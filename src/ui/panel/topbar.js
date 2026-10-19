@@ -1,6 +1,7 @@
 // The top bar: pinned metrics, fitting them into the room the panel gives, and their values.
 // Methods of the extension (installed by extension.js); `this` is the extension.
 import GLib from 'gi://GLib';
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
@@ -25,7 +26,7 @@ export class TopbarMethods {
 
         // Shown while any metric, pinned or not, is in alert; its tooltip
         // says which.
-        this._dangerBox = new St.BoxLayout({ reactive: true, track_hover: true, visible: false, style_class: 'resource-pulse-danger' });
+        this._dangerBox = new St.BoxLayout({ reactive: true, track_hover: true, visible: false, style_class: 'resource-pulse-danger', accessible_name: 'Alerts' });
         this._dangerBox.add_child(new St.Icon({
             icon_name: 'dialog-warning-symbolic',
             // Not system-status-icon: its panel padding makes the ⚠ wider
@@ -42,13 +43,15 @@ export class TopbarMethods {
                 this._indicatorBox.add_child(new St.Label({
                     text: '|',
                     style_class: 'resource-pulse-divider',
+                    accessible_role: Atk.Role.SEPARATOR,
                     // Faint in whatever colour the panel uses (light or dark).
                     opacity: 110,
                     y_align: Clutter.ActorAlign.CENTER
                 }));
             }
 
-            const box = new St.BoxLayout({ reactive: true, track_hover: true });
+            // Named with its value by _nameValues (a11y.js).
+            const box = new St.BoxLayout({ reactive: true, track_hover: true, accessible_name: METRIC_NAMES[key] });
             const icon = this._setMetricIcon(new St.Icon({
                 style_class: 'system-status-icon',
                 y_align: Clutter.ActorAlign.CENTER
@@ -256,7 +259,6 @@ export class TopbarMethods {
         }
         Object.keys(this._topBarWidgets).forEach(key => {
             const widget = this._topBarWidgets[key];
-            if (!widget.label) return;
 
             // '--' = not sampled yet, 'n/a' = this machine cannot provide it.
             let text = '--';
@@ -293,6 +295,9 @@ export class TopbarMethods {
                 text = thermalUnavailable(data.thm) ? 'n/a' : formatTemp(data.thm.packageTemp, tempUnit);
             else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : 'n/a';
 
+            // Also what screen readers are told, labelled or not (compact).
+            widget.text = text;
+            if (!widget.label) return;
             if (widget.label.text !== text) widget.label.text = text;
 
             let warn = false;

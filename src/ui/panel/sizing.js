@@ -138,6 +138,7 @@ export class SizingMethods {
 
         corners.forEach(c => {
             const handle = new ResizeHandle(c.id, c.size);
+            handle.accessible_name = 'Resize the panel';
             handle.x_align = c.xAlign;
             handle.y_align = c.yAlign;
             handle.x_expand = true;

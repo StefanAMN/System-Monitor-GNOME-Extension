@@ -191,3 +191,24 @@ export function agoLabel(samplesBack, sampleSeconds) {
     const s = t % 60;
     return s ? `${Math.floor(t / 60)}m ${s}s ago` : `${Math.floor(t / 60)}m ago`;
 }
+
+/**
+ * A value as the panel prints it, in words a screen reader says well: the
+ * placeholders as what they mean, arrows as download / upload, rates "per
+ * second", watts and hours spelled out.
+ * @param {string} text  e.g. "7%", "↓1.2 MB/s ↑30 KB/s", "85% · 2h 10m", "n/a"
+ */
+export function spokenValue(text) {
+    if (!text || text === '--') return 'no reading yet';
+    if (text === 'n/a') return 'not available';
+    const unit = (n, one, many) => `${n} ${n === '1' ? one : many}`;
+    return text
+        .replace(/\s*·\s*/g, ', ')
+        .replace(/\b(\d+)h (\d+)m\b/g, (_m, h, m) => (h === '0' ? unit(m, 'minute', 'minutes') : `${unit(h, 'hour', 'hours')} ${unit(m, 'minute', 'minutes')}`))
+        .replace(/\s*↓\s*/g, (_m, at) => (at > 0 ? ', download ' : 'download '))
+        .replace(/\s*↑\s*/g, (_m, at) => (at > 0 ? ', upload ' : 'upload '))
+        .replace(/([KMGT]?i?B)\/s\b/g, '$1 per second')
+        .replace(/(\d)\s?W\b/g, '$1 watts')
+        .replace(/\s+/g, ' ')
+        .trim();
+}

@@ -81,7 +81,7 @@ export class CpuPage {
         const procHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
         procHead.add_child(new St.Label({ text: 'Top CPU Usage', style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
 
-        const showAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true });
+        const showAllBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 20px; padding: 4px 10px;', label: 'Show All', reactive: true, can_focus: true, accessible_name: 'Show all processes in System Monitor' });
         showAllBtn.child.style_class = 'rp-fg-dim';
         showAllBtn.child.style = 'font-size: 0.75em;';
         showAllBtn.connect('clicked', () => {

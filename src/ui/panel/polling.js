@@ -10,7 +10,7 @@ import { smoothReading, interpolateReading, glideBuffer } from '../../lib/engine
 import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
-import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, HISTORY_KEYS, SPARK_SCALES } from './constants.js';
+import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
 
 export class PollingMethods {
     /** Pinned metrics as stored, minus unknown keys and duplicates. */
@@ -80,6 +80,8 @@ export class PollingMethods {
     _render(data, topBarOnly = false, frame = false) {
         this._updateTopBarUI(data, frame);
         if (!topBarOnly) this._updateDashboardUI(data, frame);
+        // A glide's start shows the last reading; its end (below) the new one.
+        if (!frame && !this._glideId) this._nameValues();
     }
 
     _smoothOn() {
@@ -138,6 +140,7 @@ export class PollingMethods {
             if (shown) this._render(shown, !this._menuOpen, true);
             if (done) {
                 this._glideId = 0;
+                this._nameValues();
                 return GLib.SOURCE_REMOVE;
             }
             return GLib.SOURCE_CONTINUE;
@@ -451,6 +454,8 @@ export class PollingMethods {
             : SPARK_SCALES[key];
         const spark = new Sparkline(this._hist[key], height, Object.assign({}, options, scale));
         spark.histKey = key;
+        // The detail charts answer the pointer, so they need a name.
+        if (options.showGrid) spark.accessible_name = `${CHART_NAMES[key]} over time`;
         // Pages are built on first visit, after polling has started.
         if (this._spanLabel) spark.setSpanLabel(this._spanLabel);
         if (this._sampleSeconds) spark.setSampleSeconds(this._sampleSeconds);

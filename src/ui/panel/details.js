@@ -1,5 +1,6 @@
 // The detail-page frame: header, range switch, building pages on first visit, switching tabs.
 // Methods of the extension (installed by extension.js); `this` is the extension.
+import Atk from 'gi://Atk';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
@@ -17,7 +18,7 @@ export class DetailsMethods {
         // Top bar for CPU detail header (matches Right Panel header)
         this._detailHeader = new St.BoxLayout({ style: 'margin-bottom: 14px; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
 
-        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true });
+        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: 'Back to the overview' });
         backBtn.add_child(new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' }));
         backBtn.connect('clicked', () => {
             this._activeTab = 'overview';
@@ -30,7 +31,7 @@ export class DetailsMethods {
         this._detailHeaderTitleBox.add_child(this._detailHeaderIcon);
         this._detailHeaderTitleBox.add_child(this._detailHeaderTitle);
 
-        const optBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true });
+        const optBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: 'Settings' });
         const optIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         optIcon.set_pivot_point(0.5, 0.5);
         optBtn.add_child(optIcon);
@@ -51,6 +52,7 @@ export class DetailsMethods {
                 can_focus: true,
                 toggle_mode: true,
                 accessible_name: range === 'live' ? 'Recent samples' : `Last ${RANGES[range].label}`,
+                accessible_role: Atk.Role.TOGGLE_BUTTON,
             });
             button.connect('clicked', () => {
                 this._range = range;
