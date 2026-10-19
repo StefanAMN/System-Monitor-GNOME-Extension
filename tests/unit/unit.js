@@ -912,7 +912,7 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
 
         // Caps: at most 2 x APPS_PER_BUCKET named apps while open, APPS_PER_BUCKET once the hour is over.
         const busy = new BatteryLedger();
-        const many = n => Object.fromEntries(Array.from({ length: 70 }, (_, i) => [`app${i}#1`, n * (i + 1) * 1e5]));
+        const many = n => Object.fromEntries(Array.from({ length: 70 }, (_x, i) => [`app${i}#1`, n * (i + 1) * 1e5]));
         busy.ingest({ ...reading(0, many(0), 0, 0), packageW: 5, battery: null });
         busy.ingest({ ...reading(1, many(1), 1e9, 0), packageW: 5, battery: null });
         const open = busy.buckets[0];
