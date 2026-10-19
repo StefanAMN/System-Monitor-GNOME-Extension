@@ -1157,6 +1157,10 @@ async function smoothGlide(rp) {
     rp._timeoutId = null;
     const poll = rp._poll;
     rp._poll = () => {};
+    // A poll already on its way (started before it was held) still lands:
+    // under load it can take longer than the wait above. Let it finish.
+    for (let i = 0; i < 50 && rp._pollInFlight; i++) await sleep(100);
+    check(!rp._pollInFlight, 'glide: a poll was still in flight after 5 s');
     try {
         const base = rp._lastData;
         const reading = (mem, cpu) => ({ ...base, mem: { ...base.mem, percent: mem }, cpu: { ...base.cpu, total: cpu } });

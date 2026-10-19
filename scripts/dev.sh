@@ -328,20 +328,34 @@ cmd_test_dedicated() {
     stop_log_stream
 
     # Surface this extension's problems even when the log was not shown.
-    # This session also runs the user's other extensions, so a JS ERROR only
-    # counts when its stack trace (next lines) mentions this extension.
-    local BAD
+    # This session also runs the user's other extensions, so a JS ERROR or a
+    # disposed-object critical only counts when its stack trace (the next
+    # lines) mentions this extension; the others are counted, not listed.
+    local BAD OTHERS NOTES
     BAD="$(awk -v uuid="$UUID" '
-        /JS ERROR/ { if (pending && hit) print pending; pending = FNR ": " $0; hit = 0; left = 8; next }
-        left > 0 { left--; if (index($0, uuid)) hit = 1; if (left == 0 && pending) { if (hit) print pending; pending = "" } }
-        /ResourcePulse|Error in .* sample|already disposed|was not found when attempting to remove/ { print FNR ": " $0 }
-        END { if (pending && hit) print pending }
+        function settle() { if (pending) { if (hit) print pending; else others++ } pending = "" }
+        /JS ERROR|already disposed/ { settle(); pending = FNR ": " $0; hit = 0; left = 12; next }
+        left > 0 { left--; if (index($0, uuid)) hit = 1; if (left == 0) settle() }
+        # What cannot be read without privileges is noted once by design.
+        /ResourcePulse: .*\(permission denied\)/ { print "NOTE " $0; next }
+        /ResourcePulse|Error in .* sample|was not found when attempting to remove/ { print FNR ": " $0 }
+        END { settle(); print "OTHERS " others + 0 }
     ' "$LOG" || true)"
+    OTHERS="$(echo "$BAD" | sed -n 's/^OTHERS //p')"
+    NOTES="$(echo "$BAD" | sed -n 's/^NOTE .*ResourcePulse: /  /p')"
+    BAD="$(echo "$BAD" | grep -v '^OTHERS \|^NOTE ' || true)"
     if [ -n "$BAD" ]; then
         log_warn "Errors from the test session (full log: $LOG):"
         echo "$BAD" | head -n 20
     else
         log_info "No extension errors in the session log ($LOG)."
+    fi
+    if [ -n "$NOTES" ]; then
+        log_info "Not readable without administrator rights (expected; noted once):"
+        echo "$NOTES"
+    fi
+    if [ "${OTHERS:-0}" -gt 0 ]; then
+        log_info "$OTHERS error(s) in the log come from other extensions (their stack traces do not mention $UUID)."
     fi
 }
 
