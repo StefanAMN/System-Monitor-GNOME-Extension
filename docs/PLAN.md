@@ -789,6 +789,49 @@ Only 2 of the panel's interactive items have names a screen reader can announce.
   - **Versions:** the check runs in the GNOME 46–50 containers. St's accessibility API changed across versions, so it is checked on each.
   - **Manual:** an Orca run on the owner's machine, which I cannot do; it is listed as not run until the owner tries it.
 
+#### State (branch `accessibility`, 2026-10-19)
+
+Built:
+- **Names:**
+  - top-bar metrics ("CPU 7%", "Network download 1.2 MB per second"; compact mode too);
+  - the ⚠ ("Alerts: CPU 97 % for 1 min — …");
+  - cards ("Disk 43%, used on /, 0% busy, opens Disk details");
+  - process rows ("dbus-daemon, 3 processes, 0.5% CPU, opens System Monitor") and their ✕ ("End firefox, 3 processes");
+  - header buttons (Back to the overview, Settings, Refresh now), Show all, Open System Monitor;
+  - the detail charts ("CPU usage over time"), the resize corners, the battery page's top-app line, and the panel itself ("Resource Pulse panel").
+- **Roles:** cards are buttons, range chips toggles, process rows list items, top-bar dividers separators.
+- **Spoken text:** `spokenValue` (`lib/common/present.js`, unit-tested) turns what the panel prints into what a screen reader should say: arrows become download / upload, "/s" becomes "per second", W becomes watts, "2h 10m" becomes "2 hours 10 minutes", "n/a" becomes "not available", "--" becomes "no reading yet".
+- **When names change:** `AccessibilityMethods._nameValues` (`ui/panel/a11y.js`) runs at the settled points only: a render that is not a glide frame while no glide runs, and the glide's last frame. A glide's first render shows the previous reading, so naming there changes nothing. The cards are named only while the menu is open.
+- **Keyboard:** process rows open System Monitor with Return or Space, as the cards already did.
+- **Deviation from the plan:** detail rows ("Usage", "7%") are plain label pairs, read in order by object or flat review and not interactive; naming 40 of them would only repeat them.
+
+Found while building it:
+- `label_actor` only adds a labelled-by relation; the accessible name stays empty, so buttons with a custom child get an explicit name.
+- AT-SPI calls a button "push button" on GNOME 46 and "button" from 47.
+- Under the C locale (the CI containers) gjs's `print` turns non-ASCII into '?', so "50°C" arrived as "50?C". The client now escapes its JSON to ASCII.
+- Without a battery the battery card is hidden, and it must not be offered then.
+
+Proof:
+- `tests/ui-driver/a11y-check.js` is an AT-SPI client started by the UI test as a separate process, as Orca would be. It reads the shell's accessible trees below "Resource Pulse" (top bar) and "Resource Pulse panel" (menu). The UI test checks them:
+  - no showing, reactive object without a name, in the top bar, the overview, the CPU page or the Battery page;
+  - each top-bar item is named with its metric and spoken value;
+  - separators between metrics;
+  - the hidden ⚠ is not offered; once raised, it is offered as "Alerts: CPU … % for …";
+  - visible cards are named buttons with their values, and hidden cards are not offered;
+  - three range toggles with one checked;
+  - one list item per visible process row, with the ✕ named "End <process>";
+  - Return on a process row launches System Monitor and closes the menu.
+- During a 20 → 80 % glide the top-bar memory is renamed exactly once, to "Memory 80%", and the card once.
+- Mutations, each caught:
+  - removing the Refresh button's name fails with "a11y: unnamed on the overview: button";
+  - naming on every frame fails with "renamed 8 times (Memory 28% | … | Memory 80%)".
+- Unnamed objects before the fixes (container exploration): the System Monitor button, the battery line and every detail chart; 0 afterwards on GNOME 46 and 50.
+- CI: the first run failed on all five shells (the C-locale '?' and the hidden battery card above); after the fixes run 39205615669 passed on GNOME 46–50.
+- Local runs: GNOME 50 host UI test passes; GNOME 47 container without a battery passes.
+- Overhead on this branch, load 0.77: menu closed +0.53 %, with tracking +0.64 %, overview +3.83 %, CPU tab +4.57 % (budgets 1 % and 5 %).
+
+Not run: Orca itself (not installed in the test images, and its speech cannot be heard here). The checks read exactly what Orca reads, the AT-SPI tree, but how it sounds is for the owner to try.
+
 ### Area 5: a memory check that can be trusted
 
 The 10-minute soak's RSS slope fails intermittently (0.48–0.72 MB/min) while 30-minute runs show a plateau (0.077, 0.151). It measures the garbage collector settling, not leaks.
