@@ -751,6 +751,17 @@ Proof (all on GitHub):
 2. Red: run 39161474404 on the throwaway branch `ci-proof-broken` (the ⋮ button's `clicked` handler removed). All five shells fail, each naming the same check on the run's page: `RP-UITEST FAIL: prefs: 0 window requests, expected the failed one and one retry`. Each job kept its logs and screenshots as an artifact (1.3–2.3 MB). Run 39199414195 repeated this on the v7 actions.
 3. Release: tag `v0.0.0-ci-test` (run 39199411239). All five shells passed, then the release job published "Resource Pulse v0.0.0-ci-test", marked as a pre-release, with the zip (160 KB). The downloaded zip is file-for-file identical to a local pack on GNOME 50 (61 files). The release, the tag and the throwaway branch were then deleted; the runs stay as the record.
 
+Overhead (`test-overhead 30`, `master` and this branch alternated twice each on the owner's laptop, with their desktop apps running):
+
+| Run | Load | Closed | Closed + tracking | Overview open | CPU tab |
+|---|---|---|---|---|---|
+| master 1 | 0.82 | +0.40 % | +0.74 % | +4.63 % | +5.70 % |
+| branch 1 | 0.62 | +0.40 % | +0.71 % | +4.50 % | +6.23 % |
+| master 2 | 1.07 | +0.40 % | +0.65 % | +3.77 % | +4.90 % |
+| branch 2 | 2.11 | +0.87 % | +1.22 % (fails the 1 % budget) | +4.23 % | +6.10 % |
+
+At similar load the branch measures the same as `master`; the `notify::text` handler adds nothing measurable. An earlier branch run at load about 1.2 also read +1.22 % with tracking. Both over-budget readings came with the highest host load, and `master` varies as much (CPU tab 4.90–5.70 %). The closed-with-tracking budget has only about 0.3 % to spare on a busy machine, for either version. Measuring overhead reliably on a shared desktop belongs with area 5's work on trustworthy measurements. (`master`'s second run also tripped the 30 s soak's memory slope, 3.22 MB/min: the known unreliable check, area 5.)
+
 Not run: the soak in CI (area 5 first). Merging `ci-matrix` waits for the owner.
 
 ### Area 2: accessibility (screen readers)
