@@ -471,9 +471,13 @@ cmd_test_i18n() {
     local tmp
     tmp="$(mktemp -d)"
     extract_pot "$tmp/now.pot"
-    if ! diff <(grep -E '^msg(id|_plural)' "$tmp/now.pot") <(grep -E '^msg(id|_plural)' "$REPO_DIR/po/$GETTEXT_DOMAIN.pot") > "$tmp/diff"; then
-        log_error "po/$GETTEXT_DOMAIN.pot is out of date: run ./scripts/dev.sh pot"
-        head -n 20 "$tmp/diff"
+    # (No diff: the test images have coreutils, not diffutils.)
+    local now committed
+    now="$(grep -E '^msg(id|_plural)' "$tmp/now.pot")"
+    committed="$(grep -E '^msg(id|_plural)' "$REPO_DIR/po/$GETTEXT_DOMAIN.pot")"
+    if [ "$now" != "$committed" ]; then
+        log_error "po/$GETTEXT_DOMAIN.pot is out of date: run ./scripts/dev.sh pot (left: sources, right: template)"
+        comm -3 <(sort <<< "$now") <(sort <<< "$committed") | head -n 20
         rm -rf "$tmp"
         exit 1
     fi
