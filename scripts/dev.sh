@@ -415,7 +415,7 @@ cmd_test_ui() {
 # Command: Overhead and soak test (the extension's own cost inside the shell)
 # ------------------------------------------------------------------------------
 cmd_test_overhead() {
-    local SOAK="${1:-600}"
+    local SOAK="${1:-1200}"
     local WINDOW="${RP_OVERHEAD_WINDOW:-30}"
     log_title "Running Overhead & Soak Test (${WINDOW}s windows, ${SOAK}s soak)"
 
@@ -436,6 +436,13 @@ cmd_test_overhead() {
         driver_failure_details
         exit 1
     fi
+}
+
+# Only the soak's memory checks (heap census, RSS, fds, actors), which need no
+# quiet machine; RP_SOAK_LEAK=1 plants a leak to prove they catch one.
+cmd_test_soak() {
+    export RP_SOAK_ONLY=1
+    cmd_test_overhead "${1:-1200}"
 }
 
 # ------------------------------------------------------------------------------
@@ -507,6 +514,9 @@ cmd_test_compat() {
         OUT="$(mktemp -d /tmp/rp-compat.XXXXXX)"
     fi
     local SUMMARY=() FAILS=() EXTRA=()
+    # RP_COMPAT_TESTS="test-soak 1200" (comma-separated) runs other tests.
+    local TESTS=("test-unit" "test-headless 8" "test-ui")
+    if [ -n "${RP_COMPAT_TESTS:-}" ]; then IFS=',' read -r -a TESTS <<< "$RP_COMPAT_TESTS"; fi
     if [ "${RP_COMPAT_NO_BATTERY:-0}" = "1" ]; then
         EXTRA=(--tmpfs /sys/class/power_supply)
     fi
@@ -537,14 +547,14 @@ cmd_test_compat() {
         fi
         actual="$(docker run --rm -v "$REPO_DIR":/src:ro "$img" gnome-shell --version 2>/dev/null | awk '{print $3}')"
         line="$v|$actual"
-        for t in "test-unit" "test-headless 8" "test-ui"; do
+        for t in "${TESTS[@]}"; do
             name="${t%% *}"
             # Writable by the container's own user, whatever its uid here.
             art="$OUT/gnome-$v-$name"
             mkdir -p "$art"
             chmod 777 "$art"
             # shellcheck disable=SC2086
-            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts "${EXTRA[@]}" \
+            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts -e RP_SOAK_LEAK="${RP_SOAK_LEAK:-0}" "${EXTRA[@]}" \
                     "$img" ./scripts/dev.sh $t > "$art.log" 2>&1; then
                 line="$line|$name pass"
             else
@@ -684,7 +694,8 @@ cmd_help() {
     echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless and test-ui on other GNOME Shell versions in containers (default 46-49; needs docker)"
     echo -e "  ${GREEN}lint${RESET}               Run ESLint (needs 'npm ci' once)"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
-    echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 600) for leaks"
+    echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 1200) for leaks"
+    echo -e "  ${GREEN}test-soak [sec]${RESET}    Only the soak's memory checks: heap census by kind, RSS, fds, actors (RP_SOAK_LEAK=1 plants a leak)"
     echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk, read, proc, power, battery)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
@@ -731,8 +742,11 @@ case "${1:-reload}" in
     test-ui|ui)
         cmd_test_ui
         ;;
+    test-soak)
+        cmd_test_soak "${2:-1200}"
+        ;;
     test-overhead|overhead|soak)
-        cmd_test_overhead "${2:-600}"
+        cmd_test_overhead "${2:-1200}"
         ;;
     benchmark|test-benchmark|bench)
         shift

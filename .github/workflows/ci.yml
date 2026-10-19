@@ -2,8 +2,9 @@ name: CI
 
 # Every push gets the quick check (lint, syntax, unit tests). The UI tests on
 # every supported GNOME Shell run for master, pull requests, release tags and
-# manual runs (Actions > CI > Run workflow, on any branch). A tag v* that
-# passes them is packed and published as a GitHub release.
+# manual runs (Actions > CI > Run workflow, on any branch), the 20-minute
+# memory soak for master and manual runs. A tag v* that passes the tests is
+# packed and published as a GitHub release.
 on:
   push:
   pull_request:
@@ -63,6 +64,36 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gnome-${{ matrix.gnome }}-logs
+          path: ${{ runner.temp }}/compat
+          retention-days: 14
+
+  # The memory soak on GNOME 50: the heap census by kind, RSS, fds and
+  # actors over 20 minutes with the menu open (./scripts/dev.sh test-soak).
+  # Too long for every push: master and manual runs only.
+  soak:
+    if: github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+    name: Memory soak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install glib tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libglib2.0-bin
+
+      - name: 20-minute soak
+        env:
+          RP_COMPAT_OUT: ${{ runner.temp }}/compat
+          RP_COMPAT_TESTS: test-soak 1200
+        run: ./scripts/dev.sh test-compat 50
+
+      - name: Keep the logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: soak-logs
           path: ${{ runner.temp }}/compat
           retention-days: 14
 

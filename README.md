@@ -95,7 +95,9 @@ npm ci && ./scripts/dev.sh lint   # ESLint (development dependency only; the ext
 ./scripts/dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
 RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
 ./scripts/dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
-./scripts/dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 10 min leak soak
+./scripts/dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 20 min leak soak
+./scripts/dev.sh test-soak           # only the soak: live JavaScript objects counted by kind (a leak grows in both halves), RSS, fds, actors
+RP_SOAK_LEAK=1 ./scripts/dev.sh test-soak   # the same with a planted leak (one object kept per reading), which must fail
 ./scripts/dev.sh test-compat         # unit, headless and UI tests on GNOME Shell 46-49 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one, 50 also works)
 ./scripts/dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
@@ -104,6 +106,7 @@ RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screensh
 GitHub Actions (`.github/workflows/ci.yml`):
 - every push runs the lint and the unit tests;
 - pushes to `master`, pull requests and `v*` tags also run `test-compat` on GNOME Shell 46, 47, 48, 49 and 50, one job each. A failing job names the failing check on the run's page and keeps its logs and screenshots as an artifact;
+- pushes to `master` also run the 20-minute memory soak (`test-soak`) on GNOME 50;
 - Actions › CI › Run workflow runs all of it on any branch;
 - a `v*` tag that passes is packed (`scripts/dev.sh pack`) and published as a GitHub release with the `.zip` (tags with a `-`, such as `v1.2-rc1`, as pre-releases).
 
