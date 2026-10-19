@@ -107,7 +107,7 @@ export class SizingMethods {
 
     /** Settings changed elsewhere (Reset in the preferences window): apply once, after both keys. */
     _queueDimensionsUpdate() {
-        if (this._sizeIdleId || this._activeResizeCorner) return;
+        if (this._sizeIdleId || this._activeResizeCorner || this._indicatorGone) return;
         this._sizeIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
             this._sizeIdleId = 0;
             this._updateMenuDimensions();

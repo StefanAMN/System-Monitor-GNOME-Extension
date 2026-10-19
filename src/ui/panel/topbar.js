@@ -143,7 +143,7 @@ export class TopbarMethods {
 
     /** Fit after the current layout pass; for use from allocation signals. */
     _queueFitTopBar() {
-        if (this._fitIdleId || !this._indicator) return;
+        if (this._fitIdleId || !this._indicator || this._indicatorGone) return;
         this._fitIdleId = GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
             this._fitIdleId = 0;
             this._fitTopBar();
