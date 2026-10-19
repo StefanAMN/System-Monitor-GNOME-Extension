@@ -980,6 +980,31 @@ Proof:
   - batteries added or removed (docks).
 - **Proof:** fixtures for two DRM cards, two `nvidia-smi` lines and two UPower batteries in unit tests; UI tests with injected readings, like the existing GPU page test. Real hybrid-graphics hardware is not available, which will be stated.
 
+#### State (branch `multi-device`, 2026-10-19)
+
+Built:
+- **GPUs** (`lib/collectors/gpu.js`, rewritten): every DRM card (AMD and Intel by PCI vendor id) and every `nvidia-smi` line is read, each with its own name from `lspci` matched by PCI slot.
+  - A sample is the GPU to show plus `gpus`, every GPU's reading. `pickShownGpu` (pure) picks the busiest awake GPU, and keeps the one shown until another is 10 points busier, so two GPUs at similar load do not take turns.
+  - **Sleeping GPUs are not woken.** A card whose `power/runtime_status` reads suspended is reported asleep without reading it, and `nvidia-smi` is not run while every NVIDIA card sleeps. Detection only tests for files (reading an amdgpu attribute resumes the card).
+  - Two old bugs went with the rewrite: a hybrid laptop with `nvidia-smi` showed only the NVIDIA GPU (that path returned before the integrated one was read), and `nvidia-smi` woke a sleeping dGPU at every sample.
+- **On screen:** the GPU page gains an "All GPUs" card when there is more than one GPU (each one's name and load, "asleep", and which one is shown above). The tooltip lists the others. Alerts take the busiest awake GPU.
+- **Batteries** (`lib/collectors/battery.js`): every `BAT*` is found (looked for again every minute: docks, removable batteries). With one battery nothing changes (UPower, then sysfs). With several, each is read from sysfs and `combineBatteries` (pure) makes the top bar's reading: charge from summed energy, health from summed capacities, time from the summed rate. The Battery page gains a "Batteries" card, one row each. Battery tracking gets the summed energy.
+- Both samplers take a sysfs root, for fixtures.
+- **Decision:** the top bar shows the busiest GPU; there is no setting to pick one (the default recorded when the owner said to go on without asking).
+- **Deviation:** the plan said "one card per GPU". The page keeps one full card (the GPU shown) and lists the others in a compact card, which keeps the page short on the usual one-GPU machine.
+
+Proof:
+- **Unit tests (415):**
+  - every `nvidia-smi` line, PCI slots, `lspci` names by slot;
+  - `pickShownGpu`: the busiest; kept within 10 points; switched beyond; awake before asleep; all asleep; none;
+  - a **sysfs fixture** with an awake Intel card and a sleeping AMD card whose busy file says 99: the AMD card is reported asleep and not read, the Intel card is shown; once awake, the AMD card is read and shown;
+  - the tooltip with several GPUs; the alert takes the busiest awake GPU (97, not the shown 40 or a sleeping 100);
+  - `combineBatteries`: charge, rate, time, health, cycle count; one charging means charging; all full; one battery as it is; none;
+  - a **two-battery sysfs fixture** read through the sampler.
+- **UI test** (injected readings, like the GPU page test): a hybrid reading lists three GPUs as "… (shown above)", "NVIDIA RTX 3050 = asleep" and "AMD Radeon 780M = 12%", with the tooltip naming the sleeping one; the list is gone again with one GPU. Two batteries are listed as "BAT0: 67% · Discharging · health 90%", "BAT1: …", and the card reads 62% for both.
+- Found by the screenshots: a long model name with "(shown above)" was cut off in the list. List names now wrap, and both lists are checked for cut-off text.
+- **Not run:** real hybrid-graphics or two-battery hardware (this laptop has one Intel GPU and one battery).
+
 ### Area 7: smaller improvements
 
 1. **Process lists:**
