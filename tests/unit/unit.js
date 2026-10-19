@@ -11,7 +11,8 @@ import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSet
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses } from '../../src/lib/collectors/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
 import { listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
-import { parseNetDev, counterDelta } from '../../src/lib/collectors/network.js';
+import { parseNetDev, counterDelta, NetworkSampler } from '../../src/lib/collectors/network.js';
+import { sessionIdentity, sessionStateText, parseSessionState, currentSessionIdentity } from '../../src/lib/engine/sessiontotals.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../../src/lib/collectors/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../../src/lib/collectors/thermal.js';
 import { raplWatts, PowerSampler } from '../../src/lib/collectors/power.js';
@@ -83,6 +84,19 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq([rb.length, rb.max()], [0, 0], 'ring clear');
 }
 
+// ── session figures across the screen lock ──
+{
+    const id = sessionIdentity('boot-1', 4242, 777);
+    const figures = { net: { rx: 5e6, tx: 1e6, counters: [{ iface: 'wlp1s0', rxBytes: 9e9, txBytes: 1e9 }, { bad: true }] }, power: { peak: 12, count: 3, weighted: 30, seconds: 4 } };
+    const text = sessionStateText(id, figures);
+    eq(parseSessionState(text, id), { net: { rx: 5e6, tx: 1e6, counters: [{ iface: 'wlp1s0', rxBytes: 9e9, txBytes: 1e9 }] }, power: figures.power },
+        'session: this session\'s figures read back');
+    eq([parseSessionState(text, sessionIdentity('boot-1', 4242, 778)), parseSessionState(text, sessionIdentity('boot-2', 4242, 777)), parseSessionState('{', id),
+        parseSessionState(JSON.stringify({ version: 1, session: id, net: { rx: -1, tx: 0, counters: [] } }), id)],
+    [null, null, null, null], 'session: another shell, another boot, a damaged or invalid file: nothing carried');
+    ok(/^b\/\d+\/\d+$/.test(currentSessionIdentity('b')), `session: this process's identity (${currentSessionIdentity('b')})`);
+}
+
 // ── running stats (power session average / peak) ──
 {
     const S = 1000000;
@@ -98,6 +112,19 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(st.mean.toFixed(3), (50 / 3).toFixed(3), 'stats: an unsampled gap is not bridged with the stale reading');
     st.add(100, 601 * S);
     eq(st.mean, 150 / 4, 'stats: resumes after the gap');
+
+    // Carried across a disable (the screen lock): the next reading starts a new stretch.
+    const before = new RunningStats(5);
+    before.add(10, 1 * S);
+    before.add(20, 3 * S);
+    const after = new RunningStats(5);
+    after.restore(JSON.parse(JSON.stringify(before)));
+    eq([after.mean, after.peak, after.count], [10, 20, 2], 'stats: restored figures');
+    after.add(40, 1000 * S);
+    after.add(40, 1002 * S);
+    eq([after.mean, after.peak], [25, 40], 'stats: restored and new figures together, the locked time not counted');
+    after.restore({ peak: -1 });
+    eq(after.count, 4, 'stats: a damaged saved state is ignored');
     st.add(NaN, 602 * S);
     st.add(100, 601 * S);
     eq([st.mean, st.peak, st.count], [150 / 4, 100, 6], 'stats: non-finite readings and a clock going backwards add no time');
@@ -720,6 +747,22 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         r = await sampler.sample();
         eq([r.key, r.percent, r.gpus.length], ['card1', 99, 2], 'gpu fixture: the dGPU read once awake, and shown as the busier');
         GLib.spawn_command_line_sync(`rm -rf ${sys}`);
+    }
+    {
+        // The network session totals carried into a new sampler (the next
+        // enable): totals kept, and the counters' movement meanwhile counted.
+        const first = new NetworkSampler();
+        await first.sample();
+        await new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => r() ?? GLib.SOURCE_REMOVE));
+        await first.sample();
+        const saved = first.sessionTotals();
+        saved.rx += 1000;
+        saved.counters = saved.counters.map(c => ({ ...c, rxBytes: Math.max(0, c.rxBytes - 500) }));
+        const second = new NetworkSampler();
+        second.restoreSession(saved);
+        await second.sample();
+        const carried = second.sessionTotals();
+        ok(carried.rx >= saved.rx + (saved.counters.length > 0 ? 500 : 0), `network session: carried ${carried.rx} after restoring ${saved.rx} (${saved.counters.length} interfaces)`);
     }
     {
         // Two batteries in a sysfs fixture, read through the sampler.
