@@ -238,11 +238,20 @@ function checkTheme(rp, light, label) {
 
 // The overview is a grid: every visible card has the same size, whatever it
 // has to say, and every bar sits on the same line of its card.
-function overviewGrid(rp, label) {
+// A grid that stays uneven is a bug; one that evens out within 3 s is a
+// first layout still running on a slow runner (seen once on CI: the CPU
+// card at 92 px on the first open), noted in the log.
+async function overviewGrid(rp, label) {
     const cards = Object.entries(rp._summaryCards).filter(([, card]) => card.box.visible);
     check(cards.length >= 6, `${label}: only ${cards.length} overview cards are visible`);
     const size = card => `${Math.round(card.box.width)}x${Math.round(card.box.height)}`;
-    const sizes = new Set(cards.map(([, card]) => size(card)));
+    let sizes = new Set(cards.map(([, card]) => size(card)));
+    let waited = 0;
+    for (; sizes.size > 1 && waited < 3000; waited += 250) {
+        await sleep(250);
+        sizes = new Set(cards.map(([, card]) => size(card)));
+    }
+    if (waited > 0 && sizes.size === 1) console.log(`RP-UITEST ${label}: overview cards evened out after ${waited} ms`);
     check(sizes.size === 1, `${label}: overview cards differ in size (${cards.map(([key, card]) => `${key} ${size(card)}`).join(', ')})`);
     const barLine = card => Math.round(card.pbar.get_transformed_position()[1] - card.box.get_transformed_position()[1]);
     const lines = new Set(cards.map(([, card]) => barLine(card)));
@@ -284,7 +293,7 @@ async function cycleTabs(rp, pass, tag = null) {
         rp._poll();
         await sleep(400);
         if (tag) await shot(`${tag}-${tab}`);
-        if (tab === 'overview') overviewGrid(rp, `pass ${pass}${tag ? ` ${tag}` : ''}`);
+        if (tab === 'overview') await overviewGrid(rp, `pass ${pass}${tag ? ` ${tag}` : ''}`);
         if (tab === 'gpu' && rp._lastGpu?.present) {
             const placeholders = gpuPlaceholders(rp);
             check(placeholders.length === 0, `pass ${pass}: the GPU page shows placeholders (${placeholders.join(' | ')})`);
