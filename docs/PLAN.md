@@ -845,6 +845,31 @@ The 10-minute soak's RSS slope fails intermittently (0.48–0.72 MB/min) while 3
   2. The current code must pass it three times in a row.
   3. Only then does the soak join CI on `master`.
 
+#### State (branch `memory-check`, 2026-10-19)
+
+Built:
+- **Heap census** (`tests/overhead-driver`): after a full collection (`System.gc()`) the soak dumps the shell's JavaScript heap (`System.dumpHeap`) and counts live cells by kind (Object, Array, Function, string, shape, ...) with `awk` in another process. The dump runs to tens of MB, so the shell does not parse it, and the file is deleted at once.
+  - There are three censuses in the steady phase: after a quarter of the soak (lazy pages and caches are built by then), at 5/8, and at the end.
+  - A kind fails when it grows by more than 40 cells per 100 polls in both halves. A cache that fills once grows in one half only.
+- **RSS** stays as a sanity bound only: a Theil–Sen slope (the median of pairwise slopes) over the second half, limit 0.5 MB/min.
+- **Soak:** 20 minutes by default (was 10). `./scripts/dev.sh test-soak` runs the soak alone (no CPU windows, so it needs no quiet machine and soaks can run side by side), and `RP_SOAK_LEAK=1` makes the driver keep one small object per reading, as a leak would. The planted leak lives in the driver: no test switch in the extension.
+- **`test-compat`** runs a chosen test list (`RP_COMPAT_TESTS="test-soak 1200"`), passes `RP_SOAK_LEAK` into the container, and prints each test's reported figures into its own log (so CI shows them).
+- **CI:** a "Memory soak" job on GNOME 50, for pushes to `master` and manual runs.
+
+Proof (GNOME 50 containers on the owner's laptop, four soaks side by side):
+
+| Soak | Objects (census 1 → 2 → 3) | Growth per 100 polls (halves) | Other kinds | RSS slope (2nd half) | Result |
+|---|---|---|---|---|---|
+| normal 1 | 3,790 → 3,817 → 3,853 | Object +6 / +8 | within ±8 | 0.007 MB/min | pass |
+| normal 2 | 3,793 → 3,820 → 3,856 | Object +6 / +8 | within ±8 | 0.285 MB/min | pass |
+| normal 3 | 3,792 → 3,819 → 3,855 | Object +6 / +8 | within ±8 | 0.257 MB/min | pass |
+| planted leak | 4,170 → 4,761 → 5,361 | **Object +129 / +131** | within ±6 | 0.293 MB/min | **fails, as it must** |
+
+- The planted leak (+130) is about three times the threshold (40), and the normal growth (+8) a fifth of it.
+- RSS did not see the leak (0.293 MB/min, under the bound): it cannot be the leak check.
+- CI run 39210040714: the Memory soak passed on a GitHub runner (21½ minutes), and GNOME 46–50 passed.
+- The normal soaks grow by a small, identical +6 to +8 objects per 100 polls. A 1-hour soak to tell a cache that fills up from a very slow leak was still running at the pause (`RP_COMPAT_TESTS="test-soak 3600" ./scripts/dev.sh test-compat 50`); its result is not recorded yet.
+
 ### Area 3: translations
 
 The interface is English only, and no file uses gettext.
@@ -896,3 +921,17 @@ The interface is English only, and no file uses gettext.
 3. **Settings export, import and reset:**
    - a "Backup" group in Settings: export to a JSON file, import with validation against the schema (unknown keys and bad values rejected and listed), and reset all with a confirmation;
    - proof: a prefs-check round trip, a rejected malformed file, and reset restoring the defaults.
+
+## Paused (2026-10-19)
+
+The owner's usage limit was reached. Where everything stands:
+
+| Area | Branch | State | To resume |
+|---|---|---|---|
+| 1 CI | merged | done | |
+| 2 Accessibility | merged | done | |
+| 5 Memory check | `memory-check` (pushed) | built and proven (3 soaks pass, planted leak caught, CI green incl. the soak job); 1-hour soak result missing | rerun the 1-hour soak; if the +6–8 objects per 100 polls levels off, merge (fast-forward) into master and push |
+| 3 Translations | `translations` (pushed, on master before area 5) | built and proven (test-i18n, mutations); not yet in CI | rebase onto master after area 5; add `test-i18n` to test-compat's default list; push; dispatch CI (the images now need gettext and glibc-langpack-en); merge |
+| 4 extensions.gnome.org | `ego-ready` (pushed, on `translations`) | checklist done; fixes made (module state reset, logOnce, clipboard declared, commands instead of pkexec, test-zip) | rebase; add `test-zip` to the CI list; run the full UI test and prefs-check on the new Troubleshooting rows; merge |
+| 6 Several batteries / GPUs | `multi-device` (pushed, on `ego-ready`) | GPU sampler rewritten (every card, sleeping cards not read or woken, busiest shown with hysteresis), unit tests with a sysfs fixture (407 pass); not done: the GPU page's "All GPUs" card, the tooltip and alerts over every GPU, batteries | finish the GPU UI and the batteries (UPower DisplayDevice for the top bar, a row per battery), UI tests with injected readings |
+| 7 Smaller items | — | not started | |

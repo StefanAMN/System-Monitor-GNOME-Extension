@@ -567,6 +567,8 @@ cmd_test_compat() {
                 fi
                 failed=1
             fi
+            # Figures the test reported (soak, overhead), for the CI log.
+            sed 's/\x1b\[[0-9;]*m//g' "$art.log" | grep -E '^  [a-z]' | sed "s/^/  GNOME Shell $v $name: /" || true
             # Empty unless the test failed.
             if [ -z "$(ls -A "$art")" ]; then rmdir "$art"; fi
         done
