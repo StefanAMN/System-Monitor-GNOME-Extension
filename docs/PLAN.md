@@ -889,6 +889,36 @@ The interface is English only, and no file uses gettext.
 - **Proof:** a pseudo-language that wraps every translated string in markers is installed in the sandbox. The UI test reads every visible label in the panel and window and fails on any text without the markers (an untranslated string). Screenshots in a real translation are also checked.
 - **Decision needed:** which language(s) first.
 
+#### State (branch `translations`, 2026-10-19)
+
+The owner's machine runs in English (`LANG=en_US.UTF-8`, no `LANGUAGE`), so no language was guessed. What ships is everything a translation needs, and no translation yet.
+
+Built:
+- **Domain:** `gettext-domain: resource-pulse` in metadata. `ExtensionBase` binds it to the extension's `locale/` on construction (same code on GNOME 46 and 50, read from the shells' sources).
+- **`lib/common/i18n.js`:** `_`, `ngettext`, `N_`, `fill(template, values)` for named placeholders, and `translated(table)` for tables read many times. The extension (`enable()`) and the preferences window (`fillPreferencesWindow`) install the bound gettext there; the unit tests get the English pass-through.
+  - `translated()` is used only for pure label tables. Tables that mix ids and labels (`ALERTS`, the settings model) are marked with `N_()` and translated where read: a proxy would also have passed choice values through gettext, and `download` is a message (spoken network text), so a translation would have rewritten a stored setting.
+- **About 400 messages**, from the top bar's values, tooltips and accessible names through every panel page, alerts, notifications, the End bar, to the whole preferences window, diagnostics and the copied report.
+  - Sentences with values use named placeholders, so a translation can reorder them; plurals use `ngettext`; units stay symbols.
+  - "n/a" became `na()`, because the top bar's width reservation compares against it.
+  - Thermal sensor labels: whether a sensor is the package is now decided from the kernel's names, not from the (now translated) label.
+- **Tooling:** `po/resource-pulse.pot` comes from `./scripts/dev.sh pot` (xgettext; keywords `_`, `N_`, `ngettext:1,2`; translator comments). `po/*.po` are compiled into `src/locale` (ignored by git) by every dev/test command, and `pack` builds them with `--podir`. README says how to add a language.
+- **Test images** gain `gettext` and `glibc-langpack-en`: `LANGUAGE` is ignored under C, and under C.UTF-8 too in current glibc (measured: no lookup until `en_US.UTF-8`).
+
+Proof: `./scripts/dev.sh test-i18n`
+1. `tests/i18n/untranslated.mjs` scans the sources for literal text in the places that show it (`text:`, `label:`, `title:`, `.text =`, `_detailRow(`, ...) not wrapped in `_()` / `N_()`. It found the CPU page's "Core n" and an internal app label (which is exempt, with the reason on the line).
+2. The committed template must match the sources: change text, run `pot`.
+3. **Pseudo-language:** every message wrapped in ⟦ ⟧ (msgen + msgfilter), the shell run with `LANG=en_US.UTF-8 LANGUAGE=xx`.
+   - The UI driver reads every visible label and accessible name in the top bar, its tooltips, the alert text and all 9 panel pages, and fails on words outside the markers that are not data (collector strings: process, sensor, CPU and GPU names...).
+   - prefs-check then builds the window as the panel opens it (three pages, fixture history) and checks every shown label, tooltip and dropdown choice.
+   - Found and fixed: the detail pages' titles (built by capitalising the tab id) and the battery chart's legend.
+   - Result: 230 panel labels over 9 pages and 151 window texts (68 Settings, 62 Tracking, 21 Diagnostics), all translated.
+4. Mutations, each caught:
+   - `'Uptime'` unwrapped fails the scan (`overview.js:662: Uptime`);
+   - the switch rows' titles read without `_()` fail the pseudo-language run, naming each ("'Compact (icons only)'", "'Tooltips'", ...).
+5. The English UI test still passes; unit tests: 393, including the helpers.
+
+Not done: a real translation (none asked for), and screenshots in one.
+
 ### Area 4: ready for extensions.gnome.org
 
 - **Audit:** go through the current review guidelines item by item (fetched at the time, since they change) and fix what does not comply. Likely items:
