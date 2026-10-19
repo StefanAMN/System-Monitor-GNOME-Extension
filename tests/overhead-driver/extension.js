@@ -288,7 +288,15 @@ async function soak() {
     ext._indicator.menu.open();
     const t0 = GLib.get_monotonic_time();
     const c0 = cpuTicks();
-    const samples = [];
+    // Samples go into arrays allocated now: a record kept per step would
+    // itself grow the heap the census counts (one object every 15 s, the
+    // +7 objects per 100 polls the first soaks measured; a soak with the
+    // extension disabled stays flat).
+    const steps = Math.ceil(SOAK_S / 15);
+    const samples = {
+        n: 0, t: new Float64Array(steps), rss: new Float64Array(steps),
+        fds: new Int32Array(steps), actors: new Int32Array(steps), sparks: new Int32Array(steps),
+    };
     // Heap censuses: after a quarter (lazy pages and caches are built by
     // then), half way through the rest, and at the end.
     const censusAt = [SOAK_S / 4, SOAK_S * 5 / 8, SOAK_S];
@@ -302,13 +310,12 @@ async function soak() {
         System.gc();
         await sleep(200);
         const t = (GLib.get_monotonic_time() - t0) / 1e6;
-        samples.push({
-            t: t / 60,
-            rss: rssMb(),
-            fds: fdCount(),
-            actors: actorCount(ext._indicator.menu.box),
-            sparks: ext._sparklines.length
-        });
+        const i = samples.n++;
+        samples.t[i] = t / 60;
+        samples.rss[i] = rssMb();
+        samples.fds[i] = fdCount();
+        samples.actors[i] = actorCount(ext._indicator.menu.box);
+        samples.sparks[i] = ext._sparklines.length;
         if (censuses.length < censusAt.length && elapsed + 15 >= censusAt[censuses.length])
             censuses.push({ t, cells: await heapCensus() });
     }
@@ -320,12 +327,15 @@ async function soak() {
 
     // RSS after the first half: the collector and the allocator settle
     // for minutes after the pages are built.
-    const steady = samples.filter(s => s.t * 60 >= SOAK_S / 2);
+    const all = Array.from({ length: samples.n }, (_x, i) => ({
+        t: samples.t[i], rss: samples.rss[i], fds: samples.fds[i], actors: samples.actors[i], sparks: samples.sparks[i],
+    }));
+    const steady = all.filter(s => s.t * 60 >= SOAK_S / 2);
     const first = steady[0];
     const last = steady[steady.length - 1];
     const rssSlope = medianSlope(steady.map(s => ({ t: s.t, v: s.rss })));
     report(`soak ${SOAK_S}s @1s interval, menu open, tabs cycling: shell CPU ${cpu.toFixed(2)}% (incl. idle shell)${SOAK_LEAK ? `, planted leak of ${kept.length} objects` : ''}`);
-    report(`soak RSS ${samples[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, slope after the first half ${rssSlope.toFixed(3)} MB/min (median of pairs)`);
+    report(`soak RSS ${all[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, slope after the first half ${rssSlope.toFixed(3)} MB/min (median of pairs)`);
     report(`soak fds ${first.fds} -> ${last.fds}, menu actors ${first.actors} -> ${last.actors}, sparklines ${first.sparks} -> ${last.sparks}`);
 
     // Cells per 100 polls (one poll a second) in each half; a leak grows in both.
