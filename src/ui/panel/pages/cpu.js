@@ -92,9 +92,12 @@ export class CpuPage {
         this._addClickAnimations(showAllBtn);
         procHead.add_child(showAllBtn);
         procCard.add_child(procHead);
+        const cpuSearch = this._buildProcFilter('cpu');
+        procCard.add_child(cpuSearch.entry);
 
         this._procList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
         procCard.add_child(this._procList);
+        procCard.add_child(cpuSearch.noMatch);
         this._procEnd = this._buildEndBar();
         procCard.add_child(this._procEnd.box);
         box.add_child(procCard);

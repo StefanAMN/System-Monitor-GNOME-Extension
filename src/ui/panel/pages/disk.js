@@ -38,8 +38,11 @@ export class DiskPage {
         // Top Disk Usage: read + write per process, sampled only on this page.
         const ioCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
         ioCard.add_child(new St.Label({ text: _('Top Disk Usage'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 8px;' }));
+        const dskSearch = this._buildProcFilter('disk');
+        ioCard.add_child(dskSearch.entry);
         this._dskProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
         ioCard.add_child(this._dskProcList);
+        ioCard.add_child(dskSearch.noMatch);
         this._dskProcIdle = new St.Label({ text: _('None of your processes is reading or writing right now.'), style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', visible: false });
         this._dskProcIdle.clutter_text.line_wrap = true;
         ioCard.add_child(this._dskProcIdle);

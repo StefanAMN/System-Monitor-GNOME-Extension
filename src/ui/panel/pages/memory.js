@@ -42,8 +42,11 @@ export class MemoryPage {
         this._addClickAnimations(memShowAllBtn);
         memProcHead.add_child(memShowAllBtn);
         memProcCard.add_child(memProcHead);
+        const memSearch = this._buildProcFilter('memory');
+        memProcCard.add_child(memSearch.entry);
         this._memProcList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
         memProcCard.add_child(this._memProcList);
+        memProcCard.add_child(memSearch.noMatch);
         this._memProcEnd = this._buildEndBar();
         memProcCard.add_child(this._memProcEnd.box);
         box.add_child(memProcCard);

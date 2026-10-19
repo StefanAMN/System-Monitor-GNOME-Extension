@@ -255,6 +255,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._hideTooltip();
                 this._poll();
             } else {
+                this._clearProcSearch();
                 if (this._stageReleaseId) {
                     global.stage.disconnect(this._stageReleaseId);
                     this._stageReleaseId = null;

@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-19 12:29+0300\n"
+"POT-Creation-Date: 2026-10-19 13:32+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/extension.js:174
+#: src/extension.js:185
 msgid "Resource Pulse panel"
 msgstr ""
 
@@ -116,6 +116,36 @@ msgstr ""
 msgid "Message bus"
 msgstr ""
 
+#: src/lib/common/backup.js:49
+msgid "This is not a settings file (it is not JSON)."
+msgstr ""
+
+#: src/lib/common/backup.js:52
+msgid "This is not a Resource Pulse settings file."
+msgstr ""
+
+#: src/lib/common/backup.js:54
+msgid ""
+"This settings file has version {version}, which this version of the "
+"extension cannot read."
+msgstr ""
+
+#: src/lib/common/backup.js:61
+msgid "not a setting of this version"
+msgstr ""
+
+#: src/lib/common/backup.js:62
+msgid "wrong kind of value"
+msgstr ""
+
+#: src/lib/common/backup.js:63
+msgid "outside {min}–{max}"
+msgstr ""
+
+#: src/lib/common/backup.js:64
+msgid "not one of the choices"
+msgstr ""
+
 #. Translators: an uptime, kept short: days and hours, hours and minutes, minutes.
 #: src/lib/common/format.js:46
 msgid "{d}d {h}h"
@@ -195,7 +225,7 @@ msgstr ""
 
 #: src/lib/common/present.js:66 src/lib/common/settingsmodel.js:22
 #: src/lib/common/settingsmodel.js:122 src/ui/panel/constants.js:20
-#: src/ui/panel/constants.js:49 src/ui/panel/dashboard.js:374
+#: src/ui/panel/constants.js:51 src/ui/panel/dashboard.js:374
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:625
 msgid "GPU"
 msgstr ""
@@ -276,7 +306,7 @@ msgid ""
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:107
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:46
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:48
 #: src/ui/panel/details.js:12 src/ui/panel/details.js:37
 #: src/ui/panel/overview.js:618 src/ui/panel/topbar.js:211
 msgid "CPU"
@@ -284,7 +314,7 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:91
 #: src/lib/common/settingsmodel.js:112 src/ui/panel/constants.js:19
-#: src/ui/panel/constants.js:47 src/ui/panel/details.js:12
+#: src/ui/panel/constants.js:49 src/ui/panel/details.js:12
 #: src/ui/panel/overview.js:619
 msgid "Memory"
 msgstr ""
@@ -408,8 +438,8 @@ msgid ""
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:86 src/lib/common/settingsmodel.js:117
-#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:48
-#: src/ui/panel/constants.js:71 src/ui/panel/pages/gpu.js:55
+#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:50
+#: src/ui/panel/constants.js:73 src/ui/panel/pages/gpu.js:55
 #: src/ui/panel/pages/gpu.js:117
 msgid "Temperature"
 msgstr ""
@@ -668,75 +698,75 @@ msgstr ""
 msgid "{process} using {cores} cores"
 msgstr ""
 
-#: src/ui/panel/constants.js:46
+#: src/ui/panel/constants.js:48
 msgid "CPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:47
+#: src/ui/panel/constants.js:49
 msgid "Memory is almost full"
 msgstr ""
 
-#: src/ui/panel/constants.js:48
+#: src/ui/panel/constants.js:50
 msgid "The processor is hot"
 msgstr ""
 
-#: src/ui/panel/constants.js:49
+#: src/ui/panel/constants.js:51
 msgid "GPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:50
+#: src/ui/panel/constants.js:52
 msgid "Disk /"
 msgstr ""
 
-#: src/ui/panel/constants.js:50
+#: src/ui/panel/constants.js:52
 msgid "Disk space is running out"
 msgstr ""
 
-#: src/ui/panel/constants.js:51
+#: src/ui/panel/constants.js:53
 msgid "The system is short of memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:51 src/ui/panel/pages/memory.js:28
+#: src/ui/panel/constants.js:53 src/ui/panel/pages/memory.js:28
 msgid "Waiting for memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:69
+#: src/ui/panel/constants.js:71
 msgid "Battery charge"
 msgstr ""
 
-#: src/ui/panel/constants.js:69
+#: src/ui/panel/constants.js:71
 msgid "Battery charge rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:69
+#: src/ui/panel/constants.js:71
 msgid "CPU usage"
 msgstr ""
 
-#: src/ui/panel/constants.js:69
+#: src/ui/panel/constants.js:71
 msgid "Memory use"
 msgstr ""
 
-#: src/ui/panel/constants.js:69
+#: src/ui/panel/constants.js:71
 msgid "Power draw"
 msgstr ""
 
-#: src/ui/panel/constants.js:70
+#: src/ui/panel/constants.js:72
 msgid "Disk read rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:70
+#: src/ui/panel/constants.js:72
 msgid "Disk write rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:70
+#: src/ui/panel/constants.js:72
 msgid "Download rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:70
+#: src/ui/panel/constants.js:72
 msgid "Upload rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:71
+#: src/ui/panel/constants.js:73
 msgid "GPU usage"
 msgstr ""
 
@@ -823,6 +853,10 @@ msgid "Driver: {driver}"
 msgstr ""
 
 #: src/ui/panel/dashboard.js:487
+msgid "No process matches “{text}”."
+msgstr ""
+
+#: src/ui/panel/dashboard.js:494
 msgid ""
 "Your processes only: {n} process of another user (a system service) cannot "
 "be read without administrator rights."
@@ -837,7 +871,7 @@ msgid "Back to the overview"
 msgstr ""
 
 #: src/ui/panel/details.js:41 src/ui/panel/overview.js:591
-#: src/ui/prefs/window.js:43
+#: src/ui/prefs/window.js:44
 msgid "Settings"
 msgstr ""
 
@@ -981,7 +1015,7 @@ msgstr ""
 msgid "Show all processes in System Monitor"
 msgstr ""
 
-#: src/ui/panel/pages/cpu.js:115
+#: src/ui/panel/pages/cpu.js:118
 msgid "Core {n}"
 msgstr ""
 
@@ -1013,11 +1047,11 @@ msgstr ""
 msgid "Top Disk Usage"
 msgstr ""
 
-#: src/ui/panel/pages/disk.js:43
+#: src/ui/panel/pages/disk.js:46
 msgid "None of your processes is reading or writing right now."
 msgstr ""
 
-#: src/ui/panel/pages/disk.js:55
+#: src/ui/panel/pages/disk.js:58
 msgid "Filesystem Mounts"
 msgstr ""
 
@@ -1083,11 +1117,11 @@ msgid ""
 "sysfs (amdgpu), or Intel DRM driver (i915/xe)."
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:165
+#: src/ui/panel/pages/gpu.js:167
 msgid "{gpu} (shown above)"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:166
+#: src/ui/panel/pages/gpu.js:168
 msgid "asleep"
 msgstr ""
 
@@ -1195,7 +1229,7 @@ msgstr ""
 msgid "{s}s"
 msgstr ""
 
-#: src/ui/panel/polling.js:461
+#: src/ui/panel/polling.js:465
 msgid "{chart} over time"
 msgstr ""
 
@@ -1211,71 +1245,80 @@ msgstr ""
 msgid "{process}, {value} memory, opens System Monitor"
 msgstr ""
 
-#: src/ui/panel/processes.js:44 src/ui/panel/processes.js:85
+#: src/ui/panel/processes.js:44
+msgid "Filter by name"
+msgstr ""
+
+#: src/ui/panel/processes.js:45
+msgid "Filter the processes by name"
+msgstr ""
+
+#: src/ui/panel/processes.js:78 src/ui/panel/processes.js:119
 msgid "End"
 msgstr ""
 
-#: src/ui/panel/processes.js:45 src/ui/panel/processes.js:85
-#: src/ui/panel/processes.js:117 src/ui/prefs/tracking.js:266
+#: src/ui/panel/processes.js:79 src/ui/panel/processes.js:119
+#: src/ui/panel/processes.js:151 src/ui/prefs/backup.js:141
+#: src/ui/prefs/tracking.js:266
 msgid "Cancel"
 msgstr ""
 
-#: src/ui/panel/processes.js:83
+#: src/ui/panel/processes.js:117
 msgid "End all {n} {process} processes? Unsaved work in them may be lost."
 msgstr ""
 
-#: src/ui/panel/processes.js:84
+#: src/ui/panel/processes.js:118
 msgid "End {process}? Unsaved work in it may be lost."
 msgstr ""
 
-#: src/ui/panel/processes.js:98
+#: src/ui/panel/processes.js:132
 msgid "{process} belongs to another user and cannot be ended from here."
 msgstr ""
 
-#: src/ui/panel/processes.js:99 src/ui/panel/processes.js:121
+#: src/ui/panel/processes.js:133 src/ui/panel/processes.js:155
 msgid "Close"
 msgstr ""
 
-#: src/ui/panel/processes.js:99
+#: src/ui/panel/processes.js:133
 msgid "{process} has already exited."
 msgstr ""
 
-#: src/ui/panel/processes.js:103
+#: src/ui/panel/processes.js:137
 msgid "Asking {process} to quit…"
 msgstr ""
 
-#: src/ui/panel/processes.js:103
+#: src/ui/panel/processes.js:137
 msgid "Forcing {process} to quit…"
 msgstr ""
 
-#: src/ui/panel/processes.js:111
+#: src/ui/panel/processes.js:145
 msgid "{process} ended."
 msgstr ""
 
-#: src/ui/panel/processes.js:115
+#: src/ui/panel/processes.js:149
 msgid ""
 "{left} of {all} {process} did not quit{error}. Force quit loses unsaved work."
 msgstr ""
 
-#: src/ui/panel/processes.js:117
+#: src/ui/panel/processes.js:151
 msgid "Force quit"
 msgstr ""
 
-#: src/ui/panel/processes.js:121
+#: src/ui/panel/processes.js:155
 msgid "{left} {process} could not be ended{error}."
 msgstr ""
 
-#: src/ui/panel/processes.js:168
+#: src/ui/panel/processes.js:202
 msgid "End process"
 msgstr ""
 
-#: src/ui/panel/processes.js:226
+#: src/ui/panel/processes.js:260
 msgid "{process}, {n} process"
 msgid_plural "{process}, {n} processes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/panel/processes.js:233
+#: src/ui/panel/processes.js:267
 msgid "End {process}"
 msgstr ""
 
@@ -1361,6 +1404,100 @@ msgstr ""
 
 #: src/ui/panel/widgets.js:402
 msgid "{average} avg, {peak} peak"
+msgstr ""
+
+#: src/ui/prefs/backup.js:77
+msgid "Restore the settings"
+msgstr ""
+
+#: src/ui/prefs/backup.js:77
+msgid "Save the settings"
+msgstr ""
+
+#: src/ui/prefs/backup.js:95
+msgid "Backup"
+msgstr ""
+
+#: src/ui/prefs/backup.js:95
+msgid "Keep the settings in a file, or move them to another computer."
+msgstr ""
+
+#: src/ui/prefs/backup.js:98
+msgid "Save to a file"
+msgstr ""
+
+#: src/ui/prefs/backup.js:99
+msgid "Restore from a file"
+msgstr ""
+
+#: src/ui/prefs/backup.js:99
+msgid "Settings the file does not have keep their values."
+msgstr ""
+
+#: src/ui/prefs/backup.js:100
+msgid ""
+"Back to how they were when the extension was installed. Battery history is "
+"kept."
+msgstr ""
+
+#: src/ui/prefs/backup.js:100
+msgid "Reset all settings"
+msgstr ""
+
+#: src/ui/prefs/backup.js:102
+msgid "Save…"
+msgstr ""
+
+#: src/ui/prefs/backup.js:103
+msgid "Open…"
+msgstr ""
+
+#: src/ui/prefs/backup.js:104
+msgid "Reset…"
+msgstr ""
+
+#: src/ui/prefs/backup.js:119
+msgid "Saved to {path}."
+msgstr ""
+
+#: src/ui/prefs/backup.js:121
+msgid "Could not save: {error}"
+msgstr ""
+
+#: src/ui/prefs/backup.js:129
+msgid "{key} ({reason})"
+msgstr ""
+
+#: src/ui/prefs/backup.js:130
+msgid "Restored {n} setting."
+msgid_plural "Restored {n} settings."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/prefs/backup.js:131
+msgid "Left out: {settings}."
+msgstr ""
+
+#: src/ui/prefs/backup.js:133
+msgid "Could not restore: {error}"
+msgstr ""
+
+#: src/ui/prefs/backup.js:138
+msgid "Reset all settings?"
+msgstr ""
+
+#: src/ui/prefs/backup.js:139
+msgid ""
+"Every setting goes back to its default: pinned metrics, units, alerts, the "
+"panel's size. Battery history is kept."
+msgstr ""
+
+#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:143
+msgid "Reset"
+msgstr ""
+
+#: src/ui/prefs/backup.js:147
+msgid "All settings were reset."
 msgstr ""
 
 #: src/ui/prefs/diagnostics.js:17
@@ -1501,10 +1638,6 @@ msgstr ""
 
 #: src/ui/prefs/rows.js:142
 msgid "Size"
-msgstr ""
-
-#: src/ui/prefs/rows.js:143
-msgid "Reset"
 msgstr ""
 
 #: src/ui/prefs/rows.js:156
@@ -1796,6 +1929,6 @@ msgstr ""
 msgid "Tracking is on; figures appear as time passes."
 msgstr ""
 
-#: src/ui/prefs/window.js:65
+#: src/ui/prefs/window.js:67
 msgid "Back to the panel"
 msgstr ""

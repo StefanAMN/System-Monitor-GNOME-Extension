@@ -472,14 +472,21 @@ export class DashboardMethods {
         };
         if (this._menuOpen && lists[this._activeTab]) {
             const [list, widgetsKey] = lists[this._activeTab];
-            const fresh = data.procSort === this._activeTab && data.processes.length > 0;
-            // Disk: only processes that are reading or writing.
-            const rows = this._activeTab === 'disk' ? data.processes.filter(p => p.ioRate > 0) : data.processes;
+            // A search may match nothing, which is a result too.
+            const search = this._procSearch?.[this._activeTab];
+            const filter = search?.entry.text ?? '';
+            const fresh = data.procSort === this._activeTab && data.procFilter === filter && (data.processes.length > 0 || filter !== '');
+            // Disk: only processes that are reading or writing, unless searched for.
+            const rows = this._activeTab === 'disk' && !filter ? data.processes.filter(p => p.ioRate > 0) : data.processes;
             if (list) {
                 if (fresh) this._renderProcessListUI(list, widgetsKey, rows, this._activeTab);
                 list.opacity = fresh ? 255 : 110;
             }
-            if (this._activeTab === 'disk' && this._dskProcIdle && fresh) this._dskProcIdle.visible = rows.length === 0;
+            if (search && fresh) {
+                search.noMatch.visible = filter !== '' && rows.length === 0;
+                if (search.noMatch.visible) search.noMatch.text = fill(_('No process matches “{text}”.'), { text: filter });
+            }
+            if (this._activeTab === 'disk' && this._dskProcIdle && fresh) this._dskProcIdle.visible = rows.length === 0 && !filter;
             if (this._activeTab === 'disk' && this._dskProcNote && fresh) {
                 // Unprivileged: other users' counters are not readable. Said, not hidden.
                 this._dskProcNote.visible = data.ioDenied > 0;

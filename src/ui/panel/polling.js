@@ -12,7 +12,7 @@ import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
 import { _, fill } from '../../lib/common/i18n.js';
 import { logOnce } from '../../lib/common/utils.js';
-import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
+import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, SEARCH_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
 
 export class PollingMethods {
     /** Pinned metrics as stored, minus unknown keys and duplicates. */
@@ -404,13 +404,16 @@ export class PollingMethods {
 
             let processes = [];
             let procSort = null;
+            let procFilter = '';
             let procWarmingUp = false;
             let ioDenied = 0;
             if (isDetailedCpu || isDetailedMem || isDetailedDsk) {
                 // A baseline older than a couple of intervals (the menu sat
                 // on another tab) would turn the rates into long averages.
+                // The open page's search, if any: matches instead of the busiest five.
+                const filter = this._procFilters?.[isDetailedMem ? 'memory' : isDetailedDsk ? 'disk' : 'cpu'] ?? '';
                 const procResult = await this._guarded('processes', deadline,
-                    () => this._proc.sample(mem.total, isDetailedMem, PROCESS_ROWS, 2.5 * this._sampleSeconds, { io: isDetailedDsk }), null);
+                    () => this._proc.sample(mem.total, isDetailedMem, filter ? SEARCH_ROWS : PROCESS_ROWS, 2.5 * this._sampleSeconds, { io: isDetailedDsk, filter }), null);
                 if (gen !== this._gen) return;
                 // null: the sampler was destroyed or is still reading.
                 // CPU and disk rates need two readings; memory is valid from the first.
@@ -418,6 +421,7 @@ export class PollingMethods {
                 if (procResult && !procWarmingUp) {
                     processes = procResult.top;
                     procSort = isDetailedMem ? 'memory' : isDetailedDsk ? 'disk' : 'cpu';
+                    procFilter = filter;
                     ioDenied = procResult.ioDenied;
                 }
             } else if (!isOpen) {
@@ -427,7 +431,7 @@ export class PollingMethods {
 
             if (need.net) this._countNetUsage(net, now);
 
-            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, processes, procSort, ioDenied };
+            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, processes, procSort, procFilter, ioDenied };
             if (tick || this._recordPending) {
                 this._recordHistory(data, shown, now);
                 this._recordLong(data, need, now);
