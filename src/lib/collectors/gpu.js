@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import { readFileAsync, listDirAsync, runSubprocess, noteReadError } from '../common/utils.js';
+import { readFileAsync, listDirAsync, runSubprocess, noteReadError, logOnce } from '../common/utils.js';
 import { _ } from '../common/i18n.js';
 
 /**
@@ -246,7 +246,7 @@ export class GpuSampler {
                     '--query-gpu=name,driver_version,utilization.gpu,utilization.memory,temperature.gpu,memory.used,memory.total,power.draw,clocks.current.graphics,clocks.max.graphics,fan.speed',
                     '--format=csv,noheader,nounits'
                 ], { timeoutMs: NVIDIA_SMI_TIMEOUT_MS, handle: this._smi });
-                if (!res.success && res.stderr) console.warn(`GPU sample: ${res.stderr}`);
+                if (!res.success && res.stderr) logOnce(`GPU sample: ${res.stderr}`);
 
                 const parsed = res.success ? parseNvidiaSmi(res.stdout) : null;
                 if (parsed) {
@@ -415,7 +415,7 @@ export class GpuSampler {
                 }
             }
         } catch (e) {
-            console.error(`Error in GPU sample: ${e.message}`);
+            logOnce(`Error in GPU sample: ${e.message}`, 'error');
         }
 
         return {

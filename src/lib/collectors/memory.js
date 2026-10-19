@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import { readFileAsync, getSysconf, noteReadError } from '../common/utils.js';
+import { readFileAsync, getSysconf, noteReadError, logOnce } from '../common/utils.js';
 
 export class MemorySampler {
     constructor() {
@@ -102,7 +102,7 @@ export class MemorySampler {
                 swapOutRate: swapOutRate
             };
         } catch (e) {
-            console.error(`Error in Memory sample: ${e.message}`);
+            logOnce(`Error in Memory sample: ${e.message}`, 'error');
             return {
                 total: 0,
                 used: 0,

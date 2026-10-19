@@ -24,6 +24,32 @@ export function readFileAsync(path) {
 }
 
 const reportedReadErrors = new Set();
+const loggedOnce = new Set();
+
+/**
+ * Log `message` the first time only: for an error the polling loop can hit
+ * on every poll (a collector failing the same way), which would otherwise
+ * flood the journal. Bounded like noteReadError.
+ * @param {string} message
+ * @param {'warn'|'error'} [level]
+ * @returns {boolean} true when it was logged
+ */
+export function logOnce(message, level = 'warn') {
+    if (loggedOnce.has(message) || loggedOnce.size >= 200) return false;
+    loggedOnce.add(message);
+    console[level](message);
+    return true;
+}
+
+/**
+ * Forget what this module logged and cached, so nothing found in one session
+ * outlives disable() (the review rules: dynamic module data is cleared there).
+ */
+export function resetUtils() {
+    reportedReadErrors.clear();
+    loggedOnce.clear();
+    sysconfPromise = null;
+}
 
 /**
  * For the catch block around an optional read. A file that is simply not

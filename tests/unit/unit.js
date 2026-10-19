@@ -10,7 +10,7 @@ import { RunningStats } from '../../src/lib/engine/stats.js';
 import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned } from '../../src/lib/common/settingsmodel.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses } from '../../src/lib/collectors/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
-import { listDirAsync, runSubprocess, readFileAsync, noteReadError } from '../../src/lib/common/utils.js';
+import { listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
 import { parseNetDev, counterDelta } from '../../src/lib/collectors/network.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../../src/lib/collectors/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../../src/lib/collectors/thermal.js';
@@ -28,7 +28,7 @@ import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/l
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth } from '../../src/lib/collectors/battery.js';
-import { _, N_, ngettext, fill, translated, setTranslations } from '../../src/lib/common/i18n.js';
+import { _, N_, ngettext, fill, translated, setTranslations, resetTranslations } from '../../src/lib/common/i18n.js';
 import { parseNvidiaSmi, parseAmdSclk, intelBusyFromRc6 } from '../../src/lib/collectors/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel, spokenValue } from '../../src/lib/common/present.js';
 
@@ -359,6 +359,17 @@ docker0: 1 2 3
         ['<Memory>', '<GPU usage is high>', '<Fan>', 3, true, '<Settings>', '<b>'], 'i18n: tables translated when read, nested ones once');
     setTranslations(str => str, (str, plural, n) => (n === 1 ? str : plural));
     eq([table.name, _('Settings')], ['Memory', 'Settings'], 'i18n: back to English');
+    setTranslations(str => `<${str}>`, (str, plural, n) => `<${n === 1 ? str : plural}>`);
+    resetTranslations();
+    eq([_('Settings'), ngettext('a', 'b', 2)], ['Settings', 'b'], 'i18n: disable() puts the English pass-through back');
+
+    // An error the polling loop meets on every poll is logged once, and
+    // again after disable() (resetUtils), not on every poll.
+    const once = [logOnce('unit test: repeated failure'), logOnce('unit test: repeated failure')];
+    resetUtils();
+    once.push(logOnce('unit test: repeated failure'));
+    eq(once, [true, false, true], 'logOnce: once per message, again after resetUtils');
+    resetUtils();
 
     eq([0, 500, 1000, 9.94 * 1000, 9.96 * 1000, 999.4 * 1000, 999.6 * 1000, 5 * 1000 ** 2, 2.5 * 1000 ** 3, NaN, -4].map(formatSpeedCompact),
         ['0.0 KB/s', '0.5 KB/s', '1.0 KB/s', '9.9 KB/s', '10 KB/s', '999 KB/s', '1.0 MB/s', '5.0 MB/s', '2.5 GB/s', '0.0 KB/s', '0.0 KB/s'],

@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-19 09:50+0300\n"
+"POT-Creation-Date: 2026-10-19 10:05+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/extension.js:172
+#: src/extension.js:174
 msgid "Resource Pulse panel"
 msgstr ""
 
@@ -128,7 +128,7 @@ msgid "{h}h {m}m"
 msgstr ""
 
 #. Translators: how much a chart shows, kept short: "2m", "60s".
-#: src/lib/common/format.js:48 src/ui/panel/polling.js:51
+#: src/lib/common/format.js:48 src/ui/panel/polling.js:52
 msgid "{m}m"
 msgstr ""
 
@@ -176,7 +176,7 @@ msgstr ""
 #: src/lib/common/present.js:45
 msgid ""
 "CPU energy counters are not readable.\n"
-"See \"Enable CPU Power Monitoring\" in settings."
+"Settings › Troubleshooting shows how to make them readable."
 msgstr ""
 
 #: src/lib/common/present.js:62
@@ -265,7 +265,7 @@ msgstr ""
 msgid "watts"
 msgstr ""
 
-#: src/lib/common/raplfix.js:23
+#: src/lib/common/raplfix.js:27
 msgid ""
 "Makes CPU energy counters readable by every local program (a known side "
 "channel). Undo by deleting {path}."
@@ -837,7 +837,7 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:58 src/ui/panel/polling.js:251
+#: src/ui/panel/details.js:58 src/ui/panel/polling.js:252
 msgid "live"
 msgstr ""
 
@@ -1167,11 +1167,11 @@ msgstr ""
 msgid "Fans"
 msgstr ""
 
-#: src/ui/panel/polling.js:51
+#: src/ui/panel/polling.js:52
 msgid "{s}s"
 msgstr ""
 
-#: src/ui/panel/polling.js:460
+#: src/ui/panel/polling.js:461
 msgid "{chart} over time"
 msgstr ""
 
@@ -1423,7 +1423,7 @@ msgid ""
 "up now. Advice about apps needs tracking to be on."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:94
+#: src/ui/prefs/diagnostics.js:94 src/ui/prefs/rows.js:174
 msgid "Check again"
 msgstr ""
 
@@ -1455,64 +1455,62 @@ msgstr ""
 msgid "The check failed"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:185
+#: src/ui/prefs/diagnostics.js:185 src/ui/prefs/rows.js:172
 msgid "Copied"
 msgstr ""
 
-#: src/ui/prefs/rows.js:17
+#: src/ui/prefs/rows.js:19
 msgid "Not pinned"
 msgstr ""
 
-#: src/ui/prefs/rows.js:17
+#: src/ui/prefs/rows.js:19
 msgid "Position {n} in the top bar"
 msgstr ""
 
-#: src/ui/prefs/rows.js:139
+#: src/ui/prefs/rows.js:141
 msgid "Drag a bottom corner of the panel to resize it."
 msgstr ""
 
-#: src/ui/prefs/rows.js:139
+#: src/ui/prefs/rows.js:141
 msgid "Panel"
 msgstr ""
 
-#: src/ui/prefs/rows.js:140
+#: src/ui/prefs/rows.js:142
 msgid "Size"
 msgstr ""
 
-#: src/ui/prefs/rows.js:141
+#: src/ui/prefs/rows.js:143
 msgid "Reset"
 msgstr ""
 
-#: src/ui/prefs/rows.js:154
+#: src/ui/prefs/rows.js:156
 msgid "Automatic"
 msgstr ""
 
-#: src/ui/prefs/rows.js:154
+#: src/ui/prefs/rows.js:156
 msgid "{width} × {height} pixels, set by dragging"
 msgstr ""
 
-#: src/ui/prefs/rows.js:160
+#: src/ui/prefs/rows.js:162
 msgid "Troubleshooting"
 msgstr ""
 
-#: src/ui/prefs/rows.js:163
+#: src/ui/prefs/rows.js:165
 msgid "CPU power is not readable"
 msgstr ""
 
-#: src/ui/prefs/rows.js:164
-msgid "Enabling it asks for an administrator password."
-msgstr ""
-
 #: src/ui/prefs/rows.js:166
-msgid "Enable"
+msgid ""
+"Run these two commands in a terminal to make it readable; they ask for your "
+"password."
 msgstr ""
 
-#: src/ui/prefs/rows.js:174
+#: src/ui/prefs/rows.js:168
+msgid "Copy commands"
+msgstr ""
+
+#: src/ui/prefs/rows.js:186
 msgid "CPU power is now readable"
-msgstr ""
-
-#: src/ui/prefs/rows.js:177 src/ui/prefs/rows.js:182
-msgid "Failed: {error}"
 msgstr ""
 
 #: src/ui/prefs/tracking.js:20

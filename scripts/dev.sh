@@ -357,6 +357,16 @@ cmd_test_ci() {
 
     local SANDBOX LOG
     make_sandbox
+    if [ "${RP_FROM_ZIP:-0}" = "1" ]; then
+        # The packed zip as a user installs it, instead of the source tree.
+        rm "$SANDBOX/data/gnome-shell/extensions/$UUID"
+        # Unpacked and moved within the sandbox: a move across filesystems
+        # fails for a directory ("Can't recursively copy directory").
+        mkdir -p "$SANDBOX/cache"
+        TMPDIR="$SANDBOX" XDG_CACHE_HOME="$SANDBOX/cache" XDG_DATA_HOME="$SANDBOX/data" \
+            gnome-extensions install --force "$REPO_DIR/$UUID.shell-extension.zip"
+        log_info "Installed from the zip: $(find "$SANDBOX/data/gnome-shell/extensions/$UUID" -type f | wc -l) files"
+    fi
 
     start_log_stream "$LOG" "$SANDBOX/session.log"
     XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" \
@@ -386,6 +396,13 @@ cmd_test_ci() {
         echo "$BAD" | head -n 40
         exit 1
     fi
+}
+
+# The packed zip, installed with gnome-extensions install (not the source
+# tree) into an isolated shell: it must load and run with a clean log.
+cmd_test_zip() {
+    cmd_pack
+    RP_FROM_ZIP=1 cmd_test_ci "${1:-8}"
 }
 
 # ------------------------------------------------------------------------------
@@ -622,7 +639,7 @@ cmd_test_compat() {
     fi
     local SUMMARY=() FAILS=() EXTRA=()
     # RP_COMPAT_TESTS="test-soak 1200" (comma-separated) runs other tests.
-    local TESTS=("test-unit" "test-headless 8" "test-ui" "test-i18n")
+    local TESTS=("test-unit" "test-headless 8" "test-ui" "test-i18n" "test-zip")
     if [ -n "${RP_COMPAT_TESTS:-}" ]; then IFS=',' read -r -a TESTS <<< "$RP_COMPAT_TESTS"; fi
     if [ "${RP_COMPAT_NO_BATTERY:-0}" = "1" ]; then
         EXTRA=(--tmpfs /sys/class/power_supply)
@@ -801,7 +818,7 @@ cmd_help() {
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Enable in an isolated headless shell for [sec] (default 5) and scan its log"
     echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
-    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless, test-ui and test-i18n on other GNOME Shell versions in containers (default 46-49; needs docker)"
+    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless, test-ui, test-i18n and test-zip on other GNOME Shell versions in containers (default 46-49; needs docker)"
     echo -e "  ${GREEN}lint${RESET}               Run ESLint (needs 'npm ci' once)"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
     echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 1200) for leaks"
@@ -810,6 +827,7 @@ cmd_help() {
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
     echo -e "  ${GREEN}pot${RESET}                Write po/resource-pulse.pot (the strings to translate) and update po/*.po"
     echo -e "  ${GREEN}test-i18n${RESET}          Every string on screen goes through gettext: source scan, template current, pseudo-language run"
+    echo -e "  ${GREEN}test-zip [sec]${RESET}     Pack, install the zip into an isolated shell (gnome-extensions install), enable it for [sec] (default 8) and scan its log"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
     echo -e "  ${GREEN}help${RESET}               Show this help message\n"
     echo -e "Options:"
@@ -859,6 +877,9 @@ case "${1:-reload}" in
         ;;
     test-i18n)
         cmd_test_i18n
+        ;;
+    test-zip)
+        cmd_test_zip "${2:-8}"
         ;;
     pot)
         cmd_pot

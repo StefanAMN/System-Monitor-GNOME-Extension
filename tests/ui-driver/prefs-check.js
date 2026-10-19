@@ -645,8 +645,10 @@ async function coverage() {
         },
     });
     window.present();
-    // The fixture's app ids are its data; the profile name comes from the system.
-    const data = ['chat', 'editor', 'performance'];
+    // The fixture's app ids are its data; the profile name comes from the
+    // system; shell commands are the same in every language.
+    const { RAPL_FIX_COMMANDS } = await import(`file://${root}/lib/common/raplfix.js`);
+    const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n')];
     const seen = new Set();
     for (const name of ['settings', 'tracking', 'diagnostics']) {
         window.set_visible_page_name(name);

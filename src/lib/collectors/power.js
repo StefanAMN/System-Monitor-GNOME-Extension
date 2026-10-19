@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import { readFileAsync, noteReadError } from '../common/utils.js';
+import { readFileAsync, noteReadError, logOnce } from '../common/utils.js';
 
 /**
  * Average power between two RAPL energy readings (microjoules).
@@ -166,7 +166,7 @@ export class PowerSampler {
                 }
             }
         } catch (e) {
-            console.error(`RAPL power sample failed: ${e.message}`);
+            logOnce(`RAPL power sample failed: ${e.message}`, 'error');
         }
 
         return {

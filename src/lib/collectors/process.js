@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import { getSysconf, noteReadError } from '../common/utils.js';
+import { getSysconf, noteReadError, logOnce } from '../common/utils.js';
 
 // Lenient decoder: process names are arbitrary bytes, not guaranteed UTF-8.
 const decoder = new TextDecoder('utf-8', { fatal: false });
@@ -157,7 +157,7 @@ function readAllStats(handle, onChunk, withIo = false) {
                 try {
                     pids = listPids();
                 } catch (e) {
-                    console.error(`Process sample failed: cannot list /proc: ${e.message}`);
+                    logOnce(`Process sample failed: cannot list /proc: ${e.message}`, 'error');
                     handle.id = 0;
                     resolve(true);
                     return GLib.SOURCE_REMOVE;

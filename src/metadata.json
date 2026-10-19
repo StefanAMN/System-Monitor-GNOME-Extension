@@ -1,7 +1,7 @@
 {
   "uuid": "resource-pulse@stefanamn.github.io",
   "name": "Resource Pulse",
-  "description": "Monitors system resources (CPU, Memory, Battery, Disk, Network, Thermal, GPU) in a customizable top bar and panel dropdown dashboard.",
+  "description": "Monitors system resources (CPU, Memory, Battery, Disk, Network, Thermal, GPU) in a customizable top bar and panel dropdown dashboard. The preferences window copies text to the clipboard when asked: the Diagnostics report (Copy report) and the commands that make CPU power readable (Copy commands).",
   "shell-version": [
     "46",
     "47",

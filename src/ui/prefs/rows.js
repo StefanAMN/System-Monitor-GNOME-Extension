@@ -3,13 +3,15 @@
 // process and must never be imported by the shell (and must not import St,
 // Clutter or shell modules itself).
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
 import Adw from 'gi://Adw';
+import Pango from 'gi://Pango';
 
 import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned } from '../../lib/common/settingsmodel.js';
 import { sanitizeMetricList } from '../../lib/common/present.js';
-import { RAPL_FIX_ARGV, raplFixWarning } from '../../lib/common/raplfix.js';
+import { RAPL_FIX_COMMANDS, raplFixWarning } from '../../lib/common/raplfix.js';
 import { PowerSampler } from '../../lib/collectors/power.js';
 import { _, fill } from '../../lib/common/i18n.js';
 
@@ -161,34 +163,35 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     powerGroup.visible = false;
     const powerRow = new Adw.ActionRow({
         title: _('CPU power is not readable'),
-        subtitle: `${_('Enabling it asks for an administrator password.')} ${raplFixWarning()}`,
+        subtitle: `${_('Run these two commands in a terminal to make it readable; they ask for your password.')} ${raplFixWarning()}`,
     });
-    const powerButton = new Gtk.Button({ label: _('Enable'), valign: Gtk.Align.CENTER });
-    powerButton.connect('clicked', () => {
-        powerButton.sensitive = false;
-        try {
-            const proc = Gio.Subprocess.new(RAPL_FIX_ARGV, Gio.SubprocessFlags.NONE);
-            proc.wait_check_async(null, (obj, res) => {
-                try {
-                    obj.wait_check_finish(res);
-                    powerRow.title = _('CPU power is now readable');
-                    powerRow.subtitle = '';
-                } catch (e) {
-                    powerRow.subtitle = fill(_('Failed: {error}'), { error: e.message });
-                    powerButton.sensitive = true;
-                }
-            });
-        } catch (e) {
-            powerRow.subtitle = fill(_('Failed: {error}'), { error: e.message });
-            powerButton.sensitive = true;
-        }
+    const copyButton = new Gtk.Button({ label: _('Copy commands'), valign: Gtk.Align.CENTER });
+    copyButton.connect('clicked', () => {
+        const bytes = new GLib.Bytes(new TextEncoder().encode(`${RAPL_FIX_COMMANDS}\n`));
+        copyButton.get_clipboard().set_content(Gdk.ContentProvider.new_for_bytes('text/plain;charset=utf-8', bytes));
+        copyButton.label = _('Copied');
     });
-    powerRow.add_suffix(powerButton);
+    const checkButton = new Gtk.Button({ label: _('Check again'), valign: Gtk.Align.CENTER });
+    powerRow.add_suffix(copyButton);
+    powerRow.add_suffix(checkButton);
     powerGroup.add(powerRow);
+    const commands = new Gtk.Label({
+        label: RAPL_FIX_COMMANDS, selectable: true, wrap: true, wrap_mode: Pango.WrapMode.CHAR, xalign: 0,
+        css_classes: ['monospace'], margin_top: 8, margin_bottom: 8, margin_start: 12, margin_end: 12,
+    });
+    powerGroup.add(commands);
     rows['power-fix'] = powerRow;
-    power.sample().then(reading => {
-        powerGroup.visible = !!reading.raplBlocked;
+    const probe = () => power.sample().then(reading => {
+        if (!reading.raplBlocked && powerGroup.visible) {
+            powerRow.title = _('CPU power is now readable');
+            powerRow.subtitle = '';
+            copyButton.visible = checkButton.visible = commands.visible = false;
+        } else {
+            powerGroup.visible = !!reading.raplBlocked;
+        }
     }, e => console.error(`Resource Pulse preferences: power probe failed: ${e.message}`));
+    checkButton.connect('clicked', probe);
+    probe();
 
     return { rows, pinRows, powerGroup, dispose: () => settings.disconnect(changedId) };
 }

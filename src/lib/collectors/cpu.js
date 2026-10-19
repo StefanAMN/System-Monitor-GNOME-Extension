@@ -1,4 +1,4 @@
-import { readFileAsync, noteReadError } from '../common/utils.js';
+import { readFileAsync, noteReadError, logOnce } from '../common/utils.js';
 import { _ } from '../common/i18n.js';
 
 /**
@@ -255,7 +255,7 @@ export class CpuSampler {
                 osName: this._osName
             };
         } catch (e) {
-            console.error(`Error in CPU sample: ${e.message}`);
+            logOnce(`Error in CPU sample: ${e.message}`, 'error');
             return {
                 total: 0,
                 cores: [],

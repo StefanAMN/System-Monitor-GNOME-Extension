@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import { readFileAsync, listDirAsync, noteReadError } from '../common/utils.js';
+import { readFileAsync, listDirAsync, noteReadError, logOnce } from '../common/utils.js';
 import { _, fill } from '../common/i18n.js';
 
 /**
@@ -134,7 +134,7 @@ export class ThermalSampler {
             this._discoveredFans = fans;
             this._lastDiscovery = GLib.get_monotonic_time();
         } catch (e) {
-            console.error(`Thermal discovery error: ${e.message}`);
+            logOnce(`Thermal discovery error: ${e.message}`, 'error');
             this._discoveredSensors = [];
             this._discoveredFans = [];
         }
@@ -219,7 +219,7 @@ export class ThermalSampler {
                 detailed: true
             };
         } catch (e) {
-            console.error(`Error in Thermal sample: ${e.message}`);
+            logOnce(`Error in Thermal sample: ${e.message}`, 'error');
             return {
                 packageTemp: 0,
                 sensors: [],

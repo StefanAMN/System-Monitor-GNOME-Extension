@@ -28,7 +28,9 @@ import { loadNetUsage, netUsagePath, readBootId } from './lib/engine/netusage.js
 import { RunningStats } from './lib/engine/stats.js';
 import { HISTORY_CAPACITY, HISTORY_KEYS } from './ui/panel/constants.js';
 import { installMethods } from './ui/panel/mixins.js';
-import { setTranslations, _ } from './lib/common/i18n.js';
+import { setTranslations, resetTranslations, _ } from './lib/common/i18n.js';
+import { resetUtils } from './lib/common/utils.js';
+import { forgetAppInfo } from './lib/common/appnames.js';
 import { SharedMethods } from './ui/panel/shared.js';
 import { SizingMethods } from './ui/panel/sizing.js';
 import { PollingMethods } from './ui/panel/polling.js';
@@ -513,6 +515,11 @@ export default class ResourcePulseExtension extends Extension {
                 if (key !== '_gen' && !base.has(key)) delete this[key];
             }
         }
+        // Module-level state too: what was logged once, cached app names
+        // and icons, the installed gettext.
+        resetUtils();
+        forgetAppInfo();
+        resetTranslations();
     }
 }
 

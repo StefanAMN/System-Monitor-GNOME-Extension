@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 
-import { readFileAsync, listDirAsync, noteReadError } from '../common/utils.js';
+import { readFileAsync, listDirAsync, noteReadError, logOnce } from '../common/utils.js';
 
 function createDBusProxy(busType, name, objectPath, interfaceName) {
     return new Promise((resolve, reject) => {
@@ -70,7 +70,7 @@ export class BatterySampler {
                     return proxy;
                 }
             } catch (e) {
-                console.error(`UPower proxy for ${path} failed: ${e.message}`);
+                logOnce(`UPower proxy for ${path} failed: ${e.message}`, 'error');
             }
         }
         return null;
@@ -135,7 +135,7 @@ export class BatterySampler {
                 }
             }
         } catch (e) {
-            console.error(`UPower battery sample failed: ${e.message}`);
+            logOnce(`UPower battery sample failed: ${e.message}`, 'error');
         }
 
         // Fallback to sysfs
@@ -233,7 +233,7 @@ export class BatterySampler {
                 };
             }
         } catch (e) {
-            console.error(`Sysfs battery sample failed: ${e.message}`);
+            logOnce(`Sysfs battery sample failed: ${e.message}`, 'error');
         }
 
         return {

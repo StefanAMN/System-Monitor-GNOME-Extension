@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import { readFileAsync, existsAsync } from '../common/utils.js';
+import { readFileAsync, existsAsync, logOnce } from '../common/utils.js';
 
 const VIRTUAL_IFACE_REGEX = /^(docker|veth|br-|virbr|lxc|tailscale|wg|tun|tap|bond|zt|vlan)/;
 
@@ -123,7 +123,7 @@ export class NetworkSampler {
                 }
             };
         } catch (e) {
-            console.error(`Error in Network sample: ${e.message}`);
+            logOnce(`Error in Network sample: ${e.message}`, 'error');
             return {
                 interfaces: {},
                 sessionRx: this._sessionRx,
