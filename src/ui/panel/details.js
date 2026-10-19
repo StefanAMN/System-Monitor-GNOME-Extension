@@ -5,6 +5,13 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import { RANGES } from '../../lib/engine/longhistory.js';
+import { _, fill, N_, translated } from '../../lib/common/i18n.js';
+
+// The detail pages' titles, as on the overview cards.
+const PAGE_TITLES = translated({
+    cpu: N_('CPU'), memory: N_('Memory'), battery: N_('Battery'), power: N_('Power'),
+    disk: N_('Disk'), network: N_('Network'), thermal: N_('Thermal'), gpu: N_('GPU'),
+});
 
 export class DetailsMethods {
     _buildDetails() {
@@ -18,7 +25,7 @@ export class DetailsMethods {
         // Top bar for CPU detail header (matches Right Panel header)
         this._detailHeader = new St.BoxLayout({ style: 'margin-bottom: 14px; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
 
-        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: 'Back to the overview' });
+        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: _('Back to the overview') });
         backBtn.add_child(new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' }));
         backBtn.connect('clicked', () => {
             this._activeTab = 'overview';
@@ -27,11 +34,11 @@ export class DetailsMethods {
 
         this._detailHeaderTitleBox = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true, y_align: Clutter.ActorAlign.CENTER });
         this._detailHeaderIcon = this._setMetricIcon(new St.Icon({ style_class: 'rp-c-cpu', style: 'icon-size: 18px;' }), 'cpu');
-        this._detailHeaderTitle = new St.Label({ text: 'CPU', style_class: 'rp-fg', style: 'font-size: 1.1em; font-weight: bold;' });
+        this._detailHeaderTitle = new St.Label({ text: _('CPU'), style_class: 'rp-fg', style: 'font-size: 1.1em; font-weight: bold;' });
         this._detailHeaderTitleBox.add_child(this._detailHeaderIcon);
         this._detailHeaderTitleBox.add_child(this._detailHeaderTitle);
 
-        const optBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: 'Settings' });
+        const optBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: _('Settings') });
         const optIcon = new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });
         optIcon.set_pivot_point(0.5, 0.5);
         optBtn.add_child(optIcon);
@@ -48,10 +55,10 @@ export class DetailsMethods {
         for (const range of Object.keys(RANGES)) {
             const button = new St.Button({
                 style_class: 'rp-range',
-                label: RANGES[range]?.label ?? (this._spanLabel || 'live'),
+                label: RANGES[range] ? _(RANGES[range].label) : (this._spanLabel || _('live')),
                 can_focus: true,
                 toggle_mode: true,
-                accessible_name: range === 'live' ? 'Recent samples' : `Last ${RANGES[range].label}`,
+                accessible_name: range === 'live' ? _('Recent samples') : fill(_('Last {span}'), { span: _(RANGES[range].label) }),
                 accessible_role: Atk.Role.TOGGLE_BUTTON,
             });
             button.connect('clicked', () => {
@@ -138,8 +145,7 @@ export class DetailsMethods {
             // Set header title & icon dynamically
             this._setMetricIcon(this._detailHeaderIcon, this._activeTab);
             this._detailHeaderIcon.style_class = `rp-c-${this._activeTab}`;
-            this._detailHeaderTitle.text = { cpu: 'CPU', gpu: 'GPU' }[this._activeTab] ||
-                this._activeTab.charAt(0).toUpperCase() + this._activeTab.slice(1);
+            this._detailHeaderTitle.text = PAGE_TITLES[this._activeTab];
 
             for (const [key, section] of Object.entries(this._detailSections || {})) {
                 if (section) section.visible = (key === this._activeTab);

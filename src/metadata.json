@@ -10,5 +10,6 @@
     "50"
   ],
   "url": "https://github.com/StefanAMN/System-Monitor-GNOME-Extension",
-  "settings-schema": "org.gnome.shell.extensions.resource-pulse"
+  "settings-schema": "org.gnome.shell.extensions.resource-pulse",
+  "gettext-domain": "resource-pulse"
 }

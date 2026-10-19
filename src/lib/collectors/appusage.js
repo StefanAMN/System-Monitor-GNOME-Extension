@@ -46,7 +46,8 @@ export function describeUnit(unit) {
     if (snap) return { id: `snap.${snap[1]}`, kind: 'snap', label: snap[1] };
 
     // Terminals give each window or tab a scope of its own.
-    if (base.startsWith('vte-spawn-')) return { id: 'terminal', kind: 'terminal', label: 'Terminal' };
+    // not translated: an internal label; the name shown comes from appnames.js
+    if (base.startsWith('vte-spawn-')) return { id: 'terminal', kind: 'terminal', label: 'Terminal' }; // not translated
     const sub = /^([a-z][\w.]*)-\d+(-\d+)?$/.exec(base);
     if (match[1] === 'scope' && sub) return { id: sub[1], kind: 'app', label: sub[1] };
 

@@ -17,6 +17,7 @@ import { buildDiagnosticsPage } from './diagnostics.js';
 import { styleWindow } from './style.js';
 import { TRACK_INTERVAL_S } from '../../lib/engine/batterytracker.js';
 import { readSystemState } from '../../lib/collectors/systemstate.js';
+import { _ } from '../../lib/common/i18n.js';
 
 function findHeaderBar(widget) {
     if (!widget) return null;
@@ -39,7 +40,7 @@ function findHeaderBar(widget) {
  * @returns {{panelPages: function(): boolean, dispose: function()}}
  */
 export function fillWindow(window, { settings, path, historyPath, tracking: trackingOpts = {}, diagnostics: diagnosticsOpts = {} }) {
-    const page = new Adw.PreferencesPage({ title: 'Settings', name: 'settings', icon_name: 'preferences-system-symbolic' });
+    const page = new Adw.PreferencesPage({ title: _('Settings'), name: 'settings', icon_name: 'preferences-system-symbolic' });
     window.add(page);
     window.set_default_size(720, 760);
     styleWindow(window);
@@ -61,7 +62,7 @@ export function fillWindow(window, { settings, path, historyPath, tracking: trac
             header.pack_start(header.rpMark);
         }
         if (panel && !backButton) {
-            backButton = new Gtk.Button({ icon_name: 'go-previous-symbolic', css_classes: ['flat'], valign: Gtk.Align.CENTER, tooltip_text: 'Back to the panel' });
+            backButton = new Gtk.Button({ icon_name: 'go-previous-symbolic', css_classes: ['flat'], valign: Gtk.Align.CENTER, tooltip_text: _('Back to the panel') });
             backButton.connect('clicked', () => {
                 settings.set_boolean('action-open-menu', true);
                 window.close();

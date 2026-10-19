@@ -10,6 +10,7 @@ set -eo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 EXT_DIR="$REPO_DIR/src"
 UUID="resource-pulse@stefanamn.github.io"
+GETTEXT_DOMAIN="resource-pulse"
 EXTENSIONS_BASE="$HOME/.local/share/gnome-shell/extensions"
 TARGET_DIR="$EXTENSIONS_BASE/$UUID"
 
@@ -39,6 +40,51 @@ compile_schemas() {
     fi
     glib-compile-schemas "$EXT_DIR/schemas"
     log_success "Schemas compiled successfully."
+    compile_translations
+}
+
+# ------------------------------------------------------------------------------
+# Helper: translations. po/<lang>.po are compiled into src/locale (ignored by
+# git) for the installed copy and the tests; pack builds its own from po/.
+# ------------------------------------------------------------------------------
+compile_translations() {
+    local po lang
+    for po in "$REPO_DIR"/po/*.po; do
+        [ -f "$po" ] || continue
+        if ! command -v msgfmt >/dev/null 2>&1; then
+            log_warn "msgfmt not found: translations NOT compiled."
+            return 0
+        fi
+        lang="$(basename "$po" .po)"
+        mkdir -p "$EXT_DIR/locale/$lang/LC_MESSAGES"
+        msgfmt -c -o "$EXT_DIR/locale/$lang/LC_MESSAGES/$GETTEXT_DOMAIN.mo" "$po"
+    done
+}
+
+# The translatable strings of the sources, as a template, written to $1.
+extract_pot() {
+    local files
+    files="$(cd "$REPO_DIR" && find src -name '*.js' | sort)"
+    # shellcheck disable=SC2086
+    (cd "$REPO_DIR" && xgettext --from-code=UTF-8 --language=JavaScript \
+        --keyword=_ --keyword=N_ --keyword=ngettext:1,2 --add-comments=Translators: \
+        --package-name="Resource Pulse" \
+        --msgid-bugs-address="https://github.com/StefanAMN/System-Monitor-GNOME-Extension/issues" \
+        --sort-by-file -o "$1" $files)
+}
+
+# A pseudo-language "xx" in src/locale: every string of the sources wrapped
+# in ⟦ ⟧, so a test can tell a translated string from one that is not.
+pseudo_translation() {
+    local tmp
+    tmp="$(mktemp -d)"
+    extract_pot "$tmp/all.pot"
+    msginit --no-translator --locale=xx -i "$tmp/all.pot" -o - 2>/dev/null \
+        | sed 's|"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\\n"|"Plural-Forms: nplurals=2; plural=(n != 1);\\n"|' \
+        | msgen - | msgfilter --keep-header -o "$tmp/xx.po" sed -e 's/^/⟦/' -e 's/$/⟧/'
+    mkdir -p "$EXT_DIR/locale/xx/LC_MESSAGES"
+    msgfmt -c -o "$EXT_DIR/locale/xx/LC_MESSAGES/$GETTEXT_DOMAIN.mo" "$tmp/xx.po"
+    rm -rf "$tmp"
 }
 
 # ------------------------------------------------------------------------------
@@ -357,8 +403,13 @@ run_driver() {
     mkdir -p "$SANDBOX/config/gtk-4.0"
     cp "${RP_GTK_USER_CSS:-$REPO_DIR/tests/ui-driver/hostile-gtk.css}" "$SANDBOX/config/gtk-4.0/gtk.css"
 
+    # RP_UI_LANGUAGE=xx runs the session in that language. LANGUAGE only
+    # counts under a real locale (not C, not C.UTF-8 in current glibc).
+    local LANG_ENV=()
+    if [ -n "${RP_UI_LANGUAGE:-}" ]; then LANG_ENV=(LANG=en_US.UTF-8 LC_ALL= LANGUAGE="$RP_UI_LANGUAGE"); fi
+
     start_log_stream "$LOG" "$SANDBOX/session.log"
-    XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" RP_UITEST_SHOTS="$SANDBOX/shots" \
+    env "${LANG_ENV[@]}" XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" RP_UITEST_SHOTS="$SANDBOX/shots" \
     dbus-run-session -- bash -c '
         gnome-shell --headless --virtual-monitor 1280x720 >> "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
@@ -388,6 +439,58 @@ driver_failure_details() {
     if ! grep -q "RP-UITEST" "$LOG"; then
         echo "  (driver never finished: timed out; end of the shell log follows)"
         grep -v "^$" "$LOG" | tail -n 25
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# Command: Translations. pot writes the template translators start from;
+# test-i18n proves every string on screen goes through gettext: a source scan
+# for literal text, the template is current, then the panel and the window
+# in a pseudo-language (every translated string reads ⟦…⟧).
+# ------------------------------------------------------------------------------
+cmd_pot() {
+    log_title "Translation template"
+    mkdir -p "$REPO_DIR/po"
+    extract_pot "$REPO_DIR/po/$GETTEXT_DOMAIN.pot"
+    local po
+    for po in "$REPO_DIR"/po/*.po; do
+        [ -f "$po" ] && msgmerge -q --update --backup=none "$po" "$REPO_DIR/po/$GETTEXT_DOMAIN.pot"
+    done
+    log_success "po/$GETTEXT_DOMAIN.pot: $(grep -c '^msgid ' "$REPO_DIR/po/$GETTEXT_DOMAIN.pot") messages"
+}
+
+cmd_test_i18n() {
+    log_title "Translation coverage"
+    check_syntax
+    compile_schemas
+    if ! node "$REPO_DIR/tests/i18n/untranslated.mjs" "$EXT_DIR"; then
+        log_error "Literal text on screen without gettext (above)."
+        exit 1
+    fi
+    # The committed template must list what the sources translate now.
+    local tmp
+    tmp="$(mktemp -d)"
+    extract_pot "$tmp/now.pot"
+    if ! diff <(grep -E '^msg(id|_plural)' "$tmp/now.pot") <(grep -E '^msg(id|_plural)' "$REPO_DIR/po/$GETTEXT_DOMAIN.pot") > "$tmp/diff"; then
+        log_error "po/$GETTEXT_DOMAIN.pot is out of date: run ./scripts/dev.sh pot"
+        head -n 20 "$tmp/diff"
+        rm -rf "$tmp"
+        exit 1
+    fi
+    rm -rf "$tmp"
+    pseudo_translation
+
+    local SANDBOX LOG BAD
+    RP_UI_LANGUAGE=xx run_driver ui-driver rp-ui-driver@resource-pulse.test 300
+    if driver_passed; then
+        grep -o "RP-UITEST coverage: .*" "$LOG" | sed 's/^/  /' || true
+        log_success "Every string on screen is translated (pseudo-language)"
+        finish_sandbox
+    else
+        log_error "Translation coverage failed (log kept: $SANDBOX)"
+        export_sandbox
+        driver_failure_details
+        exit 1
     fi
 }
 
@@ -678,7 +781,8 @@ cmd_pack() {
     check_syntax
     compile_schemas
     (cd "$EXT_DIR" && gnome-extensions pack --extra-source=lib --extra-source=ui --extra-source=icons \
-        --extra-source="$REPO_DIR/LICENSE" --out-dir="$REPO_DIR" --force)
+        --extra-source="$REPO_DIR/LICENSE" --podir="$REPO_DIR/po" --gettext-domain="$GETTEXT_DOMAIN" \
+        --out-dir="$REPO_DIR" --force)
     log_success "Extension packaged: $REPO_DIR/$UUID.shell-extension.zip"
 }
 
@@ -700,6 +804,8 @@ cmd_help() {
     echo -e "  ${GREEN}test-soak [sec]${RESET}    Only the soak's memory checks: heap census by kind, RSS, fds, actors (RP_SOAK_LEAK=1 plants a leak)"
     echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk, read, proc, power, battery)"
     echo -e "  ${GREEN}status${RESET}             Show extension status and recent journal logs"
+    echo -e "  ${GREEN}pot${RESET}                Write po/resource-pulse.pot (the strings to translate) and update po/*.po"
+    echo -e "  ${GREEN}test-i18n${RESET}          Every string on screen goes through gettext: source scan, template current, pseudo-language run"
     echo -e "  ${GREEN}pack${RESET}               Package extension into a distribution .zip"
     echo -e "  ${GREEN}help${RESET}               Show this help message\n"
     echo -e "Options:"
@@ -746,6 +852,12 @@ case "${1:-reload}" in
         ;;
     test-soak)
         cmd_test_soak "${2:-1200}"
+        ;;
+    test-i18n)
+        cmd_test_i18n
+        ;;
+    pot)
+        cmd_pot
         ;;
     test-overhead|overhead|soak)
         cmd_test_overhead "${2:-1200}"

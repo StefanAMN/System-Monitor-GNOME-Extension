@@ -1,4 +1,5 @@
 import { readFileAsync, noteReadError } from '../common/utils.js';
+import { _ } from '../common/i18n.js';
 
 /**
  * Derive display identity from /proc/cpuinfo. Nothing is guessed: unknown
@@ -44,7 +45,7 @@ export function parseCpuIdentity(cpuinfo) {
     else if (intelTier) tier = intelTier[1];
 
     return {
-        model: model || 'Unknown CPU',
+        model: model || _('Unknown CPU'),
         gen,
         vendor,
         tier,
@@ -125,7 +126,7 @@ export class CpuSampler {
             this._threadsCount = id.threads;
         } catch (e) {
             console.error(`CPU identity unavailable: ${e.message}`);
-            this._hardwareModel = 'Unknown CPU';
+            this._hardwareModel = _('Unknown CPU');
         }
 
         try {
@@ -138,7 +139,7 @@ export class CpuSampler {
                 }
             }
         } catch (e) {
-            this._osName = 'Linux OS';
+            this._osName = _('Linux OS');
         }
     }
 
@@ -226,7 +227,7 @@ export class CpuSampler {
                 } catch (e) { noteReadError(e); }
 
                 if (detailed && denseCores.length > 0) {
-                    const freqPromises = denseCores.map(async (_, i) => {
+                    const freqPromises = denseCores.map(async (_core, i) => {
                         try {
                             const cFreq = await readFileAsync(`/sys/devices/system/cpu/cpu${i}/cpufreq/scaling_cur_freq`);
                             const khz = parseFloat(cFreq.trim()) || 0;
@@ -261,13 +262,13 @@ export class CpuSampler {
                 loadavg: [0, 0, 0],
                 uptime: 0,
                 frequency: '0.00 GHz',
-                hardwareModel: this._hardwareModel || 'Unknown CPU',
+                hardwareModel: this._hardwareModel || _('Unknown CPU'),
                 cpuGen: this._cpuGen,
                 vendor: this._vendor,
                 tier: this._tier,
                 coresCount: this._coresCount,
                 threadsCount: this._threadsCount,
-                osName: this._osName || 'Linux OS'
+                osName: this._osName || _('Linux OS')
             };
         }
     }

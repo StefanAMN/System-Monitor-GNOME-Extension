@@ -28,6 +28,7 @@ import { loadNetUsage, netUsagePath, readBootId } from './lib/engine/netusage.js
 import { RunningStats } from './lib/engine/stats.js';
 import { HISTORY_CAPACITY, HISTORY_KEYS } from './ui/panel/constants.js';
 import { installMethods } from './ui/panel/mixins.js';
+import { setTranslations, _ } from './lib/common/i18n.js';
 import { SharedMethods } from './ui/panel/shared.js';
 import { SizingMethods } from './ui/panel/sizing.js';
 import { PollingMethods } from './ui/panel/polling.js';
@@ -56,6 +57,8 @@ export default class ResourcePulseExtension extends Extension {
         // Everything enable() and later code hang on `this` is dropped again
         // in disable(), so no widget reference can outlive its actor.
         this._baseKeys = new Set(Object.keys(this));
+        // Extension has bound the domain (metadata's gettext-domain).
+        setTranslations(this.gettext.bind(this), this.ngettext.bind(this));
         this._settings = this.getSettings();
 
         // Samplers
@@ -166,7 +169,7 @@ export default class ResourcePulseExtension extends Extension {
         this._menuContainer = new St.BoxLayout({
             vertical: true,
             style_class: 'resource-pulse-menu-section',
-            accessible_name: 'Resource Pulse panel',
+            accessible_name: _('Resource Pulse panel'),
             reactive: true,
             x_expand: true,
             y_expand: true

@@ -39,7 +39,8 @@ export default [
         },
     },
     {
-        files: ['eslint.config.js'],
+        // Node scripts: the config itself and the source checks.
+        files: ['eslint.config.js', 'tests/**/*.mjs'],
         languageOptions: { globals: globals.node },
     },
 ];

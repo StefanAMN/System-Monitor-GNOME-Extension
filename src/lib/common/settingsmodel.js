@@ -3,6 +3,7 @@
 // order, choices and step sizes cannot drift apart. Pure data and pure
 // helpers; nothing here touches a widget or GSettings.
 import { formatTemp } from './format.js';
+import { N_ } from './i18n.js';
 
 /**
  * The metrics that can be pinned to the top bar, in their default order.
@@ -11,14 +12,14 @@ import { formatTemp } from './format.js';
  * theme lacks the icon (cpu).
  */
 export const METRICS = [
-    { key: 'cpu', name: 'CPU', icon: 'utilities-system-monitor-symbolic', bundled: 'rp-cpu' },
-    { key: 'memory', name: 'Memory', icon: 'media-flash-symbolic' },
-    { key: 'battery', name: 'Battery', icon: 'battery-good-symbolic' },
-    { key: 'power', name: 'Power', icon: 'thunderbolt-symbolic' },
-    { key: 'disk', name: 'Disk', icon: 'drive-harddisk-symbolic' },
-    { key: 'network', name: 'Network', icon: 'network-transmit-receive-symbolic' },
-    { key: 'thermal', name: 'Thermal', icon: null, bundled: 'rp-thermal' },
-    { key: 'gpu', name: 'GPU', icon: 'video-display-symbolic' },
+    { key: 'cpu', name: N_('CPU'), icon: 'utilities-system-monitor-symbolic', bundled: 'rp-cpu' },
+    { key: 'memory', name: N_('Memory'), icon: 'media-flash-symbolic' },
+    { key: 'battery', name: N_('Battery'), icon: 'battery-good-symbolic' },
+    { key: 'power', name: N_('Power'), icon: 'thunderbolt-symbolic' },
+    { key: 'disk', name: N_('Disk'), icon: 'drive-harddisk-symbolic' },
+    { key: 'network', name: N_('Network'), icon: 'network-transmit-receive-symbolic' },
+    { key: 'thermal', name: N_('Thermal'), icon: null, bundled: 'rp-thermal' },
+    { key: 'gpu', name: N_('GPU'), icon: 'video-display-symbolic' },
 ];
 
 /**
@@ -29,101 +30,102 @@ export const METRICS = [
  *   number  an integer with min / max (the schema's range) and the step of
  *           one click; unit is 's', '%' or 'temp' (stored in °C)
  * `title` is short enough for the 360 px panel; `detail` is the longer
- * explanation the preferences window has room for.
+ * explanation the preferences window has room for. Labels are marked with
+ * N_() and translated where they are shown; keys and values are not.
  */
 export const SETTINGS_SECTIONS = [
     {
         id: 'topbar',
-        title: 'Top bar',
+        title: N_('Top bar'),
         rows: [
             {
-                key: 'pinned-metrics', kind: 'pins', title: 'Pinned metrics', hint: 'numbered in top-bar order',
-                detail: 'Shown permanently in the top bar. When they do not all fit, the last ones show only their icon.',
+                key: 'pinned-metrics', kind: 'pins', title: N_('Pinned metrics'), hint: N_('numbered in top-bar order'),
+                detail: N_('Shown permanently in the top bar. When they do not all fit, the last ones show only their icon.'),
             },
             {
-                key: 'compact-label', kind: 'switch', title: 'Compact (icons only)',
-                detail: 'Hide the values in the top bar and show only the icons',
+                key: 'compact-label', kind: 'switch', title: N_('Compact (icons only)'),
+                detail: N_('Hide the values in the top bar and show only the icons'),
             },
             {
-                key: 'show-tooltips', kind: 'switch', title: 'Tooltips',
-                detail: 'Show details when the pointer rests on a metric in the top bar',
+                key: 'show-tooltips', kind: 'switch', title: N_('Tooltips'),
+                detail: N_('Show details when the pointer rests on a metric in the top bar'),
             },
             {
-                key: 'battery-top-format', kind: 'choice', title: 'Battery shows',
-                detail: 'What the battery metric displays in the top bar',
+                key: 'battery-top-format', kind: 'choice', title: N_('Battery shows'),
+                detail: N_('What the battery metric displays in the top bar'),
                 choices: [
-                    ['percent', '%', 'Percentage (85%)'],
-                    ['percent-time', '% + time', 'Percentage and time (85% · 2h 15m)'],
+                    ['percent', '%', N_('Percentage (85%)')],
+                    ['percent-time', '% + time', N_('Percentage and time (85% · 2h 15m)')],
                 ],
             },
             {
-                key: 'network-top-format', kind: 'choice', title: 'Network shows',
-                detail: 'What the network metric displays in the top bar',
+                key: 'network-top-format', kind: 'choice', title: N_('Network shows'),
+                detail: N_('What the network metric displays in the top bar'),
                 choices: [
-                    ['download', '↓', 'Download (↓)'],
-                    ['upload', '↑', 'Upload (↑)'],
-                    ['both', '↓ ↑', 'Download and upload (↓ ↑)'],
+                    ['download', '↓', N_('Download (↓)')],
+                    ['upload', '↑', N_('Upload (↑)')],
+                    ['both', '↓ ↑', N_('Download and upload (↓ ↑)')],
                 ],
             },
         ],
     },
     {
         id: 'units',
-        title: 'Units and refresh',
+        title: N_('Units and refresh'),
         rows: [
             {
-                key: 'poll-interval', kind: 'number', title: 'Update every',
-                detail: 'Seconds between two readings (1 to 10)',
+                key: 'poll-interval', kind: 'number', title: N_('Update every'),
+                detail: N_('Seconds between two readings (1 to 10)'),
                 min: 1, max: 10, step: 1, unit: 's',
             },
             {
-                key: 'smooth-transitions', kind: 'switch', title: 'Smooth changes',
-                detail: 'Values glide to each new reading over one update; CPU, GPU, network and disk are lightly averaged',
+                key: 'smooth-transitions', kind: 'switch', title: N_('Smooth changes'),
+                detail: N_('Values glide to each new reading over one update; CPU, GPU, network and disk are lightly averaged'),
             },
             {
-                key: 'unit-temp', kind: 'choice', title: 'Temperature',
-                detail: 'Unit for every temperature shown',
-                choices: [['C', '°C', 'Celsius (°C)'], ['F', '°F', 'Fahrenheit (°F)']],
+                key: 'unit-temp', kind: 'choice', title: N_('Temperature'),
+                detail: N_('Unit for every temperature shown'),
+                choices: [['C', '°C', N_('Celsius (°C)')], ['F', '°F', N_('Fahrenheit (°F)')]],
             },
             {
-                key: 'unit-mem', kind: 'choice', title: 'Memory',
-                detail: 'Decimal gigabytes or binary gibibytes',
-                choices: [['GB', 'GB', 'Gigabytes (GB)'], ['GiB', 'GiB', 'Gibibytes (GiB)']],
+                key: 'unit-mem', kind: 'choice', title: N_('Memory'),
+                detail: N_('Decimal gigabytes or binary gibibytes'),
+                choices: [['GB', 'GB', N_('Gigabytes (GB)')], ['GiB', 'GiB', N_('Gibibytes (GiB)')]],
             },
         ],
     },
     {
         id: 'alerts',
-        title: 'Alerts',
-        hint: 'a value that stays above its limit for 30 seconds shows ⚠ in the top bar',
+        title: N_('Alerts'),
+        hint: N_('a value that stays above its limit for 30 seconds shows ⚠ in the top bar'),
         rows: [
             {
-                key: 'alert-notify', kind: 'switch', title: 'Notifications',
-                detail: 'Also send a notification, at most one per metric every 10 minutes',
+                key: 'alert-notify', kind: 'switch', title: N_('Notifications'),
+                detail: N_('Also send a notification, at most one per metric every 10 minutes'),
             },
             {
-                key: 'threshold-cpu', kind: 'number', title: 'CPU',
-                detail: 'CPU usage above this is shown as a warning',
+                key: 'threshold-cpu', kind: 'number', title: N_('CPU'),
+                detail: N_('CPU usage above this is shown as a warning'),
                 min: 50, max: 100, step: 5, unit: '%',
             },
             {
-                key: 'threshold-mem', kind: 'number', title: 'Memory',
-                detail: 'Memory usage above this is shown as a warning',
+                key: 'threshold-mem', kind: 'number', title: N_('Memory'),
+                detail: N_('Memory usage above this is shown as a warning'),
                 min: 50, max: 100, step: 5, unit: '%',
             },
             {
-                key: 'threshold-temp', kind: 'number', title: 'Temperature',
-                detail: 'CPU temperature above this is shown as a warning (stored in °C)',
+                key: 'threshold-temp', kind: 'number', title: N_('Temperature'),
+                detail: N_('CPU temperature above this is shown as a warning (stored in °C)'),
                 min: 40, max: 100, step: 5, unit: 'temp',
             },
             {
-                key: 'threshold-gpu', kind: 'number', title: 'GPU',
-                detail: 'GPU usage above this is shown as a warning',
+                key: 'threshold-gpu', kind: 'number', title: N_('GPU'),
+                detail: N_('GPU usage above this is shown as a warning'),
                 min: 50, max: 100, step: 5, unit: '%',
             },
             {
-                key: 'threshold-disk', kind: 'number', title: 'Disk space',
-                detail: 'Space used on / above this is shown as a warning',
+                key: 'threshold-disk', kind: 'number', title: N_('Disk space'),
+                detail: N_('Space used on / above this is shown as a warning'),
                 min: 50, max: 100, step: 1, unit: '%',
             },
         ],

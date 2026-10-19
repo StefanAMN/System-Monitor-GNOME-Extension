@@ -5,6 +5,7 @@ import Meta from 'gi://Meta';
 import Cairo from 'cairo';
 
 import { hoverIndex, agoLabel } from '../../lib/common/present.js';
+import { _, fill } from '../../lib/common/i18n.js';
 
 /**
  * Colours a Cairo widget should paint with, taken from its CSS so light and
@@ -397,8 +398,8 @@ export const Sparkline = GObject.registerClass({
             }
 
             const ago = this.sampleSeconds > 0 ? ` · ${agoLabel(n - 1 - hover, this.sampleSeconds)}` : '';
-            let value = has ? opt.formatValue(raw) : 'no data';
-            if (has && hist.peakAt) value = `${value} avg, ${opt.formatValue(hist.peakAt(hover))} peak`;
+            let value = has ? opt.formatValue(raw) : _('no data');
+            if (has && hist.peakAt) value = fill(_('{average} avg, {peak} peak'), { average: value, peak: opt.formatValue(hist.peakAt(hover)) });
             const text = `${value}${ago}`;
             cr.setFontSize(10);
             cr.selectFontFace('Sans', Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);

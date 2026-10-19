@@ -5,7 +5,8 @@ import St from 'gi://St';
 
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
-import { powerReadout, thermalUnavailable, visibleInterfaces, gpuReadings } from '../../lib/common/present.js';
+import { powerReadout, thermalUnavailable, visibleInterfaces, gpuReadings, na } from '../../lib/common/present.js';
+import { _, fill, ngettext } from '../../lib/common/i18n.js';
 import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../../lib/common/format.js';
 
@@ -16,7 +17,9 @@ export class DashboardMethods {
         for (const [row, key] of [[this._cpuWait, 'cpu'], [this._memWait, 'memory'], [this._dskWait, 'io']]) {
             if (!row) continue;
             const some = data.psi?.[key]?.some;
-            row.val.text = Number.isFinite(some) ? `${some.toFixed(1)} % of the time` : 'n/a (no pressure figures from this kernel)';
+            row.val.text = Number.isFinite(some)
+                ? fill(_('{percent} % of the time'), { percent: some.toFixed(1) })
+                : _('n/a (no pressure figures from this kernel)');
         }
         const tempUnit = this._settings.get_string('unit-temp') || 'C';
         const memUnit  = this._settings.get_string('unit-mem')  || 'GB';
@@ -32,12 +35,13 @@ export class DashboardMethods {
             if (this._cpuDetailsVal) this._cpuDetailsVal.text = `${Math.round(cpu.total)}%`;
 
             // Hardware details on Overview
-            if (this._hwName) this._hwName.text = cpu.hardwareModel || 'Unknown CPU';
+            if (this._hwName) this._hwName.text = cpu.hardwareModel || _('Unknown CPU');
             if (this._hwStats) {
                 const parts = [];
                 if (cpu.cpuGen) parts.push(cpu.cpuGen);
-                if (cpu.coresCount) parts.push(`${cpu.coresCount} cores`);
-                parts.push(`${cpu.threadsCount || cpu.cores.length} threads`);
+                if (cpu.coresCount) parts.push(fill(ngettext('{n} core', '{n} cores', cpu.coresCount), { n: cpu.coresCount }));
+                const threads = cpu.threadsCount || cpu.cores.length;
+                parts.push(fill(ngettext('{n} thread', '{n} threads', threads), { n: threads }));
                 this._hwStats.text = parts.join(' · ');
             }
             
@@ -89,7 +93,9 @@ export class DashboardMethods {
             if (this._memSwapActivity) {
                 const inStr = mem.swapInRate > 0 ? `${formatBytes(mem.swapInRate, false)}/s` : '0 B/s';
                 const outStr = mem.swapOutRate > 0 ? `${formatBytes(mem.swapOutRate, false)}/s` : '0 B/s';
-                this._memSwapActivity.val.text = (mem.swapInRate > 0 || mem.swapOutRate > 0) ? `In: ${inStr} · Out: ${outStr}` : 'Idle';
+                this._memSwapActivity.val.text = (mem.swapInRate > 0 || mem.swapOutRate > 0)
+                    ? fill(_('In: {in} · Out: {out}'), { in: inStr, out: outStr })
+                    : _('Idle');
             }
         }
 
@@ -105,7 +111,7 @@ export class DashboardMethods {
                     
                     let stateStr = batteryStateLabel(bat.state);
                     if (bat.timeRemaining > 0)
-                        stateStr += ` · ${formatDuration(bat.timeRemaining)} ${bat.state === 'charging' ? 'to full' : 'left'}`;
+                        stateStr += ` · ${fill(bat.state === 'charging' ? _('{time} to full') : _('{time} left'), { time: formatDuration(bat.timeRemaining) })}`;
                     sc.statusLbl.text = stateStr;
                 }
             }
@@ -119,14 +125,14 @@ export class DashboardMethods {
                         const t = bat.timeToFull || bat.timeRemaining;
                         const h = Math.floor(t / 3600);
                         const m = Math.floor((t % 3600) / 60);
-                        estText = `${h}h ${m}m to full`;
+                        estText = fill(_('{h}h {m}m to full'), { h, m });
                     } else if (bat.state === 'discharging' && (bat.timeToEmpty > 0 || bat.timeRemaining > 0)) {
                         const t = bat.timeToEmpty || bat.timeRemaining;
                         const h = Math.floor(t / 3600);
                         const m = Math.floor((t % 3600) / 60);
-                        estText = `${h}h ${m}m remaining`;
+                        estText = fill(_('{h}h {m}m remaining'), { h, m });
                     } else if (bat.state === 'full') {
-                        estText = 'Fully Charged';
+                        estText = _('Fully Charged');
                     }
                     this._batTimeEst.val.text = estText;
                 }
@@ -146,7 +152,7 @@ export class DashboardMethods {
             
             const readout = powerReadout(pwr);
             const draw = readout.value ?? 0;
-            const drawStr = readout.value === null ? 'n/a' : `${draw.toFixed(1)} W`;
+            const drawStr = readout.value === null ? na() : `${draw.toFixed(1)} W`;
 
             const bat = data.bat;
             const isCharging = bat && bat.present && bat.state === 'charging' && bat.energyRate > 0;
@@ -157,9 +163,9 @@ export class DashboardMethods {
                 sc.pbar.setPercent(this._pwrScale.percent(draw, GLib.get_monotonic_time()));
                 sc.subLabel.visible = true;
                 if (isCharging) {
-                    sc.subLabel.text = `Charging (+${bat.energyRate.toFixed(1)} W)`;
+                    sc.subLabel.text = fill(_('Charging (+{watts} W)'), { watts: bat.energyRate.toFixed(1) });
                 } else {
-                    sc.subLabel.text = readout.value === null ? 'Energy counters not readable' : readout.source;
+                    sc.subLabel.text = readout.value === null ? _('Energy counters not readable') : readout.source;
                 }
             }
             if (hasDraw) {
@@ -172,7 +178,7 @@ export class DashboardMethods {
                     if (isCharging) {
                         this._pwrCharging.val.text = `+${bat.energyRate.toFixed(1)} W`;
                     } else if (bat && bat.present && bat.state === 'full') {
-                        this._pwrCharging.val.text = '0.0 W (Full)';
+                        this._pwrCharging.val.text = _('0.0 W (Full)');
                     } else {
                         this._pwrCharging.val.text = '--';
                     }
@@ -194,10 +200,10 @@ export class DashboardMethods {
             if (sc) {
                 // Same figure as the top bar: space used on the root filesystem.
                 const root = dsk.mounts && dsk.mounts[0];
-                sc.valueLabel.text = root ? `${Math.round(root.percent)}%` : 'n/a';
+                sc.valueLabel.text = root ? `${Math.round(root.percent)}%` : na();
                 sc.pbar.setPercent(root ? root.percent : 0);
                 sc.subLabel.visible = true;
-                sc.subLabel.text = `used on / · ${Math.round(diskPct)}% busy`;
+                sc.subLabel.text = fill(_('used on / · {busy}% busy'), { busy: Math.round(diskPct) });
             }
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
@@ -293,10 +299,10 @@ export class DashboardMethods {
             const sc = this._summaryCards?.thermal;
             if (sc) {
                 const missing = thermalUnavailable(thm);
-                sc.valueLabel.text = missing ? 'n/a' : formatTemp(thm.packageTemp, tempUnit);
+                sc.valueLabel.text = missing ? na() : formatTemp(thm.packageTemp, tempUnit);
                 sc.pbar.setPercent(missing ? 0 : Math.min(100, thm.packageTemp)); // 100 °C full scale
                 sc.subLabel.visible = missing;
-                if (missing) sc.subLabel.text = 'No sensor found';
+                if (missing) sc.subLabel.text = _('No sensor found');
             }
             // A top-bar sample carries only the package sensor; rendering it
             // here would collapse the list to one row until the next detailed one.
@@ -313,7 +319,7 @@ export class DashboardMethods {
                                 this._thmSensorRows.push(row);
                             });
                         } else {
-                            const row = this._detailRow('No sensors found', '--');
+                            const row = this._detailRow(_('No sensors found'), '--');
                             this._thmSensorsBox.add_child(row.row);
                         }
                     }
@@ -363,12 +369,12 @@ export class DashboardMethods {
                     sc.pbar.setPercent(gpu.percent);
                     sc.subLabel.visible = true;
                     const clockText = gpu.clock ? ` · ${Math.round(gpu.clock)} MHz` : '';
-                    sc.subLabel.text = `${gpu.brand || 'GPU'}${clockText}`;
+                    sc.subLabel.text = `${gpu.brand || _('GPU')}${clockText}`;
                 } else {
-                    sc.valueLabel.text = 'n/a';
+                    sc.valueLabel.text = na();
                     sc.pbar.setPercent(0);
                     sc.subLabel.visible = true;
-                    sc.subLabel.text = 'No GPU Detected';
+                    sc.subLabel.text = _('No GPU Detected');
                 }
             }
 
@@ -381,10 +387,10 @@ export class DashboardMethods {
             }
 
             // Update Model / Chip Badge
-            if (this._gpuModelName) this._gpuModelName.text = gpu.model || `${gpu.brand} Graphics`;
+            if (this._gpuModelName) this._gpuModelName.text = gpu.model || fill(_('{brand} Graphics'), { brand: gpu.brand });
             if (this._gpuDriverDesc) {
                 this._gpuDriverDesc.visible = !!gpu.driver;
-                this._gpuDriverDesc.text = `Driver: ${gpu.driver || ''}`;
+                this._gpuDriverDesc.text = fill(_('Driver: {driver}'), { driver: gpu.driver || '' });
             }
 
             if (this._gpuChipBox) {
@@ -475,7 +481,10 @@ export class DashboardMethods {
             if (this._activeTab === 'disk' && this._dskProcNote && fresh) {
                 // Unprivileged: other users' counters are not readable. Said, not hidden.
                 this._dskProcNote.visible = data.ioDenied > 0;
-                this._dskProcNote.text = `Your processes only: ${data.ioDenied} processes of other users (system services) cannot be read without administrator rights.`;
+                this._dskProcNote.text = fill(ngettext(
+                    'Your processes only: {n} process of another user (a system service) cannot be read without administrator rights.',
+                    'Your processes only: {n} processes of other users (system services) cannot be read without administrator rights.',
+                    data.ioDenied), { n: data.ioDenied });
             }
         }
     }

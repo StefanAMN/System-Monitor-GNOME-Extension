@@ -1,4 +1,5 @@
 // Constants shared by the panel modules (moved from extension.js).
+import { N_, translated } from '../../lib/common/i18n.js';
 
 // ─── Polling / history constants ─────────────────────────────────────────────
 
@@ -14,10 +15,10 @@ export const POLL_DEADLINE_MS = 3000;
 export const TOP_BAR_FIT_MARGIN_PX = 16;
 // Height of the trend graph / detail line of an overview card.
 export const CARD_SLOT_HEIGHT = 22;
-export const METRIC_NAMES = {
-    cpu: 'CPU', memory: 'Memory', battery: 'Battery', power: 'Power',
-    disk: 'Disk', network: 'Network', thermal: 'Temperature', gpu: 'GPU'
-};
+export const METRIC_NAMES = translated({
+    cpu: N_('CPU'), memory: N_('Memory'), battery: N_('Battery'), power: N_('Power'),
+    disk: N_('Disk'), network: N_('Network'), thermal: N_('Temperature'), gpu: N_('GPU')
+});
 // Alerts watch metrics that are not pinned too; the slower ones less often.
 export const ALERT_DISK_EVERY_US = 60e6;
 export const ALERT_GPU_EVERY_US = 30e6;
@@ -40,13 +41,14 @@ export const PROCESS_ROWS = 5;
 // memory that raises an alert: well past the occasional reclaim stall.
 export const PRESSURE_LIMIT = 20;
 // Panel page and wording per alert.
+// Ids and labels together, so the labels (N_) are translated where read.
 export const ALERTS = {
-    cpu: { tab: 'cpu', name: 'CPU', title: 'CPU usage is high' },
-    memory: { tab: 'memory', name: 'Memory', title: 'Memory is almost full' },
-    thermal: { tab: 'thermal', name: 'Temperature', title: 'The processor is hot' },
-    gpu: { tab: 'gpu', name: 'GPU', title: 'GPU usage is high' },
-    disk: { tab: 'disk', name: 'Disk /', title: 'Disk space is running out' },
-    pressure: { tab: 'memory', name: 'Waiting for memory', title: 'The system is short of memory' },
+    cpu: { tab: 'cpu', name: N_('CPU'), title: N_('CPU usage is high') },
+    memory: { tab: 'memory', name: N_('Memory'), title: N_('Memory is almost full') },
+    thermal: { tab: 'thermal', name: N_('Temperature'), title: N_('The processor is hot') },
+    gpu: { tab: 'gpu', name: N_('GPU'), title: N_('GPU usage is high') },
+    disk: { tab: 'disk', name: N_('Disk /'), title: N_('Disk space is running out') },
+    pressure: { tab: 'memory', name: N_('Waiting for memory'), title: N_('The system is short of memory') },
 };
 export const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 
@@ -63,11 +65,11 @@ export const SPARK_SCALES = {
     netTx: KBS_SCALE
 };
 // What a screen reader calls each detail chart (the values are in the rows).
-export const CHART_NAMES = {
-    cpu: 'CPU usage', mem: 'Memory use', bat: 'Battery charge', batRate: 'Battery charge rate', pwr: 'Power draw',
-    dskRead: 'Disk read rate', dskWrite: 'Disk write rate', netRx: 'Download rate', netTx: 'Upload rate',
-    thm: 'Temperature', gpu: 'GPU usage'
-};
+export const CHART_NAMES = translated({
+    cpu: N_('CPU usage'), mem: N_('Memory use'), bat: N_('Battery charge'), batRate: N_('Battery charge rate'), pwr: N_('Power draw'),
+    dskRead: N_('Disk read rate'), dskWrite: N_('Disk write rate'), netRx: N_('Download rate'), netTx: N_('Upload rate'),
+    thm: N_('Temperature'), gpu: N_('GPU usage')
+});
 // Opening the preferences window: tries, and the pause between them, when
 // GNOME's preferences service is quitting as the request arrives.
 export const PREFS_OPEN_ATTEMPTS = 3;

@@ -8,6 +8,7 @@
 
 // Thresholds. An app is a background consumer when most of its CPU time
 // was spent without focus and it took a noticeable part of the energy.
+import { _, fill } from '../common/i18n.js';
 const BACKGROUND_FRACTION = 0.6;
 const BACKGROUND_MIN_SHARE = 0.05;
 const BACKGROUND_MIN_WH = 0.2;
@@ -65,10 +66,10 @@ export function diagnose({ battery, all, state, appName = id => id }) {
                 id: `background:${app.id}`,
                 goal: 'runtime',
                 severity: 'suggestion',
-                title: `${appName(app.id)} works in the background`,
-                detail: `Quit it when you are not using it, or check its settings for background activity.`,
-                evidence: `${Math.round(background * 100)} % of its CPU time on battery was without focus: ` +
-                    `about ${round1(backgroundWh)} Wh over ${round1(hoursOnBattery)} h on battery.`,
+                title: fill(_('{app} works in the background'), { app: appName(app.id) }),
+                detail: _('Quit it when you are not using it, or check its settings for background activity.'),
+                evidence: fill(_('{percent} % of its CPU time on battery was without focus: about {wh} Wh over {hours} h on battery.'),
+                    { percent: Math.round(background * 100), wh: round1(backgroundWh), hours: round1(hoursOnBattery) }),
                 estimate: { watts, minutes },
                 action: null,
             });
@@ -81,11 +82,11 @@ export function diagnose({ battery, all, state, appName = id => id }) {
             id: 'power-profile',
             goal: 'runtime',
             severity: 'suggestion',
-            title: 'Performance power mode on battery',
-            detail: 'Balanced mode keeps the processor from running at its highest clocks when nothing needs them.',
-            evidence: 'The power mode is "performance" and the machine runs on battery.',
+            title: _('Performance power mode on battery'),
+            detail: _('Balanced mode keeps the processor from running at its highest clocks when nothing needs them.'),
+            evidence: _('The power mode is "performance" and the machine runs on battery.'),
             estimate: null,
-            action: { kind: 'power-profile', value: 'balanced', label: 'Switch to Balanced' },
+            action: { kind: 'power-profile', value: 'balanced', label: _('Switch to Balanced') },
         });
     }
     if (state.battery && Number.isFinite(state.backlight) && state.backlight >= BRIGHT_FRACTION) {
@@ -93,9 +94,9 @@ export function diagnose({ battery, all, state, appName = id => id }) {
             id: 'brightness',
             goal: 'runtime',
             severity: 'suggestion',
-            title: 'Screen brightness is high',
-            detail: 'The display is often the largest single consumer of a laptop. Its use cannot be measured here, so no saving is estimated.',
-            evidence: `The backlight is at ${Math.round(state.backlight * 100)} %.`,
+            title: _('Screen brightness is high'),
+            detail: _('The display is often the largest single consumer of a laptop. Its use cannot be measured here, so no saving is estimated.'),
+            evidence: fill(_('The backlight is at {percent} %.'), { percent: Math.round(state.backlight * 100) }),
             estimate: null,
             action: null,
         });
@@ -105,9 +106,9 @@ export function diagnose({ battery, all, state, appName = id => id }) {
             id: 'heat',
             goal: 'runtime',
             severity: 'suggestion',
-            title: 'The processor runs hot on battery',
-            detail: 'Heat means power: look at the apps at the top of the list, and keep the air vents free.',
-            evidence: `${Math.round(battery.hotSeconds / battery.seconds * 100)} % of the time on battery the CPU was above the temperature alert.`,
+            title: _('The processor runs hot on battery'),
+            detail: _('Heat means power: look at the apps at the top of the list, and keep the air vents free.'),
+            evidence: fill(_('{percent} % of the time on battery the CPU was above the temperature alert.'), { percent: Math.round(battery.hotSeconds / battery.seconds * 100) }),
             estimate: null,
             action: null,
         });
@@ -121,12 +122,13 @@ export function diagnose({ battery, all, state, appName = id => id }) {
             id: 'wear',
             goal: 'lifespan',
             severity: worn ? 'warning' : 'info',
-            title: worn ? 'The battery is worn' : 'Battery health',
+            title: worn ? _('The battery is worn') : _('Battery health'),
             detail: worn
-                ? 'It holds noticeably less than when new; runtime per charge is shorter by the same amount.'
-                : 'Capacity is within the normal range for its age.',
-            evidence: `It holds ${Math.round(b.healthPct)} % of its design capacity` +
-                (Number.isFinite(b.cycles) && b.cycles > 0 ? ` after ${b.cycles} charge cycles.` : '.'),
+                ? _('It holds noticeably less than when new; runtime per charge is shorter by the same amount.')
+                : _('Capacity is within the normal range for its age.'),
+            evidence: fill(Number.isFinite(b.cycles) && b.cycles > 0
+                ? _('It holds {percent} % of its design capacity after {cycles} charge cycles.')
+                : _('It holds {percent} % of its design capacity.'), { percent: Math.round(b.healthPct), cycles: b.cycles }),
             estimate: null,
             action: null,
         });
@@ -136,11 +138,11 @@ export function diagnose({ battery, all, state, appName = id => id }) {
                 id: 'charge-limit',
                 goal: 'lifespan',
                 severity: 'suggestion',
-                title: 'Limit charging to about 80 %',
-                detail: 'Keeping a battery full wears it faster. This battery supports a charge limit: turn on "Preserve Battery Health" in Settings › Power.',
-                evidence: 'The battery supports a charge limit and it is off.',
+                title: _('Limit charging to about 80 %'),
+                detail: _('Keeping a battery full wears it faster. This battery supports a charge limit: turn on "Preserve Battery Health" in Settings › Power.'),
+                evidence: _('The battery supports a charge limit and it is off.'),
                 estimate: null,
-                action: { kind: 'open-power-settings', label: 'Open Power Settings' },
+                action: { kind: 'open-power-settings', label: _('Open Power Settings') },
             });
         } else if (b.chargeLimit === 'unsupported' && pluggedFraction !== null && all.seconds / 3600 >= MIN_TRACKED_HOURS &&
             pluggedFraction >= MOSTLY_PLUGGED) {
@@ -148,9 +150,9 @@ export function diagnose({ battery, all, state, appName = id => id }) {
                 id: 'always-plugged',
                 goal: 'lifespan',
                 severity: 'info',
-                title: 'Mostly plugged in',
-                detail: 'This battery has no charge limit. Kept at 100 % on the charger it wears faster; unplugging now and then, or running between about 20 and 80 %, helps it last.',
-                evidence: `${Math.round(pluggedFraction * 100)} % of the tracked time was on the charger.`,
+                title: _('Mostly plugged in'),
+                detail: _('This battery has no charge limit. Kept at 100 % on the charger it wears faster; unplugging now and then, or running between about 20 and 80 %, helps it last.'),
+                evidence: fill(_('{percent} % of the tracked time was on the charger.'), { percent: Math.round(pluggedFraction * 100) }),
                 estimate: null,
                 action: null,
             });
@@ -163,9 +165,9 @@ export function diagnose({ battery, all, state, appName = id => id }) {
             id: 'energy-unreadable',
             goal: 'data',
             severity: 'info',
-            title: 'Power readings are not available',
-            detail: 'Apps are ranked by CPU time only. Enabling CPU power readings (Troubleshooting) gives energy figures.',
-            evidence: 'The CPU energy counters cannot be read by this user.',
+            title: _('Power readings are not available'),
+            detail: _('Apps are ranked by CPU time only. Enabling CPU power readings (Troubleshooting) gives energy figures.'),
+            evidence: _('The CPU energy counters cannot be read by this user.'),
             estimate: null,
             action: null,
         });

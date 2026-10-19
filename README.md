@@ -78,7 +78,9 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   ├── ui-driver/            # scripts/dev.sh test-ui (isolated headless shell; hostile-gtk.css stands in for a third-party theme)
 │   ├── overhead-driver/      # scripts/dev.sh test-overhead
 │   ├── compat/               # scripts/dev.sh test-compat (GNOME 46-50 in containers)
+│   ├── i18n/                 # scripts/dev.sh test-i18n (literal text shown without gettext)
 │   └── bench/                # scripts/dev.sh benchmark
+├── po/                       # resource-pulse.pot: the strings to translate (scripts/dev.sh pot)
 ├── scripts/dev.sh            # Install, test, lint, pack
 └── docs/                     # spec.md (original spec), PLAN.md (milestones and verification)
 ```
@@ -93,6 +95,8 @@ The installed extension is a symlink to `src/` (`scripts/dev.sh` creates it).
 npm ci && ./scripts/dev.sh lint   # ESLint (development dependency only; the extension has no npm dependencies)
 ./scripts/dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
 ./scripts/dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
+./scripts/dev.sh test-i18n   # every string on screen goes through gettext: a source scan, the template is current, and the panel and window in a pseudo-language (⟦…⟧)
+./scripts/dev.sh pot         # rewrite po/resource-pulse.pot after changing text (test-i18n fails until it is current)
 RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab
 ./scripts/dev.sh test-headless 10    # enable for 10 s in an isolated shell and scan its log
 ./scripts/dev.sh test-overhead       # the extension's own CPU cost inside the shell (off / on / open / CPU tab), menu churn, 20 min leak soak
@@ -121,7 +125,7 @@ GitHub Actions (`.github/workflows/ci.yml`):
 - **Session figures** (network totals, power average and peak) start over when the extension is disabled, which GNOME does on every screen lock.
 - **Top bar room**: when the pinned metrics do not fit beside the clock, the last-pinned ones show only their icon (the value is in the hover tooltip) until there is room again. Pin the metrics you most want to read first.
 - **Battery use per app** is an estimate: CPU package energy shared by CPU time. Display, Wi-Fi and the rest of the machine cannot be measured per app on Linux and are shown as one line. Without readable RAPL counters apps are ranked by CPU time only. GPU time needs a driver that publishes DRM fdinfo (i915, xe, amdgpu; not the NVIDIA driver), and only Intel has an uncore energy counter to share by it; elsewhere graphics energy stays with the CPU share. GNOME disables extensions while the screen is locked, so the battery used then is shown but not attributed. A scope that ends between two samples loses up to 30 s of its CPU time. Apps started from a terminal count towards the terminal.
-- **Language**: the interface is English only.
+- **Language**: English only so far. Every string goes through gettext and `po/resource-pulse.pot` lists them (about 400), so a translation needs no code: copy it to `po/<language>.po` (for example `po/de.po`), translate the `msgstr` lines (keep `{placeholders}` and units as they are), and run `./scripts/dev.sh reload` (development copy) or `./scripts/dev.sh pack` (zip).
 - **GNOME Shell versions**: developed and used on 50. Versions 46 to 49 are covered by the automated tests in containers (software rendering, Fedora builds), not by daily use. On 45 the menu does not render, so it is not listed.
 
 ## Installation & Deployment

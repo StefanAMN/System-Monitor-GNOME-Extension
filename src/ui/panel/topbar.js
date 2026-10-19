@@ -7,7 +7,8 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, gpuTooltip } from '../../lib/common/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, gpuTooltip, na } from '../../lib/common/present.js';
+import { _, fill } from '../../lib/common/i18n.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatDuration, batteryStateLabel } from '../../lib/common/format.js';
 import { TOP_BAR_FIT_MARGIN_PX, METRIC_NAMES } from './constants.js';
 
@@ -26,7 +27,7 @@ export class TopbarMethods {
 
         // Shown while any metric, pinned or not, is in alert; its tooltip
         // says which.
-        this._dangerBox = new St.BoxLayout({ reactive: true, track_hover: true, visible: false, style_class: 'resource-pulse-danger', accessible_name: 'Alerts' });
+        this._dangerBox = new St.BoxLayout({ reactive: true, track_hover: true, visible: false, style_class: 'resource-pulse-danger', accessible_name: _('Alerts') });
         this._dangerBox.add_child(new St.Icon({
             icon_name: 'dialog-warning-symbolic',
             // Not system-status-icon: its panel padding makes the ⚠ wider
@@ -73,7 +74,7 @@ export class TopbarMethods {
                 const template = labelTemplate(key, templateOpts);
                 const reserve = () => {
                     let style = null;
-                    if (label.text !== 'n/a') {
+                    if (label.text !== na()) {
                         // Not styled off the stage; style-changed measures
                         // once it is.
                         if (!label.get_stage()) return;
@@ -100,7 +101,7 @@ export class TopbarMethods {
                 // Into or out of 'n/a': the reserved room follows.
                 let unavailable = false;
                 label.connect('notify::text', () => {
-                    if ((label.text === 'n/a') === unavailable) return;
+                    if ((label.text === na()) === unavailable) return;
                     unavailable = !unavailable;
                     reserve();
                 });
@@ -110,7 +111,7 @@ export class TopbarMethods {
             box.connect('enter-event', () => {
                 if (this._tooltipTexts[key]) {
                     // A label hidden for lack of room: its value leads the tooltip.
-                    const hidden = label && !label.visible ? `${METRIC_NAMES[key]}: ${label.text}\n` : '';
+                    const hidden = label && !label.visible ? `${fill(_('{metric}: {value}'), { metric: METRIC_NAMES[key], value: label.text })}\n` : '';
                     this._showTooltip(box, hidden + this._tooltipTexts[key]);
                 }
             });
@@ -207,46 +208,56 @@ export class TopbarMethods {
         if (!frame) {
             if (data.cpu) {
                 const loadStr = data.cpu.loadavg ? data.cpu.loadavg.map(v => v.toFixed(2)).join(', ') : '--';
-                this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || 'CPU'}\nLoad: ${loadStr}${data.cpu.frequency ? `\nFreq: ${data.cpu.frequency}` : ''}`;
+                this._tooltipTexts['cpu'] = `${data.cpu.hardwareModel || _('CPU')}\n${fill(_('Load: {load}'), { load: loadStr })}` +
+                    (data.cpu.frequency ? `\n${fill(_('Freq: {frequency}'), { frequency: data.cpu.frequency })}` : '');
             }
             if (data.mem) {
                 const usedStr = formatBytes(data.mem.used, useGiB);
                 const totalStr = formatBytes(data.mem.total, useGiB);
                 const availStr = formatBytes(data.mem.available, useGiB);
-                this._tooltipTexts['memory'] = `Used: ${usedStr} / ${totalStr}\nAvailable: ${availStr}\nSwap: ${Math.round(data.mem.swapPercent || 0)}%`;
+                this._tooltipTexts['memory'] = fill(_('Used: {used} / {total}\nAvailable: {available}\nSwap: {swap}%'),
+                    { used: usedStr, total: totalStr, available: availStr, swap: Math.round(data.mem.swapPercent || 0) });
             }
             if (data.bat && !data.bat.present)
-                this._tooltipTexts['battery'] = 'Battery not available\nNo battery was detected.';
+                this._tooltipTexts['battery'] = _('Battery not available\nNo battery was detected.');
             if (data.bat && data.bat.present) {
                 const state = batteryStateLabel(data.bat.state);
                 let timeStr = '';
                 if (data.bat.timeRemaining > 0)
-                    timeStr = ` · ${formatDuration(data.bat.timeRemaining)} ${data.bat.state === 'charging' ? 'to full' : 'left'}`;
-                this._tooltipTexts['battery'] = `Battery: ${data.bat.percent.toFixed(1)}% (${state}${timeStr})\nHealth: ${data.bat.health.toFixed(1)}% · Rate: ${(data.bat.energyRate || 0).toFixed(1)}W`;
+                    timeStr = ` · ${fill(data.bat.state === 'charging' ? _('{time} to full') : _('{time} left'), { time: formatDuration(data.bat.timeRemaining) })}`;
+                this._tooltipTexts['battery'] = fill(_('Battery: {percent}% ({state})\nHealth: {health}% · Rate: {rate}W'), {
+                    percent: data.bat.percent.toFixed(1), state: state + timeStr,
+                    health: data.bat.health.toFixed(1), rate: (data.bat.energyRate || 0).toFixed(1),
+                });
             }
             if (data.pwr) {
                 const readout = powerReadout(data.pwr);
                 if (readout.value === null) {
-                    this._tooltipTexts['power'] = `Power draw not available\n${readout.reason}`;
+                    this._tooltipTexts['power'] = `${_('Power draw not available')}\n${readout.reason}`;
                 } else {
-                    const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : 'n/a on AC';
-                    this._tooltipTexts['power'] = `System Draw: ${sys}\nCPU Package: ${data.pwr.packagePower !== null ? data.pwr.packagePower.toFixed(1) + 'W' : 'n/a'}`;
+                    const sys = data.pwr.systemPower !== null ? `${data.pwr.systemPower.toFixed(1)}W` : _('n/a on AC');
+                    this._tooltipTexts['power'] = fill(_('System Draw: {system}\nCPU Package: {package}'),
+                        { system: sys, package: data.pwr.packagePower !== null ? `${data.pwr.packagePower.toFixed(1)}W` : na() });
                 }
             }
             if (data.dsk && data.dsk.mounts && data.dsk.mounts.length > 0) {
                 const root = data.dsk.mounts[0];
-                this._tooltipTexts['disk'] = `Space used on /: ${Math.round(root.percent)}% (${formatBytes(root.free, useGiB)} free)\nBusy: ${Math.round(data.dsk.diskPercent || 0)}% · Read ${formatSpeed(data.dsk.readRate || 0)} · Write ${formatSpeed(data.dsk.writeRate || 0)}`;
+                this._tooltipTexts['disk'] = fill(_('Space used on /: {percent}% ({free} free)\nBusy: {busy}% · Read {read} · Write {write}'), {
+                    percent: Math.round(root.percent), free: formatBytes(root.free, useGiB), busy: Math.round(data.dsk.diskPercent || 0),
+                    read: formatSpeed(data.dsk.readRate || 0), write: formatSpeed(data.dsk.writeRate || 0),
+                });
             }
             if (data.net && data.net.total) {
                 const sessRx = formatBytes(data.net.sessionRx || 0, useGiB);
                 const sessTx = formatBytes(data.net.sessionTx || 0, useGiB);
-                this._tooltipTexts['network'] = `Download: ${formatSpeed(data.net.total.rxRate)}\nUpload: ${formatSpeed(data.net.total.txRate)}\nSession: ↓ ${sessRx}  ↑ ${sessTx}`;
+                this._tooltipTexts['network'] = fill(_('Download: {down}\nUpload: {up}\nSession: ↓ {sessionDown}  ↑ {sessionUp}'),
+                    { down: formatSpeed(data.net.total.rxRate), up: formatSpeed(data.net.total.txRate), sessionDown: sessRx, sessionUp: sessTx });
             }
             if (data.thm) {
-                const fanInfo = data.thm.fans && data.thm.fans.length > 0 ? `\nFan: ${data.thm.fans[0].rpm} RPM` : '';
+                const fanInfo = data.thm.fans && data.thm.fans.length > 0 ? `\n${fill(_('Fan: {rpm} RPM'), { rpm: data.thm.fans[0].rpm })}` : '';
                 this._tooltipTexts['thermal'] = thermalUnavailable(data.thm)
-                    ? 'Temperature not available\nNo readable hwmon or thermal-zone sensor was found.'
-                    : `Package Temp: ${formatTemp(data.thm.packageTemp, tempUnit)}${fanInfo}`;
+                    ? _('Temperature not available\nNo readable hwmon or thermal-zone sensor was found.')
+                    : fill(_('Package Temp: {temp}'), { temp: formatTemp(data.thm.packageTemp, tempUnit) }) + fanInfo;
             }
             if (data.gpu) this._tooltipTexts['gpu'] = gpuTooltip(data.gpu, tempUnit);
         }
@@ -269,16 +280,17 @@ export class TopbarMethods {
                 if (batFmt === 'percent-time' && data.bat.timeRemaining > 0) {
                     const h = Math.floor(data.bat.timeRemaining / 3600);
                     const m = Math.floor((data.bat.timeRemaining % 3600) / 60);
-                    text = `${basePct} · ${h}h ${m}m`;
+                    // Translators: hours and minutes of battery left, kept short for the top bar.
+                    text = `${basePct} · ${fill(_('{h}h {m}m'), { h, m })}`;
                 } else {
                     text = basePct;
                 }
             }
             else if (key === 'battery' && data.bat && data.bat.present === false && data.bat.state)
-                text = 'n/a';
+                text = na();
             else if (key === 'power' && data.pwr) {
                 const readout = powerReadout(data.pwr);
-                text = readout.value === null ? 'n/a' : `${readout.value.toFixed(1)}W`;
+                text = readout.value === null ? na() : `${readout.value.toFixed(1)}W`;
             }
             else if (key === 'disk' && data.dsk && data.dsk.mounts.length > 0)
                 text = `${Math.round(data.dsk.mounts[0].percent)}%`;
@@ -292,8 +304,8 @@ export class TopbarMethods {
                 }
             }
             else if (key === 'thermal' && data.thm)
-                text = thermalUnavailable(data.thm) ? 'n/a' : formatTemp(data.thm.packageTemp, tempUnit);
-            else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : 'n/a';
+                text = thermalUnavailable(data.thm) ? na() : formatTemp(data.thm.packageTemp, tempUnit);
+            else if (key === 'gpu' && data.gpu) text = data.gpu.present ? `${Math.round(data.gpu.percent)}%` : na();
 
             // Also what screen readers are told, labelled or not (compact).
             widget.text = text;

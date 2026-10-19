@@ -1,0 +1,1779 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the Resource Pulse package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Resource Pulse\n"
+"Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
+"Extension/issues\n"
+"POT-Creation-Date: 2026-10-19 09:50+0300\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
+
+#: src/extension.js:172
+msgid "Resource Pulse panel"
+msgstr ""
+
+#: src/lib/collectors/cpu.js:48 src/lib/collectors/cpu.js:129
+#: src/lib/collectors/cpu.js:265 src/ui/panel/dashboard.js:38
+msgid "Unknown CPU"
+msgstr ""
+
+#: src/lib/collectors/cpu.js:142 src/lib/collectors/cpu.js:271
+msgid "Linux OS"
+msgstr ""
+
+#: src/lib/collectors/gpu.js:424
+msgid "No Active GPU"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:12
+msgid "Motherboard"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:13
+msgid "NVMe Drive"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:13
+msgid "NVMe {sensor}"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:14
+msgid "Wi-Fi Adapter"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:15 src/ui/panel/pages/power.js:19
+msgid "CPU Package"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:16
+msgid "CPU Package (Tctl)"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:17
+msgid "CPU Die (Tdie)"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:18
+msgid "CPU {sensor}"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:99
+msgid "Fan {n}"
+msgstr ""
+
+#: src/lib/collectors/thermal.js:111
+msgid "Thermal Zone {n}"
+msgstr ""
+
+#: src/lib/common/appnames.js:7
+msgid "System services"
+msgstr ""
+
+#: src/lib/common/appnames.js:8
+msgid "Kernel and other users"
+msgstr ""
+
+#: src/lib/common/appnames.js:9
+msgid "Other apps"
+msgstr ""
+
+#: src/lib/common/appnames.js:10
+msgid "Terminal"
+msgstr ""
+
+#: src/lib/common/appnames.js:14
+msgid "Input methods (IBus)"
+msgstr ""
+
+#: src/lib/common/appnames.js:15
+msgid "Desktop portal"
+msgstr ""
+
+#: src/lib/common/appnames.js:16
+msgid "Desktop portal (GNOME)"
+msgstr ""
+
+#: src/lib/common/appnames.js:17 src/lib/common/appnames.js:18
+msgid "PipeWire (sound)"
+msgstr ""
+
+#: src/lib/common/appnames.js:19
+msgid "WirePlumber (sound)"
+msgstr ""
+
+#: src/lib/common/appnames.js:20
+msgid "Message bus"
+msgstr ""
+
+#. Translators: an uptime, kept short: days and hours, hours and minutes, minutes.
+#: src/lib/common/format.js:46
+msgid "{d}d {h}h"
+msgstr ""
+
+#. Translators: hours and minutes of battery left, kept short for the top bar.
+#: src/lib/common/format.js:47 src/lib/common/format.js:54
+#: src/ui/panel/topbar.js:284
+msgid "{h}h {m}m"
+msgstr ""
+
+#. Translators: how much a chart shows, kept short: "2m", "60s".
+#: src/lib/common/format.js:48 src/ui/panel/polling.js:51
+msgid "{m}m"
+msgstr ""
+
+#: src/lib/common/format.js:59
+msgid "Charging"
+msgstr ""
+
+#: src/lib/common/format.js:60
+msgid "Discharging"
+msgstr ""
+
+#: src/lib/common/format.js:61 src/ui/panel/dashboard.js:135
+msgid "Fully Charged"
+msgstr ""
+
+#: src/lib/common/format.js:62
+msgid "Not Charging"
+msgstr ""
+
+#: src/lib/common/format.js:63
+msgid "Empty"
+msgstr ""
+
+#: src/lib/common/format.js:64
+msgid "Unknown"
+msgstr ""
+
+#. Translators: "not available", in a top-bar value or a card; keep it short.
+#: src/lib/common/present.js:28
+msgid "n/a"
+msgstr ""
+
+#: src/lib/common/present.js:37
+msgid "Not sampled yet"
+msgstr ""
+
+#: src/lib/common/present.js:39
+msgid "On Battery"
+msgstr ""
+
+#: src/lib/common/present.js:41
+msgid "AC · CPU package only"
+msgstr ""
+
+#: src/lib/common/present.js:45
+msgid ""
+"CPU energy counters are not readable.\n"
+"See \"Enable CPU Power Monitoring\" in settings."
+msgstr ""
+
+#: src/lib/common/present.js:62
+msgid ""
+"GPU not available\n"
+"No supported GPU was detected."
+msgstr ""
+
+#: src/lib/common/present.js:64
+msgid "VRAM: {percent}%"
+msgstr ""
+
+#: src/lib/common/present.js:65
+msgid "Temp: {temp}"
+msgstr ""
+
+#: src/lib/common/present.js:66 src/lib/common/settingsmodel.js:22
+#: src/lib/common/settingsmodel.js:122 src/ui/panel/constants.js:20
+#: src/ui/panel/constants.js:49 src/ui/panel/dashboard.js:372
+#: src/ui/panel/details.js:13 src/ui/panel/overview.js:625
+msgid "GPU"
+msgstr ""
+
+#: src/lib/common/present.js:66
+msgid "{gpu}: {percent}%"
+msgstr ""
+
+#. Translators: how old a chart point is, under the pointer; kept short.
+#: src/lib/common/present.js:196
+msgid "now"
+msgstr ""
+
+#: src/lib/common/present.js:197
+msgid "{s}s ago"
+msgstr ""
+
+#: src/lib/common/present.js:201
+msgid "{h}h ago"
+msgstr ""
+
+#: src/lib/common/present.js:201
+msgid "{h}h {m}m ago"
+msgstr ""
+
+#: src/lib/common/present.js:205
+msgid "{m}m ago"
+msgstr ""
+
+#: src/lib/common/present.js:205
+msgid "{m}m {s}s ago"
+msgstr ""
+
+#: src/lib/common/present.js:215
+msgid "no reading yet"
+msgstr ""
+
+#: src/lib/common/present.js:216
+msgid "not available"
+msgstr ""
+
+#: src/lib/common/present.js:217
+msgid "{n} hour"
+msgid_plural "{n} hours"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/common/present.js:218
+msgid "{n} minute"
+msgid_plural "{n} minutes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/lib/common/present.js:222
+msgid "download"
+msgstr ""
+
+#: src/lib/common/present.js:223
+msgid "upload"
+msgstr ""
+
+#: src/lib/common/present.js:224
+msgid "per second"
+msgstr ""
+
+#: src/lib/common/present.js:225
+msgid "watts"
+msgstr ""
+
+#: src/lib/common/raplfix.js:23
+msgid ""
+"Makes CPU energy counters readable by every local program (a known side "
+"channel). Undo by deleting {path}."
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:107
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:46
+#: src/ui/panel/details.js:12 src/ui/panel/details.js:37
+#: src/ui/panel/overview.js:618 src/ui/panel/topbar.js:211
+msgid "CPU"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:91
+#: src/lib/common/settingsmodel.js:112 src/ui/panel/constants.js:19
+#: src/ui/panel/constants.js:47 src/ui/panel/details.js:12
+#: src/ui/panel/overview.js:619
+msgid "Memory"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:17 src/ui/panel/constants.js:19
+#: src/ui/panel/details.js:12 src/ui/panel/overview.js:620
+msgid "Battery"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:18 src/ui/panel/constants.js:19
+#: src/ui/panel/details.js:12 src/ui/panel/overview.js:624
+#: src/ui/panel/pages/gpu.js:60
+msgid "Power"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:19 src/ui/panel/constants.js:20
+#: src/ui/panel/details.js:13 src/ui/panel/overview.js:621
+msgid "Disk"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:20 src/ui/panel/constants.js:20
+#: src/ui/panel/details.js:13 src/ui/panel/overview.js:622
+msgid "Network"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:21 src/ui/panel/details.js:13
+#: src/ui/panel/overview.js:623
+msgid "Thermal"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:39
+msgid "Top bar"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:42
+msgid "Pinned metrics"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:42
+msgid "numbered in top-bar order"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:43
+msgid ""
+"Shown permanently in the top bar. When they do not all fit, the last ones "
+"show only their icon."
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:46
+msgid "Compact (icons only)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:47
+msgid "Hide the values in the top bar and show only the icons"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:50
+msgid "Tooltips"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:51
+msgid "Show details when the pointer rests on a metric in the top bar"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:54
+msgid "Battery shows"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:55
+msgid "What the battery metric displays in the top bar"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:57
+msgid "Percentage (85%)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:58
+msgid "Percentage and time (85% · 2h 15m)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:62
+msgid "Network shows"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:63
+msgid "What the network metric displays in the top bar"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:65
+msgid "Download (↓)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:66
+msgid "Upload (↑)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:67
+msgid "Download and upload (↓ ↑)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:74
+msgid "Units and refresh"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:77
+msgid "Update every"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:78
+msgid "Seconds between two readings (1 to 10)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:82
+msgid "Smooth changes"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:83
+msgid ""
+"Values glide to each new reading over one update; CPU, GPU, network and disk "
+"are lightly averaged"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:86 src/lib/common/settingsmodel.js:117
+#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:48
+#: src/ui/panel/constants.js:71 src/ui/panel/pages/gpu.js:55
+#: src/ui/panel/pages/gpu.js:108
+msgid "Temperature"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:87
+msgid "Unit for every temperature shown"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:88
+msgid "Celsius (°C)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:88
+msgid "Fahrenheit (°F)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:92
+msgid "Decimal gigabytes or binary gibibytes"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:93
+msgid "Gibibytes (GiB)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:93
+msgid "Gigabytes (GB)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:99 src/ui/panel/topbar.js:30
+msgid "Alerts"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:100
+msgid ""
+"a value that stays above its limit for 30 seconds shows ⚠ in the top bar"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:103
+msgid "Notifications"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:104
+msgid "Also send a notification, at most one per metric every 10 minutes"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:108
+msgid "CPU usage above this is shown as a warning"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:113
+msgid "Memory usage above this is shown as a warning"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:118
+msgid "CPU temperature above this is shown as a warning (stored in °C)"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:123
+msgid "GPU usage above this is shown as a warning"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:127
+msgid "Disk space"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:128
+msgid "Space used on / above this is shown as a warning"
+msgstr ""
+
+#. Translators: an alert, such as "CPU 97 % for 3 min".
+#: src/lib/engine/alerts.js:133
+msgid "{name} {value} for {minutes} min"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:69
+msgid "{app} works in the background"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:70
+msgid ""
+"Quit it when you are not using it, or check its settings for background "
+"activity."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:71
+#, javascript-format
+msgid ""
+"{percent} % of its CPU time on battery was without focus: about {wh} Wh over "
+"{hours} h on battery."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:85
+msgid "Performance power mode on battery"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:86
+msgid ""
+"Balanced mode keeps the processor from running at its highest clocks when "
+"nothing needs them."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:87
+msgid "The power mode is \"performance\" and the machine runs on battery."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:89
+msgid "Switch to Balanced"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:97
+msgid "Screen brightness is high"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:98
+msgid ""
+"The display is often the largest single consumer of a laptop. Its use cannot "
+"be measured here, so no saving is estimated."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:99
+msgid "The backlight is at {percent} %."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:109
+msgid "The processor runs hot on battery"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:110
+msgid ""
+"Heat means power: look at the apps at the top of the list, and keep the air "
+"vents free."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:111
+#, javascript-format
+msgid ""
+"{percent} % of the time on battery the CPU was above the temperature alert."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:125
+msgid "Battery health"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:125
+msgid "The battery is worn"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:127
+msgid ""
+"It holds noticeably less than when new; runtime per charge is shorter by the "
+"same amount."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:128
+msgid "Capacity is within the normal range for its age."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:130
+#, javascript-format
+msgid ""
+"It holds {percent} % of its design capacity after {cycles} charge cycles."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:131
+#, javascript-format
+msgid "It holds {percent} % of its design capacity."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:141
+msgid "Limit charging to about 80 %"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:142
+msgid ""
+"Keeping a battery full wears it faster. This battery supports a charge "
+"limit: turn on \"Preserve Battery Health\" in Settings › Power."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:143
+msgid "The battery supports a charge limit and it is off."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:145
+msgid "Open Power Settings"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:153
+msgid "Mostly plugged in"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:154
+msgid ""
+"This battery has no charge limit. Kept at 100 % on the charger it wears "
+"faster; unplugging now and then, or running between about 20 and 80 %, helps "
+"it last."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:155
+#, javascript-format
+msgid "{percent} % of the tracked time was on the charger."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:168
+msgid "Power readings are not available"
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:169
+msgid ""
+"Apps are ranked by CPU time only. Enabling CPU power readings "
+"(Troubleshooting) gives energy figures."
+msgstr ""
+
+#: src/lib/engine/diagnostics.js:170
+msgid "The CPU energy counters cannot be read by this user."
+msgstr ""
+
+#. Translators: chart ranges on a chip, kept short: one hour, 24 hours.
+#: src/lib/engine/longhistory.js:116
+msgid "1h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:117
+msgid "24h"
+msgstr ""
+
+#: src/ui/panel/a11y.js:13
+msgid "{metric} {value}"
+msgstr ""
+
+#: src/ui/panel/a11y.js:15
+msgid "Alerts: {alerts}"
+msgstr ""
+
+#: src/ui/panel/a11y.js:20
+msgid "{metric} {value}, opens {metric} details"
+msgstr ""
+
+#: src/ui/panel/alerts.js:51
+#, javascript-format
+msgid "{name} {percent} % full"
+msgstr ""
+
+#: src/ui/panel/alerts.js:53
+msgid "{free} free"
+msgstr ""
+
+#: src/ui/panel/alerts.js:66
+msgid "No alerts"
+msgstr ""
+
+#: src/ui/panel/alerts.js:112
+msgid "{process} using {memory}"
+msgstr ""
+
+#: src/ui/panel/alerts.js:113
+msgid "{process} using {cores} cores"
+msgstr ""
+
+#: src/ui/panel/constants.js:46
+msgid "CPU usage is high"
+msgstr ""
+
+#: src/ui/panel/constants.js:47
+msgid "Memory is almost full"
+msgstr ""
+
+#: src/ui/panel/constants.js:48
+msgid "The processor is hot"
+msgstr ""
+
+#: src/ui/panel/constants.js:49
+msgid "GPU usage is high"
+msgstr ""
+
+#: src/ui/panel/constants.js:50
+msgid "Disk /"
+msgstr ""
+
+#: src/ui/panel/constants.js:50
+msgid "Disk space is running out"
+msgstr ""
+
+#: src/ui/panel/constants.js:51
+msgid "The system is short of memory"
+msgstr ""
+
+#: src/ui/panel/constants.js:51 src/ui/panel/pages/memory.js:28
+msgid "Waiting for memory"
+msgstr ""
+
+#: src/ui/panel/constants.js:69
+msgid "Battery charge"
+msgstr ""
+
+#: src/ui/panel/constants.js:69
+msgid "Battery charge rate"
+msgstr ""
+
+#: src/ui/panel/constants.js:69
+msgid "CPU usage"
+msgstr ""
+
+#: src/ui/panel/constants.js:69
+msgid "Memory use"
+msgstr ""
+
+#: src/ui/panel/constants.js:69
+msgid "Power draw"
+msgstr ""
+
+#: src/ui/panel/constants.js:70
+msgid "Disk read rate"
+msgstr ""
+
+#: src/ui/panel/constants.js:70
+msgid "Disk write rate"
+msgstr ""
+
+#: src/ui/panel/constants.js:70
+msgid "Download rate"
+msgstr ""
+
+#: src/ui/panel/constants.js:70
+msgid "Upload rate"
+msgstr ""
+
+#: src/ui/panel/constants.js:71
+msgid "GPU usage"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:21
+#, javascript-format
+msgid "{percent} % of the time"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:22
+msgid "n/a (no pressure figures from this kernel)"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:42
+msgid "{n} core"
+msgid_plural "{n} cores"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/panel/dashboard.js:44
+msgid "{n} thread"
+msgid_plural "{n} threads"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/panel/dashboard.js:97
+msgid "In: {in} · Out: {out}"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:98
+msgid "Idle"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:114 src/ui/panel/topbar.js:227
+msgid "{time} left"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:114 src/ui/panel/topbar.js:227
+msgid "{time} to full"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:128
+msgid "{h}h {m}m to full"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:133
+msgid "{h}h {m}m remaining"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:166
+msgid "Charging (+{watts} W)"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:168
+msgid "Energy counters not readable"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:181
+msgid "0.0 W (Full)"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:206
+#, javascript-format
+msgid "used on / · {busy}% busy"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:305
+msgid "No sensor found"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:322
+msgid "No sensors found"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:377
+msgid "No GPU Detected"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:390
+msgid "{brand} Graphics"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:393
+msgid "Driver: {driver}"
+msgstr ""
+
+#: src/ui/panel/dashboard.js:485
+msgid ""
+"Your processes only: {n} process of another user (a system service) cannot "
+"be read without administrator rights."
+msgid_plural ""
+"Your processes only: {n} processes of other users (system services) cannot "
+"be read without administrator rights."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/panel/details.js:28
+msgid "Back to the overview"
+msgstr ""
+
+#: src/ui/panel/details.js:41 src/ui/panel/overview.js:591
+#: src/ui/prefs/window.js:43
+msgid "Settings"
+msgstr ""
+
+#: src/ui/panel/details.js:58 src/ui/panel/polling.js:251
+msgid "live"
+msgstr ""
+
+#: src/ui/panel/details.js:61
+msgid "Last {span}"
+msgstr ""
+
+#: src/ui/panel/details.js:61
+msgid "Recent samples"
+msgstr ""
+
+#: src/ui/panel/overview.js:574
+msgid "System Overview"
+msgstr ""
+
+#: src/ui/panel/overview.js:577
+msgid "Refresh now"
+msgstr ""
+
+#: src/ui/panel/overview.js:651
+msgid "Intel Processor"
+msgstr ""
+
+#: src/ui/panel/overview.js:652
+msgid "Cores & Threads"
+msgstr ""
+
+#: src/ui/panel/overview.js:662 src/ui/panel/pages/cpu.js:66
+msgid "Uptime"
+msgstr ""
+
+#: src/ui/panel/overview.js:667 src/ui/panel/pages/cpu.js:54
+msgid "Load Average"
+msgstr ""
+
+#: src/ui/panel/overview.js:672
+msgid "OS"
+msgstr ""
+
+#: src/ui/panel/overview.js:699
+msgid "Open System Monitor"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:15
+msgid "Charge Level History (%)"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:23
+msgid "Charge/Discharge Rate (W)"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:30 src/ui/panel/pages/disk.js:27
+#: src/ui/panel/pages/memory.js:17 src/ui/panel/pages/power.js:16
+msgid "Stats"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:31
+msgid "State"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:33
+msgid "Time Estimate"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:35
+msgid "Health"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:37
+msgid "Cycle Count"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:39
+msgid "Current / Full"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:41
+msgid "Design Capacity"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:70
+msgid "{line} Opens the Tracking page."
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:76
+msgid ""
+"Battery use per app: tracking is off. Open the Tracking page to start it."
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:83
+msgid "Battery use per app: no time on battery recorded today yet."
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:91
+#, javascript-format
+msgid "Top app on battery today: {app} ({share} % of the processor's energy)."
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:92
+#, javascript-format
+msgid "Top app on battery today: {app} ({share} % of the processor's time)."
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:16
+msgid "CPU Usage"
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:38
+msgid "Per-Core Usage · GHz"
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:60
+msgid "Frequency"
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:76
+msgid "Waiting for CPU"
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:83
+msgid "Top CPU Usage"
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:85 src/ui/panel/pages/memory.js:35
+msgid "Show All"
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:85 src/ui/panel/pages/memory.js:35
+msgid "Show all processes in System Monitor"
+msgstr ""
+
+#: src/ui/panel/pages/cpu.js:115
+msgid "Core {n}"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:12
+msgid "Read Rate (MB/s)"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:20
+msgid "Write Rate (MB/s)"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:28
+msgid "Read rate"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:30
+msgid "Write rate"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:32
+msgid "Busy (active time)"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:34
+msgid "Waiting for disk"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:40
+msgid "Top Disk Usage"
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:43
+msgid "None of your processes is reading or writing right now."
+msgstr ""
+
+#: src/ui/panel/pages/disk.js:55
+msgid "Filesystem Mounts"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:33
+msgid "Graphics Processor"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:37
+msgid "Driver: --"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:50
+msgid "Clock"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:75
+msgid "GPU Utilization (%)"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:84
+msgid "Video Memory (VRAM)"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:93 src/ui/panel/pages/memory.js:18
+msgid "Used / Total"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:95
+msgid "Free VRAM"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:103
+msgid "Performance & Sensors"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:104
+msgid "Core Utilization"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:106
+msgid "Core Clock"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:110
+msgid "Fan Speed"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:112
+msgid "Power Draw"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:123
+msgid "No Active GPU Detected"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:127
+msgid ""
+"GPU telemetry requires NVIDIA proprietary drivers (nvidia-smi), AMD GPU "
+"sysfs (amdgpu), or Intel DRM driver (i915/xe)."
+msgstr ""
+
+#: src/ui/panel/pages/memory.js:11
+msgid "Memory Usage"
+msgstr ""
+
+#: src/ui/panel/pages/memory.js:20
+msgid "Available"
+msgstr ""
+
+#: src/ui/panel/pages/memory.js:22
+msgid "Buffers / Cache"
+msgstr ""
+
+#: src/ui/panel/pages/memory.js:24
+msgid "Swap"
+msgstr ""
+
+#: src/ui/panel/pages/memory.js:26
+msgid "Swap Activity"
+msgstr ""
+
+#: src/ui/panel/pages/memory.js:34
+msgid "Top Memory Usage"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:12
+msgid "Download Rate"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:20
+msgid "Upload Rate"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:27
+msgid "Stats & Session Totals"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:28
+msgid "Current Download"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:30
+msgid "Current Upload"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:32
+msgid "Session Downloaded"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:34
+msgid "Session Uploaded"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:37 src/ui/prefs/tracking.js:21
+msgid "Today"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:39
+msgid "This month"
+msgstr ""
+
+#: src/ui/panel/pages/network.js:45
+msgid "Interfaces"
+msgstr ""
+
+#: src/ui/panel/pages/power.js:10
+msgid "Draw History"
+msgstr ""
+
+#: src/ui/panel/pages/power.js:17
+msgid "System Draw"
+msgstr ""
+
+#: src/ui/panel/pages/power.js:21
+msgid "GPU Draw"
+msgstr ""
+
+#: src/ui/panel/pages/power.js:23
+msgid "Charging Rate"
+msgstr ""
+
+#: src/ui/panel/pages/power.js:25
+msgid "Session Peak"
+msgstr ""
+
+#: src/ui/panel/pages/power.js:27
+msgid "Session Avg"
+msgstr ""
+
+#: src/ui/panel/pages/thermal.js:10
+msgid "Temperature History"
+msgstr ""
+
+#: src/ui/panel/pages/thermal.js:16
+msgid "Components"
+msgstr ""
+
+#: src/ui/panel/pages/thermal.js:22
+msgid "Fans"
+msgstr ""
+
+#: src/ui/panel/polling.js:51
+msgid "{s}s"
+msgstr ""
+
+#: src/ui/panel/polling.js:460
+msgid "{chart} over time"
+msgstr ""
+
+#: src/ui/panel/processes.js:17
+msgid "{process}, {value} CPU, opens System Monitor"
+msgstr ""
+
+#: src/ui/panel/processes.js:17
+msgid "{process}, {value} disk, opens System Monitor"
+msgstr ""
+
+#: src/ui/panel/processes.js:17
+msgid "{process}, {value} memory, opens System Monitor"
+msgstr ""
+
+#: src/ui/panel/processes.js:44 src/ui/panel/processes.js:85
+msgid "End"
+msgstr ""
+
+#: src/ui/panel/processes.js:45 src/ui/panel/processes.js:85
+#: src/ui/panel/processes.js:117 src/ui/prefs/tracking.js:266
+msgid "Cancel"
+msgstr ""
+
+#: src/ui/panel/processes.js:83
+msgid "End all {n} {process} processes? Unsaved work in them may be lost."
+msgstr ""
+
+#: src/ui/panel/processes.js:84
+msgid "End {process}? Unsaved work in it may be lost."
+msgstr ""
+
+#: src/ui/panel/processes.js:98
+msgid "{process} belongs to another user and cannot be ended from here."
+msgstr ""
+
+#: src/ui/panel/processes.js:99 src/ui/panel/processes.js:121
+msgid "Close"
+msgstr ""
+
+#: src/ui/panel/processes.js:99
+msgid "{process} has already exited."
+msgstr ""
+
+#: src/ui/panel/processes.js:103
+msgid "Asking {process} to quit…"
+msgstr ""
+
+#: src/ui/panel/processes.js:103
+msgid "Forcing {process} to quit…"
+msgstr ""
+
+#: src/ui/panel/processes.js:111
+msgid "{process} ended."
+msgstr ""
+
+#: src/ui/panel/processes.js:115
+msgid ""
+"{left} of {all} {process} did not quit{error}. Force quit loses unsaved work."
+msgstr ""
+
+#: src/ui/panel/processes.js:117
+msgid "Force quit"
+msgstr ""
+
+#: src/ui/panel/processes.js:121
+msgid "{left} {process} could not be ended{error}."
+msgstr ""
+
+#: src/ui/panel/processes.js:168
+msgid "End process"
+msgstr ""
+
+#: src/ui/panel/processes.js:226
+msgid "{process}, {n} process"
+msgid_plural "{process}, {n} processes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/panel/processes.js:233
+msgid "End {process}"
+msgstr ""
+
+#: src/ui/panel/sizing.js:142
+msgid "Resize the panel"
+msgstr ""
+
+#: src/ui/panel/topbar.js:114
+msgid "{metric}: {value}"
+msgstr ""
+
+#: src/ui/panel/topbar.js:211
+msgid "Load: {load}"
+msgstr ""
+
+#: src/ui/panel/topbar.js:212
+msgid "Freq: {frequency}"
+msgstr ""
+
+#: src/ui/panel/topbar.js:218
+msgid ""
+"Used: {used} / {total}\n"
+"Available: {available}\n"
+"Swap: {swap}%"
+msgstr ""
+
+#: src/ui/panel/topbar.js:222
+msgid ""
+"Battery not available\n"
+"No battery was detected."
+msgstr ""
+
+#: src/ui/panel/topbar.js:228
+msgid ""
+"Battery: {percent}% ({state})\n"
+"Health: {health}% · Rate: {rate}W"
+msgstr ""
+
+#: src/ui/panel/topbar.js:236
+msgid "Power draw not available"
+msgstr ""
+
+#: src/ui/panel/topbar.js:238
+msgid "n/a on AC"
+msgstr ""
+
+#: src/ui/panel/topbar.js:239
+msgid ""
+"System Draw: {system}\n"
+"CPU Package: {package}"
+msgstr ""
+
+#: src/ui/panel/topbar.js:245
+msgid ""
+"Space used on /: {percent}% ({free} free)\n"
+"Busy: {busy}% · Read {read} · Write {write}"
+msgstr ""
+
+#: src/ui/panel/topbar.js:253
+msgid ""
+"Download: {down}\n"
+"Upload: {up}\n"
+"Session: ↓ {sessionDown}  ↑ {sessionUp}"
+msgstr ""
+
+#: src/ui/panel/topbar.js:257
+msgid "Fan: {rpm} RPM"
+msgstr ""
+
+#: src/ui/panel/topbar.js:259
+msgid ""
+"Temperature not available\n"
+"No readable hwmon or thermal-zone sensor was found."
+msgstr ""
+
+#: src/ui/panel/topbar.js:260
+msgid "Package Temp: {temp}"
+msgstr ""
+
+#: src/ui/panel/widgets.js:401
+msgid "no data"
+msgstr ""
+
+#: src/ui/panel/widgets.js:402
+msgid "{average} avg, {peak} peak"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:17
+msgid "Longer runtime per charge"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:18
+msgid "Longer battery life"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:19
+msgid "About these readings"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:32
+msgid "Saves about {watts} W, about {minutes} min more per full charge."
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:33
+msgid "Saves about {watts} W."
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:44
+msgid "Resource Pulse diagnostics, {time} UTC"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:48
+msgid "on AC"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:48
+msgid "on battery"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:49
+msgid "power profile {profile}"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:50
+msgid "backlight {percent} %"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:53
+#, javascript-format
+msgid "battery holds {percent} % of its design capacity after {cycles} cycles"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:54
+#, javascript-format
+msgid "battery holds {percent} % of its design capacity"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:56
+msgid "charge limit {limit}"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:57
+msgid "processor energy not readable"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:59
+msgid "System: {state}"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:59
+msgid "unknown"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:61
+msgid "System: not read yet"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:72
+msgid "No findings."
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:88
+msgid "Diagnostics"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:90
+msgid ""
+"Based on the last 7 days of battery tracking and on how the machine is set "
+"up now. Advice about apps needs tracking to be on."
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:94
+msgid "Check again"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:95 src/ui/prefs/diagnostics.js:189
+msgid "Copy report"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:95
+msgid "Copy the findings and the machine's state as text"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:127
+msgid "Could not do it: {error}"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:146
+msgid "Checking…"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:146
+msgid "Nothing to improve was found"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:147
+msgid "Start tracking on the Tracking page for advice about apps."
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:169
+msgid "The check failed"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:185
+msgid "Copied"
+msgstr ""
+
+#: src/ui/prefs/rows.js:17
+msgid "Not pinned"
+msgstr ""
+
+#: src/ui/prefs/rows.js:17
+msgid "Position {n} in the top bar"
+msgstr ""
+
+#: src/ui/prefs/rows.js:139
+msgid "Drag a bottom corner of the panel to resize it."
+msgstr ""
+
+#: src/ui/prefs/rows.js:139
+msgid "Panel"
+msgstr ""
+
+#: src/ui/prefs/rows.js:140
+msgid "Size"
+msgstr ""
+
+#: src/ui/prefs/rows.js:141
+msgid "Reset"
+msgstr ""
+
+#: src/ui/prefs/rows.js:154
+msgid "Automatic"
+msgstr ""
+
+#: src/ui/prefs/rows.js:154
+msgid "{width} × {height} pixels, set by dragging"
+msgstr ""
+
+#: src/ui/prefs/rows.js:160
+msgid "Troubleshooting"
+msgstr ""
+
+#: src/ui/prefs/rows.js:163
+msgid "CPU power is not readable"
+msgstr ""
+
+#: src/ui/prefs/rows.js:164
+msgid "Enabling it asks for an administrator password."
+msgstr ""
+
+#: src/ui/prefs/rows.js:166
+msgid "Enable"
+msgstr ""
+
+#: src/ui/prefs/rows.js:174
+msgid "CPU power is now readable"
+msgstr ""
+
+#: src/ui/prefs/rows.js:177 src/ui/prefs/rows.js:182
+msgid "Failed: {error}"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:20
+msgid "Last 24 hours"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:22
+msgid "Last 7 days"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:23
+msgid "Last {n} day"
+msgid_plural "Last {n} days"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/prefs/tracking.js:87
+msgid "cannot read the history: {error}"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:96
+msgid "the history file is damaged ({error})"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:215
+msgid "{time} of processor time"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:216
+msgid "{time} of graphics time"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:217
+msgid "{percent} % in the background"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:244
+msgid "Tracking"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:249
+msgid "Battery tracking"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:250
+msgid ""
+"Records which apps use the processor, every {seconds} seconds while you are "
+"logged in. Kept for {days} days, on this computer only."
+msgstr ""
+
+#: src/ui/prefs/tracking.js:254
+msgid "Track battery use per app"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:257
+msgid "Status"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:259
+msgid "History"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:259
+msgid "Recorded figures of the last {n} day"
+msgid_plural "Recorded figures of the last {n} days"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/prefs/tracking.js:260
+msgid "Clear…"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:263
+msgid "Clear the battery history?"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:264
+msgid ""
+"All recorded figures are deleted. Tracking goes on if it is switched on."
+msgstr ""
+
+#: src/ui/prefs/tracking.js:267
+msgid "Clear"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:278
+msgid "Report"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:280
+msgid "Period"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:282
+msgid "Leave out the time on the charger"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:282
+msgid "On battery only"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:286
+msgid "Summary"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:287
+msgid ""
+"Processor energy is shared among apps by the processor time each used, and "
+"the integrated graphics part by graphics time where the machine reports it: "
+"an estimate. The display, radios and the rest of the machine cannot be "
+"measured per app."
+msgstr ""
+
+#: src/ui/prefs/tracking.js:290
+msgid "A full charge lasts"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:290
+msgid "Average drain"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:290
+msgid "Battery used"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:290 src/ui/prefs/tracking.js:351
+msgid "Time on battery"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:298
+msgid "Battery use"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:299
+msgid "battery"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:299
+msgid "processor"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:312
+msgid "Processor idle and platform"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:312
+msgid "Processor, shared among apps"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:312
+msgid "of which graphics"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:313
+msgid "Display, radios and the rest"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:313
+msgid "While locked or asleep"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:321
+msgid "Apps"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:321
+msgid "Most first"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:336
+msgid "Problem: {problem}"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:337
+msgid "Off"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:337
+msgid "Off. The history below is kept until you clear it."
+msgstr ""
+
+#: src/ui/prefs/tracking.js:338
+msgid "Recording. The first figures appear within a minute."
+msgstr ""
+
+#: src/ui/prefs/tracking.js:340
+msgid "Recording · {time} recorded · energy measured"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:341
+msgid ""
+"Recording · {time} recorded · processor time only: power readings are not "
+"available"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:348
+#, javascript-format
+msgid "{percent} % of the battery used"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:350
+#, javascript-format
+msgid "{percent} % of a full charge"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:351
+msgid "Time recorded"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:355
+msgid "on average"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:357
+msgid "at this drain"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:358 src/ui/prefs/tracking.js:360
+msgid "not measured"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:359
+msgid "power readings are not available"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:363
+msgid "by graphics time"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:366
+msgid "not measurable per app"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:366
+msgid "{share}; not measurable per app"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:368
+msgid "not attributed: extensions pause while the screen is locked"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:388
+msgid "Each below the ones above"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:388
+msgid "{n} more"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:393
+msgid "No figures for this period"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:394
+msgid "Switch on tracking above to start recording."
+msgstr ""
+
+#: src/ui/prefs/tracking.js:394
+msgid "Tracking is on; figures appear as time passes."
+msgstr ""
+
+#: src/ui/prefs/window.js:65
+msgid "Back to the panel"
+msgstr ""

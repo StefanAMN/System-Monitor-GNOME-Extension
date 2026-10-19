@@ -10,6 +10,7 @@ import { thermalUnavailable } from '../../lib/common/present.js';
 import { alertReadings, alertLine } from '../../lib/engine/alerts.js';
 import { formatBytes, formatTemp } from '../../lib/common/format.js';
 import { PRESSURE_LIMIT, ALERTS } from './constants.js';
+import { _, fill } from '../../lib/common/i18n.js';
 
 export class AlertsMethods {
     _updateAlerts(data, now) {
@@ -47,10 +48,13 @@ export class AlertsMethods {
         const info = ALERTS[alert.key];
         if (alert.key === 'disk') {
             const free = this._lastDsk?.mounts?.[0]?.free;
-            return `${info.name} ${Math.round(alert.value)} % full${free !== undefined ? ` · ${formatBytes(free, this._settings.get_string('unit-mem') === 'GiB')} free` : ''}`;
+            const full = fill(_('{name} {percent} % full'), { name: _(info.name), percent: Math.round(alert.value) });
+            return free !== undefined
+                ? `${full} · ${fill(_('{free} free'), { free: formatBytes(free, this._settings.get_string('unit-mem') === 'GiB') })}`
+                : full;
         }
         const format = alert.key === 'thermal' ? v => formatTemp(v, tempUnit) : v => `${Math.round(v)} %`;
-        const line = alertLine(alert, now, { name: info.name, format });
+        const line = alertLine(alert, now, { name: _(info.name), format });
         const cause = this._alertCauses[alert.key];
         return cause ? `${line} — ${cause}` : line;
     }
@@ -59,7 +63,7 @@ export class AlertsMethods {
     _alertText() {
         const now = GLib.get_monotonic_time();
         const lines = this._alerts?.active().map(a => this._alertLine(a, now)) ?? [];
-        return lines.length ? lines.join('\n') : 'No alerts';
+        return lines.length ? lines.join('\n') : _('No alerts');
     }
 
     async _onAlertRaised(key, now) {
@@ -105,8 +109,8 @@ export class AlertsMethods {
         const name = top.count > 1 ? `${top.comm} ×${top.count}` : top.comm;
         // Process CPU is per core (100 = one core), so say it in cores.
         return byMemory
-            ? `${name} using ${formatBytes(top.rssBytes, this._settings.get_string('unit-mem') === 'GiB')}`
-            : `${name} using ${(top.cpu / 100).toFixed(1)} cores`;
+            ? fill(_('{process} using {memory}'), { process: name, memory: formatBytes(top.rssBytes, this._settings.get_string('unit-mem') === 'GiB') })
+            : fill(_('{process} using {cores} cores'), { process: name, cores: (top.cpu / 100).toFixed(1) });
     }
 
     _notifyAlert(key, body) {
@@ -117,7 +121,7 @@ export class AlertsMethods {
             });
             Main.messageTray.add(this._notifySource);
         }
-        const notification = new MessageTray.Notification({ source: this._notifySource, title: ALERTS[key].title, body });
+        const notification = new MessageTray.Notification({ source: this._notifySource, title: _(ALERTS[key].title), body });
         notification.connect('activated', () => {
             if (!this._indicator) return;
             this._activeTab = ALERTS[key].tab;

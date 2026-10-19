@@ -10,12 +10,13 @@ import Adw from 'gi://Adw';
 import { diagnose } from '../../lib/engine/diagnostics.js';
 import { appInfo } from '../../lib/common/appnames.js';
 import { readSystemState, setPowerProfile } from '../../lib/collectors/systemstate.js';
+import { _, fill, N_ } from '../../lib/common/i18n.js';
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 const GOALS = [
-    ['runtime', 'Longer runtime per charge'],
-    ['lifespan', 'Longer battery life'],
-    ['data', 'About these readings'],
+    ['runtime', N_('Longer runtime per charge')],
+    ['lifespan', N_('Longer battery life')],
+    ['data', N_('About these readings')],
 ];
 const SEVERITY_ICONS = {
     warning: 'dialog-warning-symbolic',
@@ -27,8 +28,9 @@ const SEVERITY_ICONS = {
 export function estimateText(estimate) {
     if (!estimate) return '';
     const watts = estimate.watts < 0.1 ? estimate.watts.toFixed(2) : estimate.watts.toFixed(1);
-    const minutes = estimate.minutes !== null ? `, about ${Math.round(estimate.minutes)} min more per full charge` : '';
-    return `Saves about ${watts} W${minutes}.`;
+    return estimate.minutes !== null
+        ? fill(_('Saves about {watts} W, about {minutes} min more per full charge.'), { watts, minutes: Math.round(estimate.minutes) })
+        : fill(_('Saves about {watts} W.'), { watts });
 }
 
 /**
@@ -39,31 +41,35 @@ export function estimateText(estimate) {
  * @param {Date} [now]
  */
 export function reportText(findings, system, now = new Date()) {
-    const lines = [`Resource Pulse diagnostics, ${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`];
+    const lines = [fill(_('Resource Pulse diagnostics, {time} UTC'), { time: now.toISOString().slice(0, 16).replace('T', ' ') })];
     if (system) {
         const b = system.battery;
         const parts = [
-            system.onBattery === null || system.onBattery === undefined ? null : system.onBattery ? 'on battery' : 'on AC',
-            system.powerProfile ? `power profile ${system.powerProfile}` : null,
-            Number.isFinite(system.backlight) ? `backlight ${Math.round(system.backlight * 100)} %` : null,
-            b && Number.isFinite(b.healthPct) ? `battery holds ${Math.round(b.healthPct)} % of its design capacity${Number.isFinite(b.cycles) ? ` after ${b.cycles} cycles` : ''}` : null,
-            b?.chargeLimit ? `charge limit ${b.chargeLimit}` : null,
-            system.energyReadable === false ? 'processor energy not readable' : null,
+            system.onBattery === null || system.onBattery === undefined ? null : system.onBattery ? _('on battery') : _('on AC'),
+            system.powerProfile ? fill(_('power profile {profile}'), { profile: system.powerProfile }) : null,
+            Number.isFinite(system.backlight) ? fill(_('backlight {percent} %'), { percent: Math.round(system.backlight * 100) }) : null,
+            b && Number.isFinite(b.healthPct)
+                ? fill(Number.isFinite(b.cycles)
+                    ? _('battery holds {percent} % of its design capacity after {cycles} cycles')
+                    : _('battery holds {percent} % of its design capacity'), { percent: Math.round(b.healthPct), cycles: b.cycles })
+                : null,
+            b?.chargeLimit ? fill(_('charge limit {limit}'), { limit: b.chargeLimit }) : null,
+            system.energyReadable === false ? _('processor energy not readable') : null,
         ].filter(Boolean);
-        lines.push(`System: ${parts.join(', ') || 'unknown'}`);
+        lines.push(fill(_('System: {state}'), { state: parts.join(', ') || _('unknown') }));
     } else {
-        lines.push('System: not read yet');
+        lines.push(_('System: not read yet'));
     }
     for (const [goal, title] of GOALS) {
         const mine = findings.filter(f => f.goal === goal);
         if (mine.length === 0) continue;
-        lines.push('', title);
+        lines.push('', _(title));
         for (const f of mine) {
             const rest = [f.detail, f.evidence, estimateText(f.estimate)].filter(Boolean).join(' ');
             lines.push(`- [${f.severity}] ${f.title}${rest ? `: ${rest}` : ''}`);
         }
     }
-    if (findings.length === 0) lines.push('', 'No findings.');
+    if (findings.length === 0) lines.push('', _('No findings.'));
     return lines.join('\n');
 }
 
@@ -79,15 +85,14 @@ export function buildDiagnosticsPage(history, {
     switchProfile = value => setPowerProfile(value),
     launch = argv => Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE),
 } = {}) {
-    const page = new Adw.PreferencesPage({ title: 'Diagnostics', name: 'diagnostics', icon_name: 'dialog-information-symbolic' });
+    const page = new Adw.PreferencesPage({ title: _('Diagnostics'), name: 'diagnostics', icon_name: 'dialog-information-symbolic' });
     const intro = new Adw.PreferencesGroup({
-        description: 'Based on the last 7 days of battery tracking and on how the machine is set up now. ' +
-            'Advice about apps needs tracking to be on.',
+        description: _('Based on the last 7 days of battery tracking and on how the machine is set up now. Advice about apps needs tracking to be on.'),
     });
     page.add(intro);
     const buttons = new Gtk.Box({ spacing: 8, halign: Gtk.Align.START });
-    const again = new Gtk.Button({ label: 'Check again' });
-    const copy = new Gtk.Button({ label: 'Copy report', tooltip_text: 'Copy the findings and the machine\'s state as text' });
+    const again = new Gtk.Button({ label: _('Check again') });
+    const copy = new Gtk.Button({ label: _('Copy report'), tooltip_text: _('Copy the findings and the machine\'s state as text') });
     buttons.append(again);
     buttons.append(copy);
     intro.add(buttons);
@@ -95,7 +100,7 @@ export function buildDiagnosticsPage(history, {
     const groups = {};
     const lists = {};
     for (const [goal, title] of GOALS) {
-        groups[goal] = new Adw.PreferencesGroup({ title });
+        groups[goal] = new Adw.PreferencesGroup({ title: _(title) });
         lists[goal] = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
         groups[goal].add(lists[goal]);
         page.add(groups[goal]);
@@ -119,7 +124,7 @@ export function buildDiagnosticsPage(history, {
                     if (finding.action.kind === 'power-profile') await switchProfile(finding.action.value);
                     else if (finding.action.kind === 'open-power-settings') launch(['gnome-control-center', 'power']);
                 } catch (e) {
-                    r.subtitle = `${r.subtitle}\nCould not do it: ${e.message}`;
+                    r.subtitle = `${r.subtitle}\n${fill(_('Could not do it: {error}'), { error: e.message })}`;
                 }
                 await refresh();
             });
@@ -138,8 +143,8 @@ export function buildDiagnosticsPage(history, {
             groups[goal].visible = mine.length > 0 || goal === 'runtime';
             if (goal === 'runtime' && mine.length === 0) {
                 list.append(new Adw.ActionRow({
-                    title: state.system ? 'Nothing to improve was found' : 'Checking…',
-                    subtitle: history.ledger.buckets.length === 0 ? 'Start tracking on the Tracking page for advice about apps.' : '',
+                    title: state.system ? _('Nothing to improve was found') : _('Checking…'),
+                    subtitle: history.ledger.buckets.length === 0 ? _('Start tracking on the Tracking page for advice about apps.') : '',
                 }));
             }
         }
@@ -161,7 +166,7 @@ export function buildDiagnosticsPage(history, {
             });
         } catch (e) {
             console.error(`ResourcePulse: diagnostics failed: ${e.message}`);
-            state.findings = [{ id: 'error', goal: 'data', severity: 'warning', title: 'The check failed', detail: e.message, evidence: '', estimate: null, action: null }];
+            state.findings = [{ id: 'error', goal: 'data', severity: 'warning', title: _('The check failed'), detail: e.message, evidence: '', estimate: null, action: null }];
         } finally {
             if (gen === state.gen) state.running = false;
         }
@@ -177,11 +182,11 @@ export function buildDiagnosticsPage(history, {
         // set_text() is not introspectable; a bytes provider is the same thing.
         const bytes = new GLib.Bytes(new TextEncoder().encode(reportText(state.findings, state.system)));
         copy.get_clipboard().set_content(Gdk.ContentProvider.new_for_bytes('text/plain;charset=utf-8', bytes));
-        copy.label = 'Copied';
+        copy.label = _('Copied');
         if (copiedId) GLib.source_remove(copiedId);
         copiedId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => {
             copiedId = 0;
-            copy.label = 'Copy report';
+            copy.label = _('Copy report');
             return GLib.SOURCE_REMOVE;
         });
     });

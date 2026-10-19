@@ -10,6 +10,7 @@ import Graphene from 'gi://Graphene';
 import Gtk from 'gi://Gtk?version=4.0';
 import Adw from 'gi://Adw?version=1';
 import System from 'system';
+import Gettext from 'gettext';
 
 const root = ARGV[0];
 const loop = new GLib.MainLoop(null, false);
@@ -445,11 +446,12 @@ function findScrolled(widget) {
 
 // The Tracking and Diagnostics pages on a fixture history: two hours on
 // battery with a chat app working in the background and an editor in use.
-async function batteryPages(styleWindow) {
-    const { HistorySource, buildTrackingPage } = await import(`file://${root}/ui/prefs/tracking.js`);
-    const { buildDiagnosticsPage } = await import(`file://${root}/ui/prefs/diagnostics.js`);
+/**
+ * A battery history of two hours on battery with two apps (chat, editor), saved
+ * to a temporary file: the Tracking and Diagnostics pages' fixture.
+ */
+async function fixtureHistory() {
     const { BatteryLedger, saveLedger } = await import(`file://${root}/lib/engine/batteryledger.js`);
-
     const dir = GLib.dir_make_tmp('rp-prefs-history-XXXXXX');
     const path = `${dir}/battery-history.json`;
     const ledger = new BatteryLedger();
@@ -475,6 +477,15 @@ async function batteryPages(styleWindow) {
         });
     }
     await saveLedger(path, ledger);
+    return { dir, path, ledger };
+}
+
+async function batteryPages(styleWindow) {
+    const { HistorySource, buildTrackingPage } = await import(`file://${root}/ui/prefs/tracking.js`);
+    const { buildDiagnosticsPage } = await import(`file://${root}/ui/prefs/diagnostics.js`);
+    const { BatteryLedger, saveLedger } = await import(`file://${root}/lib/engine/batteryledger.js`);
+
+    const { dir, path, ledger } = await fixtureHistory();
 
     const settings = newSettings();
     const history = new HistorySource(settings, path);
@@ -599,7 +610,74 @@ async function batteryPages(styleWindow) {
     };
 }
 
-main().catch(e => {
+/**
+ * The pseudo-language run (gjs -m prefs-check.js <root> coverage, LANGUAGE=xx
+ * from ./scripts/dev.sh test-i18n): the window as the panel opens it, all
+ * three pages, with the fixture history and a stub machine state. Every
+ * shown label, tooltip and dropdown choice must read ⟦…⟧.
+ */
+async function coverage() {
+    const { untranslated } = await import('./i18n-coverage.js');
+    const domain = 'resource-pulse';
+    // As ExtensionPreferences does for the real window.
+    Gettext.setlocale(Gettext.LocaleCategory.ALL, '');
+    Gettext.bindtextdomain(domain, `${root}/locale`);
+    const { setTranslations } = await import(`file://${root}/lib/common/i18n.js`);
+    setTranslations(str => Gettext.dgettext(domain, str), (str, plural, n) => Gettext.dngettext(domain, str, plural, n));
+    ok(Gettext.dgettext(domain, 'Settings') === '⟦Settings⟧', `coverage: the pseudo-language is not loaded ('${Gettext.dgettext(domain, 'Settings')}')`);
+    Adw.init();
+
+    const { fillWindow } = await import(`file://${root}/ui/prefs/window.js`);
+    const { dir, path } = await fixtureHistory();
+    const settings = newSettings();
+    // A panel request: the window gets all three pages.
+    settings.set_string('prefs-page', 'tracking');
+    const window = new Adw.PreferencesWindow({ title: 'Resource Pulse' });
+    const filled = fillWindow(window, {
+        settings, path: root, historyPath: path,
+        diagnostics: {
+            readState: () => Promise.resolve({
+                battery: { healthPct: 72, cycles: 610, fullWh: 40, chargeLimit: 'off' },
+                onBattery: true, backlight: 0.95, powerProfile: 'performance', energyReadable: false,
+            }),
+            switchProfile: () => Promise.resolve(),
+            launch: () => {},
+        },
+    });
+    window.present();
+    // The fixture's app ids are its data; the profile name comes from the system.
+    const data = ['chat', 'editor', 'performance'];
+    const seen = new Set();
+    for (const name of ['settings', 'tracking', 'diagnostics']) {
+        window.set_visible_page_name(name);
+        await sleep(800);
+        const texts = [];
+        for (const w of findAll(window.get_visible_page(), () => true)) {
+            if (!w.get_mapped()) continue;
+            if (w instanceof Gtk.Label) texts.push(w.label);
+            if (w.tooltip_text) texts.push(w.tooltip_text);
+            if (w instanceof Adw.ComboRow) {
+                for (let i = 0; i < w.model.get_n_items(); i++) texts.push(w.model.get_string(i));
+            }
+        }
+        ok(texts.length > 10, `coverage: only ${texts.length} texts on the ${name} page`);
+        for (const text of texts) {
+            const rest = untranslated(text, data);
+            if (rest && !seen.has(text)) {
+                seen.add(text);
+                ok(false, `coverage: untranslated on the ${name} page: '${text}'`);
+            }
+        }
+        print(`PREFS-CHECK INFO: coverage of the ${name} page: ${texts.length} texts`);
+    }
+    window.destroy();
+    filled.dispose();
+    GLib.unlink(path);
+    GLib.rmdir(dir);
+    print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} checks passed`);
+}
+
+(ARGV[1] === 'coverage' ? coverage() : main()).catch(e => {
     failures++;
     print(`PREFS-CHECK FAIL: ${e.message}\n${e.stack}`);
 }).finally(() => loop.quit());
