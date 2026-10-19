@@ -175,6 +175,7 @@ async function main() {
 
     const battery = await batteryPages(styleWindow);
     await entryPoints();
+    await backup();
 
     // What the window really shows, read back from its rendering: the test
     // shell carries a third-party theme as the user stylesheet (dev.sh), which
@@ -223,6 +224,53 @@ async function main() {
 // Where the window was opened from: the Extensions app (no prefs-page)
 // gets the settings only; the panel (prefs-page set) also gets Tracking and
 // Diagnostics, also when it asks while a settings-only window is open.
+// Settings saved to a file and restored, a file with bad values, and reset,
+// on memory-backed settings; the group itself on the Settings page.
+async function backup() {
+    const { exportSettings, importSettings, resetSettings, buildBackupGroup } = await import(`file://${root}/ui/prefs/backup.js`);
+    const { BackupError } = await import(`file://${root}/lib/common/backup.js`);
+    const dir = GLib.dir_make_tmp('rp-prefs-backup-XXXXXX');
+    const file = Gio.File.new_for_path(`${dir}/settings.json`);
+    const settings = newSettings();
+    settings.set_int('poll-interval', 5);
+    settings.set_string('unit-temp', 'F');
+    settings.set_strv('pinned-metrics', ['gpu', 'cpu']);
+    settings.set_string('prefs-page', 'tracking');
+    await exportSettings(settings, file);
+    const [, saved] = file.load_contents(null);
+    const doc = JSON.parse(new TextDecoder().decode(saved));
+    ok(doc.settings['poll-interval'] === 5 && !('prefs-page' in doc.settings), `backup: saved ${JSON.stringify(doc.settings).slice(0, 120)}`);
+
+    resetSettings(settings);
+    ok(settings.get_int('poll-interval') === 2 && settings.get_string('unit-temp') === 'C' && settings.get_string('prefs-page') === 'tracking',
+        'backup: reset restores the defaults and leaves the window\'s signals');
+    const restored = await importSettings(settings, file);
+    ok(settings.get_int('poll-interval') === 5 && settings.get_string('unit-temp') === 'F' && settings.get_strv('pinned-metrics').join() === 'gpu,cpu' &&
+        restored.rejected.length === 0, `backup: restored ${restored.applied} settings, rejected ${JSON.stringify(restored.rejected)}`);
+
+    GLib.file_set_contents(`${dir}/settings.json`, JSON.stringify({ format: 'resource-pulse-settings', version: 1,
+        settings: { 'poll-interval': 99, 'unit-mem': 'GiB', 'made-up': true } }));
+    const partly = await importSettings(settings, file);
+    ok(partly.applied === 1 && settings.get_string('unit-mem') === 'GiB' && settings.get_int('poll-interval') === 5 &&
+        partly.rejected.map(r => r.key).join() === 'poll-interval,made-up', `backup: a file with bad values: ${JSON.stringify(partly)}`);
+
+    GLib.file_set_contents(`${dir}/settings.json`, 'not a settings file');
+    let refused = null;
+    try {
+        await importSettings(settings, file);
+    } catch (e) {
+        refused = e;
+    }
+    ok(refused instanceof BackupError, `backup: a file that is not a backup is refused (${refused?.message})`);
+
+    const page = new Adw.PreferencesPage();
+    const built = buildBackupGroup(page, settings);
+    ok(built.rows.save && built.rows.restore && built.rows.reset && built.buttons.reset.has_css_class('destructive-action'),
+        'backup: the group has Save, Open and a destructive Reset');
+    GLib.unlink(`${dir}/settings.json`);
+    GLib.rmdir(dir);
+}
+
 async function entryPoints() {
     const { fillWindow } = await import(`file://${root}/ui/prefs/window.js`);
     const dir = GLib.dir_make_tmp('rp-prefs-entry-XXXXXX');

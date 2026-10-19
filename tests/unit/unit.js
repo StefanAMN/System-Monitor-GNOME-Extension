@@ -28,6 +28,7 @@ import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/l
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth, combineBatteries, BatterySampler } from '../../src/lib/collectors/battery.js';
+import { backupText, checkBackup, BackupError, NOT_BACKED_UP } from '../../src/lib/common/backup.js';
 import { _, N_, ngettext, fill, translated, setTranslations, resetTranslations } from '../../src/lib/common/i18n.js';
 import { parseNvidiaSmi, parseNvidiaSmiAll, parseAmdSclk, intelBusyFromRc6, pickShownGpu, pciSlot, parseLspciGpus, GpuSampler } from '../../src/lib/collectors/gpu.js';
 import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, visibleInterfaces, gpuTooltip, gpuReadings, sanitizeMetricList, PeakScale, hoverIndex, agoLabel, spokenValue } from '../../src/lib/common/present.js';
@@ -298,6 +299,37 @@ docker0: 1 2 3
     eq(parseAmdSclk('0: 500Mhz\n'), null, 'amdgpu: no active level');
     eq(intelBusyFromRc6(1000, 1250, 1000), 75, 'intel rc6: 25% asleep = 75% busy');
     eq(intelBusyFromRc6(1000, 2000, 1000), 0, 'intel rc6: fully asleep');
+
+    // Settings backup: what a file holds, and what of one may be restored.
+    const schemaKeys = {
+        'poll-interval': { type: 'i', min: 1, max: 10 }, 'unit-temp': { type: 's', choices: ['C', 'F'] },
+        'pinned-metrics': { type: 'as' }, 'compact-label': { type: 'b' }, 'prefs-page': { type: 's' },
+    };
+    const saved = JSON.parse(backupText({ 'poll-interval': 3, 'unit-temp': 'F', 'prefs-page': 'tracking' }, new Date(0)));
+    eq([saved.format, saved.version, saved.saved, Object.keys(saved.settings)], ['resource-pulse-settings', 1, '1970-01-01T00:00:00.000Z', ['poll-interval', 'unit-temp']],
+        'backup: the file, without the window\'s signals');
+    ok(NOT_BACKED_UP.has('action-open-menu') && NOT_BACKED_UP.has('prefs-page'), 'backup: signals are not settings');
+    const checked = checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: {
+        'poll-interval': 4, 'unit-temp': 'K', 'pinned-metrics': ['cpu', 3], 'compact-label': true, 'no-such-key': 1, 'prefs-page': 'x', 'poll-interval-x': 2,
+    } }), schemaKeys);
+    eq(checked.apply, { 'poll-interval': 4, 'compact-label': true }, 'backup: valid values applied');
+    eq(checked.rejected.map(r => `${r.key}: ${r.reason}`), ['unit-temp: not one of the choices', 'pinned-metrics: wrong kind of value',
+        'no-such-key: not a setting of this version', 'prefs-page: not a setting of this version', 'poll-interval-x: not a setting of this version'],
+    'backup: the rest rejected with a reason');
+    eq(checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: { 'poll-interval': 99 } }), schemaKeys).rejected[0].reason,
+        'outside 1–10', 'backup: out of range');
+    eq(checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: { 'poll-interval': 2.5 } }), schemaKeys).rejected[0].reason,
+        'wrong kind of value', 'backup: an integer setting takes no fraction');
+    for (const [text, why] of [['{', 'not JSON'], ['{"format":"other","settings":{}}', 'other format'], ['{"format":"resource-pulse-settings","version":2,"settings":{}}', 'newer version'],
+        ['{"format":"resource-pulse-settings","version":1,"settings":[]}', 'settings not an object']]) {
+        let error = null;
+        try {
+            checkBackup(text, schemaKeys);
+        } catch (e) {
+            error = e;
+        }
+        ok(error instanceof BackupError, `backup: refused (${why})`);
+    }
 
     // More than one battery: one reading for the top bar, each listed.
     const bat = (name, state, energy, full, design, rate, cycles) => ({ present: true, name, state, energy, energyFull: full, energyFullDesign: design,
