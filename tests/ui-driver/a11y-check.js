@@ -76,6 +76,9 @@ while (queue.length && found.size < wanted.size && visited < VISIT_LIMIT) {
 }
 for (const name of wanted) {
     if (!found.has(name)) fail(`no object named '${name}' among ${visited} visited`);
-    print(`A11Y-CHECK TREE ${name}\t${JSON.stringify(describe(found.get(name)))}`);
+    // ASCII only: under the C locale (the CI containers) print() turns
+    // anything else, such as the ° of a temperature, into '?'.
+    const json = JSON.stringify(describe(found.get(name))).replace(/[\u007f-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+    print(`A11Y-CHECK TREE ${name}\t${json}`);
 }
 print('A11Y-CHECK DONE');
