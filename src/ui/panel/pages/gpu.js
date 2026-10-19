@@ -4,7 +4,7 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 
 import { ProgressBar } from '../widgets.js';
-import { _ } from '../../../lib/common/i18n.js';
+import { _, fill } from '../../../lib/common/i18n.js';
 
 export class GpuPage {
     _buildGpuDetails() {
@@ -68,6 +68,15 @@ export class GpuPage {
         this._gpuHwCard.add_child(hwStatsRow);
         this._addCardInteractions(this._gpuHwCard);
         box.add_child(this._gpuHwCard);
+
+        // Every GPU, when there is more than one (a hybrid laptop): the card
+        // above shows the busiest one.
+        this._gpuAllCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true, visible: false });
+        this._gpuAllCard.add_child(new St.Label({ text: _('All GPUs'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        this._gpuListBox = new St.BoxLayout({ vertical: true });
+        this._gpuAllCard.add_child(this._gpuListBox);
+        this._gpuListKeys = null;
+        box.add_child(this._gpuAllCard);
 
         // 2. GPU Usage Sparkline Card
         const sparkCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
@@ -133,5 +142,30 @@ export class GpuPage {
         box.add_child(this._gpuInactiveCard);
 
         return box;
+    }
+
+    /** The All GPUs card: one row per GPU, rebuilt only when the set changes. */
+    _updateGpuList(gpu) {
+        if (!this._gpuAllCard) return;
+        const gpus = gpu?.gpus ?? [];
+        this._gpuAllCard.visible = gpus.length > 1;
+        if (gpus.length < 2) return;
+        const keys = gpus.map(g => g.key).join();
+        if (keys !== this._gpuListKeys) {
+            this._gpuListBox.destroy_all_children();
+            this._gpuListRows = gpus.map(() => {
+                const row = this._detailRow('');
+                // Model names are long: wrap, never cut off.
+                this._wrapLabel(row.lbl);
+                this._gpuListBox.add_child(row.row);
+                return row;
+            });
+            this._gpuListKeys = keys;
+        }
+        gpus.forEach((g, i) => {
+            const row = this._gpuListRows[i];
+            row.lbl.text = g.key === gpu.key ? fill(_('{gpu} (shown above)'), { gpu: g.model }) : g.model;
+            row.val.text = g.asleep ? _('asleep') : `${Math.round(g.percent)}%`;
+        });
     }
 }

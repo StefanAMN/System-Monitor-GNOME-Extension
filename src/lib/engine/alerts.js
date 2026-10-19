@@ -118,12 +118,19 @@ export function alertReadings(data, limits, thermalUnavailable) {
         cpu: reading(!!data.cpu, data.cpu?.total, limits.cpu),
         memory: reading(!!data.mem && data.mem.total > 0, data.mem?.percent, limits.memory),
         thermal: reading(!!data.thm && !thermalUnavailable(data.thm), data.thm?.packageTemp, limits.thermal),
-        gpu: reading(!!data.gpu?.present && data.gpu.percent !== null, data.gpu?.percent, limits.gpu),
+        // The busiest awake GPU: the one shown may trail it by a few points.
+        gpu: reading(!!data.gpu?.present && data.gpu.percent !== null, busiestGpu(data.gpu), limits.gpu),
         disk: reading(!!root, root?.percent, limits.disk),
         // The share of time some program waited for memory: the same figure
         // the Memory page shows.
         pressure: reading(Number.isFinite(data.psi?.memory?.some), data.psi?.memory?.some, limits.pressure),
     };
+}
+
+/** Load of the busiest GPU that is awake (a machine may have several). */
+function busiestGpu(gpu) {
+    const awake = (gpu?.gpus ?? []).filter(g => !g.asleep);
+    return awake.length ? Math.max(...awake.map(g => g.percent)) : gpu?.percent;
 }
 
 /** "CPU 97 % for 1 min" */

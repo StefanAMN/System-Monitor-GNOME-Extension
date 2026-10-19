@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-19 10:05+0300\n"
+"POT-Creation-Date: 2026-10-19 12:29+0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -32,7 +32,7 @@ msgstr ""
 msgid "Linux OS"
 msgstr ""
 
-#: src/lib/collectors/gpu.js:424
+#: src/lib/collectors/gpu.js:388
 msgid "No Active GPU"
 msgstr ""
 
@@ -140,7 +140,7 @@ msgstr ""
 msgid "Discharging"
 msgstr ""
 
-#: src/lib/common/format.js:61 src/ui/panel/dashboard.js:135
+#: src/lib/common/format.js:61 src/ui/panel/dashboard.js:136
 msgid "Fully Charged"
 msgstr ""
 
@@ -195,73 +195,77 @@ msgstr ""
 
 #: src/lib/common/present.js:66 src/lib/common/settingsmodel.js:22
 #: src/lib/common/settingsmodel.js:122 src/ui/panel/constants.js:20
-#: src/ui/panel/constants.js:49 src/ui/panel/dashboard.js:372
+#: src/ui/panel/constants.js:49 src/ui/panel/dashboard.js:374
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:625
 msgid "GPU"
 msgstr ""
 
-#: src/lib/common/present.js:66
+#: src/lib/common/present.js:66 src/lib/common/present.js:70
 msgid "{gpu}: {percent}%"
 msgstr ""
 
+#: src/lib/common/present.js:69
+msgid "{gpu}: asleep"
+msgstr ""
+
 #. Translators: how old a chart point is, under the pointer; kept short.
-#: src/lib/common/present.js:196
+#: src/lib/common/present.js:200
 msgid "now"
 msgstr ""
 
-#: src/lib/common/present.js:197
+#: src/lib/common/present.js:201
 msgid "{s}s ago"
 msgstr ""
 
-#: src/lib/common/present.js:201
+#: src/lib/common/present.js:205
 msgid "{h}h ago"
 msgstr ""
 
-#: src/lib/common/present.js:201
+#: src/lib/common/present.js:205
 msgid "{h}h {m}m ago"
 msgstr ""
 
-#: src/lib/common/present.js:205
+#: src/lib/common/present.js:209
 msgid "{m}m ago"
 msgstr ""
 
-#: src/lib/common/present.js:205
+#: src/lib/common/present.js:209
 msgid "{m}m {s}s ago"
 msgstr ""
 
-#: src/lib/common/present.js:215
+#: src/lib/common/present.js:219
 msgid "no reading yet"
 msgstr ""
 
-#: src/lib/common/present.js:216
+#: src/lib/common/present.js:220
 msgid "not available"
 msgstr ""
 
-#: src/lib/common/present.js:217
+#: src/lib/common/present.js:221
 msgid "{n} hour"
 msgid_plural "{n} hours"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/lib/common/present.js:218
+#: src/lib/common/present.js:222
 msgid "{n} minute"
 msgid_plural "{n} minutes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/lib/common/present.js:222
+#: src/lib/common/present.js:226
 msgid "download"
 msgstr ""
 
-#: src/lib/common/present.js:223
+#: src/lib/common/present.js:227
 msgid "upload"
 msgstr ""
 
-#: src/lib/common/present.js:224
+#: src/lib/common/present.js:228
 msgid "per second"
 msgstr ""
 
-#: src/lib/common/present.js:225
+#: src/lib/common/present.js:229
 msgid "watts"
 msgstr ""
 
@@ -406,7 +410,7 @@ msgstr ""
 #: src/lib/common/settingsmodel.js:86 src/lib/common/settingsmodel.js:117
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:48
 #: src/ui/panel/constants.js:71 src/ui/panel/pages/gpu.js:55
-#: src/ui/panel/pages/gpu.js:108
+#: src/ui/panel/pages/gpu.js:117
 msgid "Temperature"
 msgstr ""
 
@@ -476,7 +480,7 @@ msgid "Space used on / above this is shown as a warning"
 msgstr ""
 
 #. Translators: an alert, such as "CPU 97 % for 3 min".
-#: src/lib/engine/alerts.js:133
+#: src/lib/engine/alerts.js:140
 msgid "{name} {value} for {minutes} min"
 msgstr ""
 
@@ -773,52 +777,52 @@ msgstr ""
 msgid "{time} to full"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:128
+#: src/ui/panel/dashboard.js:129
 msgid "{h}h {m}m to full"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:133
+#: src/ui/panel/dashboard.js:134
 msgid "{h}h {m}m remaining"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:166
+#: src/ui/panel/dashboard.js:167
 msgid "Charging (+{watts} W)"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:168
+#: src/ui/panel/dashboard.js:169
 msgid "Energy counters not readable"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:181
+#: src/ui/panel/dashboard.js:182
 msgid "0.0 W (Full)"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:206
+#: src/ui/panel/dashboard.js:207
 #, javascript-format
 msgid "used on / · {busy}% busy"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:305
+#: src/ui/panel/dashboard.js:306
 msgid "No sensor found"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:322
+#: src/ui/panel/dashboard.js:323
 msgid "No sensors found"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:377
+#: src/ui/panel/dashboard.js:379
 msgid "No GPU Detected"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:390
+#: src/ui/panel/dashboard.js:392
 msgid "{brand} Graphics"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:393
+#: src/ui/panel/dashboard.js:395
 msgid "Driver: {driver}"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:485
+#: src/ui/panel/dashboard.js:487
 msgid ""
 "Your processes only: {n} process of another user (a system service) cannot "
 "be read without administrator rights."
@@ -881,64 +885,72 @@ msgstr ""
 msgid "Open System Monitor"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:15
+#: src/ui/panel/pages/battery.js:16
 msgid "Charge Level History (%)"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:23
+#: src/ui/panel/pages/battery.js:24
 msgid "Charge/Discharge Rate (W)"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:30 src/ui/panel/pages/disk.js:27
+#: src/ui/panel/pages/battery.js:31 src/ui/panel/pages/disk.js:27
 #: src/ui/panel/pages/memory.js:17 src/ui/panel/pages/power.js:16
 msgid "Stats"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:31
+#: src/ui/panel/pages/battery.js:32
 msgid "State"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:33
+#: src/ui/panel/pages/battery.js:34
 msgid "Time Estimate"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:35
+#: src/ui/panel/pages/battery.js:36
 msgid "Health"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:37
+#: src/ui/panel/pages/battery.js:38
 msgid "Cycle Count"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:39
+#: src/ui/panel/pages/battery.js:40
 msgid "Current / Full"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:41
+#: src/ui/panel/pages/battery.js:42
 msgid "Design Capacity"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:70
+#: src/ui/panel/pages/battery.js:49
+msgid "Batteries"
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:80
 msgid "{line} Opens the Tracking page."
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:76
+#: src/ui/panel/pages/battery.js:86
 msgid ""
 "Battery use per app: tracking is off. Open the Tracking page to start it."
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:83
+#: src/ui/panel/pages/battery.js:93
 msgid "Battery use per app: no time on battery recorded today yet."
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:91
+#: src/ui/panel/pages/battery.js:101
 #, javascript-format
 msgid "Top app on battery today: {app} ({share} % of the processor's energy)."
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:92
+#: src/ui/panel/pages/battery.js:102
 #, javascript-format
 msgid "Top app on battery today: {app} ({share} % of the processor's time)."
+msgstr ""
+
+#: src/ui/panel/pages/battery.js:122
+msgid "{percent}% · {state} · health {health}%"
 msgstr ""
 
 #: src/ui/panel/pages/cpu.js:16
@@ -1022,49 +1034,61 @@ msgid "Clock"
 msgstr ""
 
 #: src/ui/panel/pages/gpu.js:75
-msgid "GPU Utilization (%)"
+msgid "All GPUs"
 msgstr ""
 
 #: src/ui/panel/pages/gpu.js:84
+msgid "GPU Utilization (%)"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:93
 msgid "Video Memory (VRAM)"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:93 src/ui/panel/pages/memory.js:18
+#: src/ui/panel/pages/gpu.js:102 src/ui/panel/pages/memory.js:18
 msgid "Used / Total"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:95
+#: src/ui/panel/pages/gpu.js:104
 msgid "Free VRAM"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:103
+#: src/ui/panel/pages/gpu.js:112
 msgid "Performance & Sensors"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:104
+#: src/ui/panel/pages/gpu.js:113
 msgid "Core Utilization"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:106
+#: src/ui/panel/pages/gpu.js:115
 msgid "Core Clock"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:110
+#: src/ui/panel/pages/gpu.js:119
 msgid "Fan Speed"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:112
+#: src/ui/panel/pages/gpu.js:121
 msgid "Power Draw"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:123
+#: src/ui/panel/pages/gpu.js:132
 msgid "No Active GPU Detected"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:127
+#: src/ui/panel/pages/gpu.js:136
 msgid ""
 "GPU telemetry requires NVIDIA proprietary drivers (nvidia-smi), AMD GPU "
 "sysfs (amdgpu), or Intel DRM driver (i915/xe)."
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:165
+msgid "{gpu} (shown above)"
+msgstr ""
+
+#: src/ui/panel/pages/gpu.js:166
+msgid "asleep"
 msgstr ""
 
 #: src/ui/panel/pages/memory.js:11

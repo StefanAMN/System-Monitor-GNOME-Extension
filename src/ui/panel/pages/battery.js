@@ -5,6 +5,7 @@ import St from 'gi://St';
 
 import { appInfo as ledgerAppInfo } from '../../../lib/common/appnames.js';
 import { _, fill } from '../../../lib/common/i18n.js';
+import { batteryStateLabel } from '../../../lib/common/format.js';
 
 export class BatteryPage {
     _buildBatteryDetails() {
@@ -41,6 +42,15 @@ export class BatteryPage {
         this._batDesign = this._detailRow(_('Design Capacity'));
         statsCard.add_child(this._batDesign.row);
         box.add_child(statsCard);
+
+        // Each battery, when there is more than one; the figures above are
+        // for all of them together.
+        this._batListCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true, visible: false });
+        this._batListCard.add_child(new St.Label({ text: _('Batteries'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 6px;' }));
+        this._batListBox = new St.BoxLayout({ vertical: true });
+        this._batListCard.add_child(this._batListBox);
+        this._batListNames = null;
+        box.add_child(this._batListCard);
 
         // Battery use per app lives in the details window; one line here.
         this._batTopApp = new St.Button({ style_class: 'rp-surface rp-top-app', reactive: true, can_focus: true, x_expand: true });
@@ -90,5 +100,27 @@ export class BatteryPage {
         show(fill(sum.hasEnergy
             ? _('Top app on battery today: {app} ({share} % of the processor\'s energy).')
             : _('Top app on battery today: {app} ({share} % of the processor\'s time).'), { app: name, share: Math.round(share * 100) }));
+    }
+
+    /** The Batteries card: one row per battery, rebuilt when the set changes. */
+    _updateBatteryList(bat) {
+        if (!this._batListCard) return;
+        const list = bat?.batteries ?? [];
+        this._batListCard.visible = list.length > 1;
+        if (list.length < 2) return;
+        const names = list.map(b => b.name).join();
+        if (names !== this._batListNames) {
+            this._batListBox.destroy_all_children();
+            this._batListRows = list.map(b => {
+                const row = this._detailRow(b.name);
+                this._batListBox.add_child(row.row);
+                return row;
+            });
+            this._batListNames = names;
+        }
+        list.forEach((b, i) => {
+            this._batListRows[i].val.text = fill(_('{percent}% · {state} · health {health}%'),
+                { percent: Math.round(b.percent), state: batteryStateLabel(b.state), health: Math.round(b.health) });
+        });
     }
 }

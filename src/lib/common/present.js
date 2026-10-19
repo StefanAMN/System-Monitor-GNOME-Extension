@@ -64,7 +64,11 @@ export function gpuTooltip(gpu, tempUnit = 'C') {
     if (gpu.memTotal > 0) extra.push(fill(_('VRAM: {percent}%'), { percent: Math.round(gpu.memPercent) }));
     if (gpu.temp > 0) extra.push(fill(_('Temp: {temp}'), { temp: formatTemp(gpu.temp, tempUnit) }));
     const head = fill(_('{gpu}: {percent}%'), { gpu: gpu.brand || _('GPU'), percent: Math.round(gpu.percent) });
-    return extra.length > 0 ? `${head}\n${extra.join(' · ')}` : head;
+    // The other GPUs of a machine with more than one.
+    const others = (gpu.gpus ?? []).filter(g => g.key !== gpu.key).map(g => (g.asleep
+        ? fill(_('{gpu}: asleep'), { gpu: g.model })
+        : fill(_('{gpu}: {percent}%'), { gpu: g.model, percent: Math.round(g.percent) })));
+    return [extra.length > 0 ? `${head}\n${extra.join(' · ')}` : head, ...others].join('\n');
 }
 
 /**
