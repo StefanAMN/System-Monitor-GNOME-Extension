@@ -5,22 +5,31 @@
 // A metric becomes active once it has stayed at or above its threshold for
 // SUSTAIN_US, and clears once it has stayed HYSTERESIS points below the
 // threshold for RECOVER_US, so a value hovering at the line does not flap.
+// A clear drop, DEEP_DROP points or more below the threshold, clears after
+// DEEP_RECOVER_US instead: memory falling from 95 % to 60 % against 90 %
+// must not keep the warning on a value that reads 60 % for ten seconds.
 // All times are monotonic microseconds.
 import { _, fill } from '../common/i18n.js';
 
 export const SUSTAIN_US = 30e6;
 export const RECOVER_US = 10e6;
 export const HYSTERESIS = 5;
+export const DEEP_DROP = 3 * HYSTERESIS;
+// Two readings at the default 2 s interval: one low reading is not a recovery.
+export const DEEP_RECOVER_US = 2e6;
 // One notification per metric at most this often.
 export const NOTIFY_GAP_US = 10 * 60e6;
 
 export class AlertMonitor {
-    constructor({ sustainUs = SUSTAIN_US, recoverUs = RECOVER_US, hysteresis = HYSTERESIS, notifyGapUs = NOTIFY_GAP_US } = {}) {
+    constructor({ sustainUs = SUSTAIN_US, recoverUs = RECOVER_US, hysteresis = HYSTERESIS, notifyGapUs = NOTIFY_GAP_US,
+        deepDrop = DEEP_DROP, deepRecoverUs = DEEP_RECOVER_US } = {}) {
         this._sustainUs = sustainUs;
         this._recoverUs = recoverUs;
         this._hysteresis = hysteresis;
+        this._deepDrop = deepDrop;
+        this._deepRecoverUs = deepRecoverUs;
         this._notifyGapUs = notifyGapUs;
-        // key -> { aboveSince, belowSince, active, since, value, threshold }
+        // key -> { aboveSince, belowSince, deepSince, active, since, value, threshold }
         this._state = new Map();
         this._notified = new Map();
     }
@@ -39,11 +48,11 @@ export class AlertMonitor {
         for (const [key, reading] of Object.entries(readings)) {
             let s = this._state.get(key);
             if (!s) {
-                s = { aboveSince: null, belowSince: null, active: false, since: 0, value: 0, threshold: 0 };
+                s = { aboveSince: null, belowSince: null, deepSince: null, active: false, since: 0, value: 0, threshold: 0 };
                 this._state.set(key, s);
             }
             if (!reading || !Number.isFinite(reading.value) || !Number.isFinite(reading.threshold)) {
-                s.aboveSince = s.belowSince = null;
+                s.aboveSince = s.belowSince = s.deepSince = null;
                 if (s.active) {
                     s.active = false;
                     cleared.push(key);
@@ -58,15 +67,17 @@ export class AlertMonitor {
                 if (s.aboveSince !== null && now - s.aboveSince >= this._sustainUs) {
                     s.active = true;
                     s.since = s.aboveSince;
-                    s.belowSince = null;
+                    s.belowSince = s.deepSince = null;
                     raised.push(key);
                 }
             } else {
                 s.belowSince = value < threshold - this._hysteresis ? (s.belowSince ?? now) : null;
-                if (s.belowSince !== null && now - s.belowSince >= this._recoverUs) {
+                s.deepSince = value <= threshold - this._deepDrop ? (s.deepSince ?? now) : null;
+                const recovered = (s.belowSince !== null && now - s.belowSince >= this._recoverUs) ||
+                    (s.deepSince !== null && now - s.deepSince >= this._deepRecoverUs);
+                if (recovered) {
                     s.active = false;
-                    s.aboveSince = null;
-                    s.belowSince = null;
+                    s.aboveSince = s.belowSince = s.deepSince = null;
                     cleared.push(key);
                 }
             }
