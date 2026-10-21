@@ -60,12 +60,20 @@ async function main() {
     const built = build(settings, new PowerSampler(emptyRoot));
     const { rows, pinRows } = built;
 
+    // No explanatory text on the page: group titles only, no caption under the preview.
+    const groups = findAll(built.page, w => w instanceof Adw.PreferencesGroup);
+    ok(groups.length >= 4 && groups.every(g => !g.description), `settings: group descriptions shown (${groups.filter(g => g.description).map(g => `${g.title}: '${g.description}'`).join('; ')})`);
+    const captions = findAll(built.page, w => w instanceof Gtk.Label && /Example values|drag a metric/.test(w.label));
+    ok(captions.length === 0 && /drag a metric/.test(rows.preview.tooltip_text ?? ''), `settings: preview caption '${captions[0]?.label}' shown, or its hint missing from the tooltip`);
+
     const model = allSettingRows().filter(row => row.kind !== 'pins');
     ok(model.every(row => rows[row.key]), `rows missing for ${model.filter(row => !rows[row.key]).map(row => row.key)}`);
     for (const row of model) {
         const widget = rows[row.key];
         if (!widget) continue;
-        ok(widget.title === row.title && widget.subtitle === row.detail, `${row.key}: title '${widget.title}' / subtitle differ from the model`);
+        // No words under the row: what it does is its tooltip.
+        ok(widget.title === row.title && !widget.subtitle && widget.tooltip_text === row.detail,
+            `${row.key}: title '${widget.title}', subtitle '${widget.subtitle}', tooltip '${widget.tooltip_text}' (wanted the model's detail as the tooltip, no subtitle)`);
         if (row.kind === 'number') {
             const adj = widget.adjustment;
             ok(adj.lower === row.min && adj.upper === row.max && adj.step_increment === row.step,
@@ -889,7 +897,7 @@ async function chartZoom(r) {
     const [lo, hi] = chart.bounds;
     ok(!chart.view && chart.points.length >= 24 && chart.points[1].t - chart.points[0].t === 3600e3 && !chart.zoomLine.reset.visible,
         `zoom: the day starts unzoomed in ${chart.points.length} hourly bars, no Reset`);
-    ok(chart.zoomLine.label.label === 'Hourly bars' && /drag across/i.test(chart.zoomLine.label.tooltip_text), `zoom: the line reads '${chart.zoomLine.label.label}', how to zoom on hover`);
+    ok(!chart.zoomLine.visible && chart.zoomLine.label.label === '', `zoom: no zoom line until zoomed ('${chart.zoomLine.label.label}')`);
     chart.zoomTo(hi - 2 * 3600e3, hi);
     ok(chart.view && chart.points.length >= 24 && chart.points.every(p => p.step === 300e3), `zoom: two hours in ${chart.points.length} five-minute bars`);
     const filled = chart.points.filter(p => p.battery > 0).length;

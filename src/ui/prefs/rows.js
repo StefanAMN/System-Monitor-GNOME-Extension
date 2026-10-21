@@ -67,6 +67,17 @@ function dragSource(widget, key, onBegin = () => {}, onEnd = () => {}) {
 }
 
 /**
+ * What a setting does, without words on the page: a tooltip for the pointer
+ * and the accessible description for a screen reader.
+ */
+export function explain(widget, text) {
+    if (!text) return widget;
+    widget.tooltip_text = text;
+    widget.update_property([Gtk.AccessibleProperty.DESCRIPTION], [text]);
+    return widget;
+}
+
+/**
  * The top bar as the pinned metrics, the compact switch, the formats and the
  * temperature unit make it, with example values: dark, as GNOME's is. Its
  * metrics can be dragged along it to change their order, or moved with
@@ -76,9 +87,8 @@ function dragSource(widget, key, onBegin = () => {}, onEnd = () => {}) {
 function topBarPreview(settings, iconFor) {
     const frame = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-preview'] });
     const bar = new Gtk.Box({ spacing: 0, halign: Gtk.Align.CENTER, css_classes: ['rp-preview-bar'], accessible_role: Gtk.AccessibleRole.LIST });
-    const caption = new Gtk.Label({ label: _('Example values · drag a metric to move it'), css_classes: ['rp-preview-caption'], halign: Gtk.Align.CENTER });
     frame.append(bar);
-    frame.append(caption);
+    explain(frame, _('Example values · drag a metric to move it'));
     let spoken = '';
     let focusKey = null;
     frame.items = [];
@@ -189,7 +199,7 @@ function topBarPreview(settings, iconFor) {
  * `selected` and `model` (the long labels), as a combo row has them.
  */
 function segmentedRow(row, settings, isFollowing) {
-    const widget = new Adw.ActionRow({ title: _(row.title), subtitle: _(row.detail) });
+    const widget = explain(new Adw.ActionRow({ title: _(row.title) }), _(row.detail));
     const values = row.choices.map(([value]) => value);
     const box = new Gtk.Box({ css_classes: ['linked', 'rp-segmented'], valign: Gtk.Align.CENTER });
     const buttons = row.choices.map(([value, , longLabel, segment], i) => {
@@ -267,7 +277,7 @@ function knobOnly(scale) {
  * `value`, as a spin row has it.
  */
 function sliderRow(row, settings, iconFor) {
-    const widget = new Adw.ActionRow({ title: _(row.title), subtitle: _(row.detail) });
+    const widget = explain(new Adw.ActionRow({ title: _(row.title) }), _(row.detail));
     const gicon = row.metric ? iconFor?.(row.metric) : null;
     if (gicon) widget.add_prefix(new Gtk.Image({ gicon, css_classes: [`rp-c-${row.metric}`] }));
     const adjustment = new Gtk.Adjustment({ lower: row.min, upper: row.max, step_increment: row.step, page_increment: row.step });
@@ -363,7 +373,7 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     const addRow = (group, row) => {
         let widget;
         if (row.kind === 'switch') {
-            widget = new Adw.SwitchRow({ title: _(row.title), subtitle: _(row.detail) });
+            widget = explain(new Adw.SwitchRow({ title: _(row.title) }), _(row.detail));
             settings.bind(row.key, widget, 'active', Gio.SettingsBindFlags.DEFAULT);
         } else if (row.kind === 'number') {
             widget = sliderRow(row, settings, iconFor);
@@ -376,13 +386,10 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
         rows[row.key] = widget;
     };
 
-    const SECTION_TEXT = {
-        topbar: [N_('Top bar'), N_('Click a metric to pin it next to the clock. Pinned last shows last, and loses its value first when space runs out.')],
-        units: [N_('Readings'), N_('How often values are read, and in which units.')],
-    };
+    // Titles only: what a group is for shows in its rows.
+    const SECTION_TITLE = { topbar: N_('Top bar'), units: N_('Readings') };
     for (const section of SETTINGS_SECTIONS) {
-        const [title, description] = SECTION_TEXT[section.id] ?? [section.title, section.hint ?? ''];
-        const group = addGroup(_(title), description ? `${_(description)[0].toUpperCase()}${_(description).slice(1)}` : '');
+        const group = addGroup(_(SECTION_TITLE[section.id] ?? section.title));
         if (section.id === 'topbar') group.add_css_class('rp-topbar-group');
         let list = null;
         for (const row of section.rows) {
@@ -411,8 +418,8 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     const changedId = settings.connect('changed', follow);
 
     // The panel's size: set by dragging a bottom corner of the panel.
-    const panelGroup = addGroup(_('Panel'), _('Drag a bottom corner of the panel to resize it.'));
-    const sizeRow = new Adw.ActionRow({ title: _('Size') });
+    const panelGroup = addGroup(_('Panel'));
+    const sizeRow = explain(new Adw.ActionRow({ title: _('Size') }), _('Drag a bottom corner of the panel to resize it.'));
     const resetButton = new Gtk.Button({ label: _('Reset'), valign: Gtk.Align.CENTER });
     resetButton.connect('clicked', () => {
         settings.set_int('menu-custom-width', 0);
@@ -426,7 +433,7 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
         const w = settings.get_int('menu-custom-width');
         const h = settings.get_int('menu-custom-height');
         const custom = w > 0 && h > 0;
-        sizeRow.subtitle = custom ? fill(_('{width} × {height} pixels, set by dragging'), { width: w, height: h }) : _('Automatic');
+        sizeRow.subtitle = custom ? fill(_('{width} × {height}'), { width: w, height: h }) : _('Automatic');
         resetButton.sensitive = custom;
     });
     follow();
@@ -434,10 +441,12 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     // Offered only while the counters are blocked.
     const powerGroup = addGroup(_('Troubleshooting'));
     powerGroup.visible = false;
-    const powerRow = new Adw.ActionRow({
+    // One visible line: the commands ask for a password and open a side
+    // channel, which is not left to a tooltip; the whole warning is.
+    const powerRow = explain(new Adw.ActionRow({
         title: _('CPU power is not readable'),
-        subtitle: `${_('Run these two commands in a terminal to make it readable; they ask for your password.')} ${raplFixWarning()}`,
-    });
+        subtitle: _('Two commands, with your password; readable by every program after'),
+    }), `${_('Run these two commands in a terminal to make it readable; they ask for your password.')} ${raplFixWarning()}`);
     const copyButton = new Gtk.Button({ label: _('Copy commands'), valign: Gtk.Align.CENTER });
     copyButton.connect('clicked', () => {
         const bytes = new GLib.Bytes(new TextEncoder().encode(`${RAPL_FIX_COMMANDS}\n`));

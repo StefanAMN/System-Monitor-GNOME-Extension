@@ -134,7 +134,7 @@ export class GpuPage {
             style_class: 'rp-fg', style: 'font-size: 1.0em; font-weight: bold; margin-bottom: 6px;'
         });
         const inactMsg = new St.Label({
-            text: _('GPU telemetry requires NVIDIA proprietary drivers (nvidia-smi), AMD GPU sysfs (amdgpu), or Intel DRM driver (i915/xe).'),
+            text: _('No supported GPU driver (nvidia-smi, amdgpu, i915 or xe)'),
             style_class: 'rp-fg-dim', style: 'font-size: 0.8em;'
         });
         this._wrapLabel(inactMsg);

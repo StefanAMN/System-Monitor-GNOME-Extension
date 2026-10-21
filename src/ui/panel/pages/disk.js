@@ -44,7 +44,7 @@ export class DiskPage {
         this._dskProcList = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 6px;' });
         ioCard.add_child(this._dskProcList);
         ioCard.add_child(dskSearch.noMatch);
-        this._dskProcIdle = new St.Label({ text: _('None of your processes is reading or writing right now.'), style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', visible: false });
+        this._dskProcIdle = new St.Label({ text: _('No disk activity'), style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', visible: false });
         this._dskProcIdle.clutter_text.line_wrap = true;
         ioCard.add_child(this._dskProcIdle);
         this._dskProcNote = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.75em; margin-top: 6px;', visible: false });

@@ -1390,3 +1390,15 @@ Owner: the ⚠ shows while memory reads 60 % against a 90 % limit; maybe a high 
 - **Fix:** a reading DEEP_DROP (3 x HYSTERESIS = 15) points or more below its limit for DEEP_RECOVER_US (2 s, two readings at the default interval; one low reading is not a recovery) clears; nearer the limit the 10 s hold stays. The pressure alert keeps its ⚠ and tooltip line but marks no value (`ALERTS[key].value`, null for pressure).
 - **Proof:** unit tests (95 -> 60 clears at 2 s; a single low reading does not; 76 against 90 keeps 10 s; exactly 15 below is deep), 568 passed; test-ui: CPU 97 -> 40 gone after 2.3 s, disk 98 -> 60 3.5 s, GPU 99 -> 50 2.5 s, memory 95 -> 60 3.5 s, temperature 95 -> 55 °C 3.5 s, pressure 40 -> 1 2.5 s with no value painted red, and memory 95 -> 80 (near the limit) still held 11.5 s.
 - CI on 1cdea3b: GNOME 46 test-ui failed in the step after the new scenario (endProcesses: "pointer at 1259,628 hits Meta_BackgroundActor"). The scenario left a notification banner per scripted alert and returned while the top bar was still rebuilding for the restored pins, with the menu hanging from it. It now turns alert notifications off while it runs (alertsRaise tests them) and waits for the top bar to settle; GNOME 46 test-ui passed twice in its container, and test-ui on the host.
+
+## Even less text (2026-10-29)
+
+Owner: "redesign the UI to display even less text (remove all the intuitive text eg: the small text under the Top Bar in the settings menu)".
+
+- **Settings:** no group descriptions (Top bar, Readings, Alerts, Panel) and no subtitle under any row; what they said becomes the row's tooltip and accessible description, so nothing is lost to a screen reader or a pointer that rests. No caption under the top-bar preview (its tooltip says it can be dragged). The panel size reads "Automatic" or "420 × 560". The CPU-power fix keeps one short visible line, as it asks for a password and opens a side channel; the full warning is its tooltip.
+- **Tracking:** tile details that only explain ("of all cores", "of the time", "processor", "estimate") go; details that carry a figure stay ("47 % of a full charge", "of 15.5 GB"). No app-list descriptions, no subtitles under empty rows, no zoom line until zoomed (how to zoom is the chart title's tooltip).
+- **Diagnostics:** no agent description, no subtitle under "Nothing to improve".
+- **Panel (shell):** the empty-state sentences become a few words.
+- **Kept on purpose:** the end-process confirmations (unsaved work), the agent's first-use consent dialog, error messages.
+- **Proof:** prefs-check updated (tooltips carry the old texts), test-ui with real clicks, test-i18n, prefs-check under Orchis-Pink, screenshots.
+- **State: done.** Lint clean; test-unit passed; prefs-check 289 of 289 under Orchis-Pink (new: no group description, no preview caption, each row's old subtitle now its tooltip); test-ui passed (prefs-check 275 of 275 in the nested shell, real clicks); test-i18n passed. Screenshots of Settings, Tracking and Diagnostics compared before and after.
