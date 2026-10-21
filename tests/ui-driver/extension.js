@@ -1470,6 +1470,9 @@ async function alertsRecover(rp) {
     const s = rp._settings;
     // Raised quickly; recovered with the real timing.
     rp._alerts = new AlertMonitor({ sustainUs: 2e6 });
+    // Notifications are alertsRaise's to test; here they would leave a
+    // banner per scripted alert on screen for the steps after.
+    s.set_boolean('alert-notify', false);
     s.set_int('poll-interval', 1);
     s.set_strv('pinned-metrics', ['cpu', 'memory', 'disk', 'thermal', 'gpu']);
     await sleep(1500);
@@ -1541,8 +1544,12 @@ async function alertsRecover(rp) {
     } finally {
         s.reset('poll-interval');
         s.reset('pinned-metrics');
+        s.reset('alert-notify');
         rp._alerts = new AlertMonitor();
         rp._showDanger();
+        // The top bar rebuilds for the restored pins, and the menu hanging
+        // from it moves: let it settle before the next step clicks into it.
+        await sleep(2500);
     }
 }
 
