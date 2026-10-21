@@ -1402,3 +1402,22 @@ Owner: "redesign the UI to display even less text (remove all the intuitive text
 - **Kept on purpose:** the end-process confirmations (unsaved work), the agent's first-use consent dialog, error messages.
 - **Proof:** prefs-check updated (tooltips carry the old texts), test-ui with real clicks, test-i18n, prefs-check under Orchis-Pink, screenshots.
 - **State: done.** Lint clean; test-unit passed; prefs-check 289 of 289 under Orchis-Pink (new: no group description, no preview caption, each row's old subtitle now its tooltip); test-ui passed (prefs-check 275 of 275 in the nested shell, real clicks); test-i18n passed. Screenshots of Settings, Tracking and Diagnostics compared before and after.
+
+## Diagnostics redesign (2026-10-29)
+
+Owner: "redesign the diagnostics page ui". Before: a "Findings" title over nothing, then a heading and a boxed list per area, then the agent rows.
+
+### Design
+- **Area strip** (the Tracking tabs' look): one tile per area (Processor, Memory, Battery, Network) with the area's tinted icon, its name and its count of findings: orange when one is a warning, blue for suggestions only, a dimmed ✓ for none. A tile filters the list to its area; pressed again it shows all. Check again and Copy report sit at the strip's end; where the findings come from is the strip's tooltip.
+- **One list** instead of a heading per area: warnings first, then suggestions, then facts about the readings; each row starts with its area's tinted icon and carries its severity as a coloured edge (orange warning, blue suggestion). Title, the saving as subtitle, the action button, and the explanation and evidence opening beneath, as before.
+- **Nothing to improve:** every tile shows ✓ and the list has one row.
+- **Agent section:** unchanged.
+
+### Proof
+prefs-check (counts and their colours per tile, filter by API, order by severity, the edge class), test-ui with the real pointer pressing a tile (filters) and again (all), opening a finding and Copy report; theme checks by rendered pixels under the stand-in and Orchis-Pink (tile tint, edge colour); screenshots light and dark.
+
+### Owner's report: the finding rows white with unreadable text
+- Under the owner's Orchis-Pink stylesheet every finding row was white with off-white text. Reproduced in test-ui with `RP_GTK_USER_CSS=~/.config/gtk-4.0/gtk.css` and pictures of the list (`RP_SHOT_DIR`).
+- Cause, introduced by this redesign: the rows were built with `css_classes` in the AdwExpanderRow constructor, which replaced the row's own `expander` class; without it no expander rule applied and Orchis's plain `list { background-color: #FFFFFF }` painted the header. Found by rendering each node of a row (the header `list` painted white). Fix: add_css_class.
+- The edge check had passed because it looked only at the coloured edge. New checks: every finding row keeps `expander`; a finding's title against the card behind it, by rendered pixels, in dark and light. With the bug put back both fail (dark: rgb(228, 230, 235) on rgb(255, 255, 255)); with the fix test-ui passes under Orchis-Pink and under the stand-in theme.
+- Lesson recorded in CLAUDE.md.

@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-29 21:51+0200\n"
+"POT-Creation-Date: 2026-10-29 22:22+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -645,7 +645,7 @@ msgstr ""
 msgid "Processor energy counters: not readable by this user"
 msgstr ""
 
-#: src/lib/engine/agentreport.js:106 src/ui/prefs/diagnostics.js:129
+#: src/lib/engine/agentreport.js:106 src/ui/prefs/diagnostics.js:194
 msgid "Findings"
 msgstr ""
 
@@ -1977,12 +1977,12 @@ msgstr ""
 msgid "Report"
 msgstr ""
 
-#: src/ui/prefs/agent.js:231 src/ui/prefs/diagnostics.js:142
-#: src/ui/prefs/diagnostics.js:266
+#: src/ui/prefs/agent.js:231 src/ui/prefs/diagnostics.js:187
+#: src/ui/prefs/diagnostics.js:332
 msgid "Copy report"
 msgstr ""
 
-#: src/ui/prefs/agent.js:234 src/ui/prefs/diagnostics.js:261
+#: src/ui/prefs/agent.js:234 src/ui/prefs/diagnostics.js:327
 #: src/ui/prefs/rows.js:454
 msgid "Copied"
 msgstr ""
@@ -2081,108 +2081,130 @@ msgstr ""
 msgid "All settings were reset."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:38
+#: src/ui/prefs/diagnostics.js:30
+msgid "note"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:30
+msgid "suggestion"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:30
+msgid "warning"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:42
 msgid "Saves about {watts} W, about {minutes} min more per full charge."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:39
+#: src/ui/prefs/diagnostics.js:43
 msgid "Saves about {watts} W."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:47
+#: src/ui/prefs/diagnostics.js:51
 msgid "≈{watts} W · +{minutes} min per charge"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:48
+#: src/ui/prefs/diagnostics.js:52
 msgid "≈{watts} W"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:59
+#: src/ui/prefs/diagnostics.js:63
 msgid "Resource Pulse diagnostics, {time} UTC"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:63
+#: src/ui/prefs/diagnostics.js:67
 msgid "on AC"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:63
+#: src/ui/prefs/diagnostics.js:67
 msgid "on battery"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:64
+#: src/ui/prefs/diagnostics.js:68
 msgid "power profile {profile}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:65
+#: src/ui/prefs/diagnostics.js:69
 msgid "backlight {percent} %"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:68
+#: src/ui/prefs/diagnostics.js:72
 #, javascript-format
 msgid "battery holds {percent} % of its design capacity after {cycles} cycles"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:69
+#: src/ui/prefs/diagnostics.js:73
 #, javascript-format
 msgid "battery holds {percent} % of its design capacity"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:71
+#: src/ui/prefs/diagnostics.js:75
 msgid "charge limit {limit}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:72
+#: src/ui/prefs/diagnostics.js:76
 msgid "processor energy not readable"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:74
+#: src/ui/prefs/diagnostics.js:78
 msgid "System: {state}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:74
+#: src/ui/prefs/diagnostics.js:78
 msgid "unknown"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:76
+#: src/ui/prefs/diagnostics.js:80
 msgid "System: not read yet"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:87
+#: src/ui/prefs/diagnostics.js:91
 msgid "No findings."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:126
+#: src/ui/prefs/diagnostics.js:132
 msgid "Diagnostics"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:130
+#: src/ui/prefs/diagnostics.js:140
 msgid ""
 "From the last 7 days of usage tracking and how the machine is set up now, "
 "worked out on this computer. Advice about apps and memory needs tracking to "
 "be on."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:141 src/ui/prefs/rows.js:456
+#: src/ui/prefs/diagnostics.js:186 src/ui/prefs/rows.js:456
 msgid "Check again"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:146 src/ui/prefs/diagnostics.js:220
+#: src/ui/prefs/diagnostics.js:196 src/ui/prefs/diagnostics.js:275
 msgid "Checking…"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:154
-msgid "Findings: {area}"
+#: src/ui/prefs/diagnostics.js:231
+msgid "{area}, {severity}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:199
+#: src/ui/prefs/diagnostics.js:247
 msgid "Could not do it: {error}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:220
+#: src/ui/prefs/diagnostics.js:275
 msgid "Nothing to improve"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:244
+#: src/ui/prefs/diagnostics.js:283
+msgid "{area}: nothing found"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:283
+msgid "{area}: {n} finding"
+msgid_plural "{area}: {n} findings"
+msgstr[0] ""
+msgstr[1] ""
+
+#: src/ui/prefs/diagnostics.js:310
 msgid "The check failed"
 msgstr ""
 

@@ -388,7 +388,7 @@ function render(widget) {
     downloader.set_format(Gdk.MemoryFormat.R8G8B8A8);
     const [bytes, stride] = downloader.download_bytes();
     const data = bytes.toArray();
-    return { width, height, at: (x, y) => Array.from(data.slice(Math.round(y) * stride + Math.round(x) * 4, Math.round(y) * stride + Math.round(x) * 4 + 4)) };
+    return { width, height, texture, at: (x, y) => Array.from(data.slice(Math.round(y) * stride + Math.round(x) * 4, Math.round(y) * stride + Math.round(x) * 4 + 4)) };
 }
 
 const hex = colour => [1, 3, 5].map(i => parseInt(colour.slice(i, i + 2), 16));
@@ -670,6 +670,7 @@ async function batteryPages(styleWindow) {
     const confirmAnswers = [];
     const diagnostics = buildDiagnosticsPage(history, {
         settings,
+        iconFor: key => metricIcon(key, root),
         agent: {
             dir: fake.agentDir,
             which: fake.which,
@@ -727,26 +728,87 @@ async function batteryPages(styleWindow) {
 
     // Diagnostics on the stubbed state.
     for (let i = 0; i < 20 && diagnostics.state.running; i++) await sleep(100);
-    const found = () => Object.values(diagnostics.lists).flatMap(list => {
-        const out = [];
-        for (let row = list.get_first_child(); row; row = row.get_next_sibling()) if (row.findingId) out.push(row);
-        return out;
-    });
+    const found = () => diagnostics.rows;
     const ids = found().map(row => row.findingId);
     ok(['wear', 'background:chat', 'power-profile', 'brightness', 'charge-limit'].every(id => ids.includes(id)) && !ids.includes('background:editor'),
         `diagnostics: findings ${ids.join(', ')}`);
-    const inArea = area => {
-        const out = [];
-        for (let row = diagnostics.lists[area].get_first_child(); row; row = row.get_next_sibling()) out.push(row.findingId);
-        return out;
-    };
+    const inArea = area => found().filter(row => row.area === area).map(row => row.findingId);
     const batteryIds = inArea('battery');
     ok(batteryIds[0] === 'wear' && batteryIds.includes('charge-limit') && batteryIds.includes('background:chat'),
         `diagnostics: battery findings ${batteryIds.join()}, the warning first`);
     ok(inArea('memory').join() === 'swapping' && inArea('network').join() === 'traffic-away',
         `diagnostics: memory ${inArea('memory').join()}, network ${inArea('network').join()}`);
-    ok(!diagnostics.nothing.visible && !diagnostics.groups.data.visible && diagnostics.groups.memory.visible,
-        'diagnostics: areas without findings are hidden, and so is "nothing found"');
+    ok(!diagnostics.nothing.get_parent(), 'diagnostics: no "nothing found" row with findings');
+    // One list, warnings first; each row's area is its icon, its severity its edge.
+    const order = { warning: 0, suggestion: 1, info: 2 };
+    const sevs = found().map(row => order[row.severity]);
+    ok(sevs.every((v, i) => i === 0 || v >= sevs[i - 1]) && found()[0].severity === 'warning',
+        `diagnostics: one list, warnings first (${found().map(row => `${row.findingId}:${row.severity}`).join(', ')})`);
+    ok(found().every(row => row.has_css_class(`rp-edge-${row.severity}`)), 'diagnostics: each row carries its severity edge');
+    // Its own class kept: without 'expander' themes style the header as a plain list (Orchis: white).
+    ok(found().every(row => row.has_css_class('expander')), `diagnostics: a finding row lost its 'expander' class (${found()[0]?.get_css_classes().join('.')})`);
+    // The strip: counts per area, orange with a warning, a ✓ for none.
+    const t = diagnostics.tiles;
+    ok(t.memory.count.label === '1' && t.memory.count.has_css_class('rp-finding-warning') && t.network.count.label === '1' &&
+        t.network.count.has_css_class('rp-finding-suggestion') && t.cpu.count.label === '✓' && Number(t.battery.count.label) >= 3,
+        `diagnostics: tile counts cpu ${t.cpu.count.label}, memory ${t.memory.count.label}, battery ${t.battery.count.label}, network ${t.network.count.label}`);
+    // Pressing a tile shows only its area; pressing it again shows all.
+    t.battery.active = true;
+    const shown = () => found().filter(row => row.visible).map(row => row.area);
+    ok(shown().length === inArea('battery').length && shown().every(a => a === 'battery') && t.battery.has_css_class('rp-tint-battery'),
+        `diagnostics: the battery tile shows only battery (${shown().join()})`);
+    t.memory.active = true;
+    ok(!t.battery.active && shown().every(a => a === 'memory'), `diagnostics: another tile takes over (${shown().join()})`);
+    t.memory.active = false;
+    ok(shown().length === found().length && diagnostics.state.filter === null, 'diagnostics: pressed again, every finding is shown');
+    // As rendered, both variants: a warning's edge is orange, a suggestion's blue.
+    if (Gdk.Display.get_default()) {
+        const manager = Adw.StyleManager.get_default();
+        window.present();
+        window.set_visible_page_name('diagnostics');
+        for (const scheme of [Adw.ColorScheme.FORCE_DARK, Adw.ColorScheme.FORCE_LIGHT]) {
+            manager.color_scheme = scheme;
+            await sleep(300);
+            await painted(window);
+            // Each row rendered on its own: what it paints, its edge included.
+            const edgeOf = row => {
+                const drawn = render(row);
+                return drawn ? drawn.at(1, Math.min(25, drawn.height / 2)) : null;
+            };
+            // RP_SHOT_DIR=<dir>: the strip and the list as PNGs, to look at.
+            const shotDir = GLib.getenv('RP_SHOT_DIR');
+            if (shotDir) {
+                const v = scheme === Adw.ColorScheme.FORCE_DARK ? 'dark' : 'light';
+                render(diagnostics.tiles.cpu.get_parent())?.texture.save_to_png(`${shotDir}/diag-strip-${v}.png`);
+                render(diagnostics.list)?.texture.save_to_png(`${shotDir}/diag-list-${v}.png`);
+            }
+            const warning = found().find(row => row.severity === 'warning');
+            const suggestion = found().find(row => row.severity === 'suggestion');
+            const [w, s] = [edgeOf(warning), edgeOf(suggestion)];
+            const variant = scheme === Adw.ColorScheme.FORCE_DARK ? 'dark' : 'light';
+            ok(w && near(w, '#ff7800', 40) && s && near(s, '#3584e4', 40),
+                `diagnostics (${variant}): severity edges warning ${w ? show(w) : 'not drawn'}, suggestion ${s ? show(s) : 'not drawn'}`);
+            // Readable: a row's title against its own background (a theme
+            // can paint the header white under off-white text).
+            const lum = c => (c[0] + c[1] + c[2]) / 3;
+            // The card behind the row is the list's: sampled from the list, beside the title.
+            const drawnList = render(diagnostics.list);
+            const [okBg, spot] = warning.compute_point(diagnostics.list, new Graphene.Point().init(Math.round(warning.get_width() * 0.7), 10));
+            const bg = okBg && drawnList ? drawnList.at(spot.x, spot.y) : null;
+            const titleLabel = findAll(warning, x => x instanceof Gtk.Label && x.label === warning.title)[0];
+            const text = titleLabel && render(titleLabel);
+            let ink = null;
+            for (let y = 0; text && y < text.height; y++) {
+                for (let x = 0; x < text.width; x++) {
+                    const px = text.at(x, y);
+                    if (px[3] > 200 && (!ink || Math.abs(lum(px) - lum(bg ?? px)) > Math.abs(lum(ink) - lum(bg ?? ink)))) ink = px;
+                }
+            }
+            ok(bg && ink && Math.abs(lum(ink) - lum(bg)) > 110 && (variant === 'dark' ? lum(bg) < 90 : true),
+                `diagnostics (${variant}): a finding's title ${ink ? show(ink) : 'not drawn'} on ${bg ? show(bg) : 'nothing'} is not readable`);
+        }
+        manager.color_scheme = Adw.ColorScheme.DEFAULT;
+    }
     const chat = found().find(row => row.findingId === 'background:chat');
     ok(/^≈[\d.]+ W · \+\d+ min per charge$/.test(chat.subtitle), `diagnostics: the saving is the subtitle ('${chat.subtitle}')`);
     ok(chat instanceof Adw.ExpanderRow && !chat.expanded && /without focus/.test(chat.detailLabel.label),
@@ -1360,7 +1422,14 @@ async function findingClicks(window, diagnostics) {
         const [, q] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() * fx, widget.get_height() * fy));
         return `${Math.round(q.x + sx)} ${Math.round(q.y + sy)}`;
     };
-    const first = diagnostics.lists.memory.get_first_child();
+    // The battery tile pressed: only battery findings; pressed again: all.
+    const tile = diagnostics.tiles.battery;
+    await act(`PREFS-CHECK CLICK tile-battery ${at(tile, 0.5, 0.5)}`);
+    ok(await until(() => tile.active) && diagnostics.rows.filter(r => r.visible).every(r => r.area === 'battery'),
+        `findings (pointer): the battery tile filtered the list (${diagnostics.rows.filter(r => r.visible).map(r => r.area).join()})`);
+    await act(`PREFS-CHECK CLICK tile-battery ${at(tile, 0.5, 0.5)}`);
+    ok(await until(() => !tile.active) && diagnostics.rows.every(r => r.visible), 'findings (pointer): pressed again, every finding shows');
+    const first = diagnostics.rows[0];
     ok(first instanceof Adw.ExpanderRow && !first.expanded, 'findings (pointer): the first finding starts closed');
     // Its header: the title's middle, left of any button.
     await act(`PREFS-CHECK CLICK finding ${at(first, 0.4, 0.5 * 56 / Math.max(56, first.get_height()))}`);

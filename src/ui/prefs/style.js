@@ -285,6 +285,13 @@ window.rp-window .rp-slider-value { font-weight: 700; }
 window.rp-window .rp-finding-warning { color: #ff7800; }
 window.rp-window .rp-finding-suggestion { color: ${ACCENT}; }
 window.rp-window .rp-finding-info { color: ${p.dim}; }
+window.rp-window .rp-finding-ok { color: ${p.dim}; }
+/* Diagnostics: the area strip's counts, and each finding's severity as the
+   left edge of its row (the area is its icon). */
+window.rp-window .rp-diag-strip button.rp-tab { padding: 8px 4px; }
+window.rp-window .rp-diag-count { font-size: 1.25em; font-weight: 800; }
+window.rp-window .boxed-list > row.rp-finding-row.rp-edge-warning { box-shadow: inset 3px 0 #ff7800; }
+window.rp-window .boxed-list > row.rp-finding-row.rp-edge-suggestion { box-shadow: inset 3px 0 ${ACCENT}; }
 ${tints}
 `;
 }
