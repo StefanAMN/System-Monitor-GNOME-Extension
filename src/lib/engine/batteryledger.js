@@ -7,11 +7,18 @@
 // rest) are not given to any app. Without readable package energy only CPU
 // time is recorded.
 //
+// Since version 2 each hour also holds what the diagnostics need beyond the
+// battery: memory per app and for the machine, swap traffic, stall times,
+// network bytes and the time the user was away. Version 1 files still load;
+// their hours have none of it.
+//
 // Engine layer: no widgets; file I/O only in loadLedger / saveLedger.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import { counterDelta } from '../collectors/network.js';
 
-export const LEDGER_VERSION = 1;
+export const LEDGER_VERSION = 2;
+const READABLE_VERSIONS = [1, 2];
 export const DAYS_KEPT = 14;
 // One bucket per hour and power source (AC / battery): fixed upper bound.
 export const MAX_BUCKETS = DAYS_KEPT * 24 * 2;
@@ -20,6 +27,12 @@ export const APPS_PER_BUCKET = 30;
 // While a bucket is open it may hold more, so a late heavy app is not
 // lumped in with the rest; still bounded.
 const OPEN_BUCKET_APPS = 2 * APPS_PER_BUCKET;
+// Of the apps kept, up to this many are the largest by memory, so an app that
+// holds memory without using the CPU is not lumped in with the rest.
+export const MEMORY_PLACES = 10;
+// An app holding less is not recorded for memory (session services, helpers).
+export const MEMORY_MIN_MIB = 16;
+const MIB = 1024 * 1024;
 const HOUR_MS = 3600 * 1000;
 
 // Pseudo-app ids. They cannot clash with desktop ids, which never start with '@'.
@@ -70,8 +83,17 @@ function emptyBucket(start, onBattery) {
     // iw: of which idle baseline; gw: battery Wh over gaps (locked, asleep);
     // hs: seconds the CPU was above the temperature alert;
     // uw: graphics Wh shared by GPU time (part of pw); gpu: GPU busy ns of named units;
-    // cpu: machine CPU µs; a: id -> [cpu µs, foreground cpu µs, Wh, GPU ns]
-    return { t: start, b: onBattery, s: 0, bw: 0, pw: 0, iw: 0, gw: 0, hs: 0, uw: 0, gpu: 0, cpu: 0, energy: false, a: {} };
+    // cpu: machine CPU µs; a: id -> [cpu µs, foreground cpu µs, Wh, GPU ns, memory MiB·s, max memory MiB]
+    // Since version 2: ms: seconds memory was read over; mu: memory in use MiB·s; mx: its max MiB;
+    // mt: installed MiB; sx: swap in use, max MiB; st: swap size MiB; si / so: MiB swapped in / out;
+    // ps: seconds stall times were read over; pc, pm, pf, pi: seconds stalled on CPU, memory
+    // (some, full) and I/O; ns: seconds network was read over; rx / tx: bytes;
+    // is: seconds the user was away; ir / it: bytes while away.
+    return {
+        t: start, b: onBattery, s: 0, bw: 0, pw: 0, iw: 0, gw: 0, hs: 0, uw: 0, gpu: 0, cpu: 0, energy: false, a: {},
+        ms: 0, mu: 0, mx: 0, mt: 0, sx: 0, st: 0, si: 0, so: 0,
+        ps: 0, pc: 0, pm: 0, pf: 0, pi: 0, ns: 0, rx: 0, tx: 0, is: 0, ir: 0, it: 0,
+    };
 }
 
 export class BatteryLedger {
@@ -88,9 +110,12 @@ export class BatteryLedger {
         this._prevWall = 0;
         this._prevTotal = null;
         this._prevSystem = null;
+        this._prevMachine = null;
+        this._prevNet = null;
         this._prevBatteryWh = state?.last?.batteryWh ?? null;
         this._lastSeenWall = state?.last?.wall ?? null;
         this._packageLow = new LowPercentile();
+        this.loadedVersion = LEDGER_VERSION;
     }
 
     /** Parse a saved ledger. @throws {LedgerFormatError} */
@@ -101,11 +126,13 @@ export class BatteryLedger {
         } catch (e) {
             throw new LedgerFormatError(`not JSON: ${e.message}`);
         }
-        if (obj?.version !== LEDGER_VERSION)
-            throw new LedgerFormatError(`version ${obj?.version} is not ${LEDGER_VERSION}`);
+        if (!READABLE_VERSIONS.includes(obj?.version))
+            throw new LedgerFormatError(`version ${obj?.version} is not one of ${READABLE_VERSIONS.join(', ')}`);
         if (!Array.isArray(obj.buckets) || !obj.buckets.every(b => Number.isFinite(b?.t) && typeof b.a === 'object'))
             throw new LedgerFormatError('buckets are malformed');
-        return new BatteryLedger(obj);
+        const ledger = new BatteryLedger(obj);
+        ledger.loadedVersion = obj.version;
+        return ledger;
     }
 
     toJSON() {
@@ -129,9 +156,17 @@ export class BatteryLedger {
     forgetLast() {
         this._prevUnits = null;
         this._prevGpu = null;
+        this._prevMachine = null;
+        this._prevNet = null;
         this._prevBatteryWh = null;
         this._lastSeenWall = null;
         this._prevWall = 0;
+    }
+
+    /** Give a bucket loaded from a version 1 file the version 2 fields. */
+    _upgrade(bucket) {
+        if (bucket.ms !== undefined) return;
+        Object.assign(bucket, { ms: 0, mu: 0, mx: 0, mt: 0, sx: 0, st: 0, si: 0, so: 0, ps: 0, pc: 0, pm: 0, pf: 0, pi: 0, ns: 0, rx: 0, tx: 0, is: 0, ir: 0, it: 0 });
     }
 
     _bucket(wallMs, onBattery) {
@@ -149,13 +184,28 @@ export class BatteryLedger {
         return bucket;
     }
 
-    /** Keep the largest APPS_PER_BUCKET apps of a bucket, sum the rest into MORE. */
+    /**
+     * Keep APPS_PER_BUCKET apps of a bucket: up to MEMORY_PLACES of the largest
+     * by memory, the rest the largest by energy and CPU time. The others are
+     * summed into MORE.
+     */
     _closeBucket(bucket) {
         const ids = Object.keys(bucket.a).filter(id => !id.startsWith('@'));
         if (ids.length <= APPS_PER_BUCKET) return;
+        const keep = new Set(ids.filter(id => (bucket.a[id][5] ?? 0) > 0)
+            .sort((x, y) => bucket.a[y][5] - bucket.a[x][5]).slice(0, MEMORY_PLACES));
         ids.sort((x, y) => (bucket.a[y][2] - bucket.a[x][2]) || (bucket.a[y][0] - bucket.a[x][0]));
-        for (const id of ids.slice(APPS_PER_BUCKET)) {
-            this._add(bucket, MORE, bucket.a[id][0], bucket.a[id][1], bucket.a[id][2], bucket.a[id][3] ?? 0, true);
+        for (const id of ids) {
+            if (keep.size >= APPS_PER_BUCKET) break;
+            keep.add(id);
+        }
+        for (const id of ids) {
+            if (keep.has(id)) continue;
+            const [cpu, fg, wh, gpu = 0, mibS = 0, maxMib = 0] = bucket.a[id];
+            const more = this._add(bucket, MORE, cpu, fg, wh, gpu, true);
+            // The rest's max is the sum of theirs: an upper bound.
+            more[4] += mibS;
+            more[5] += maxMib;
             delete bucket.a[id];
         }
     }
@@ -171,14 +221,85 @@ export class BatteryLedger {
         if (!entry) {
             const named = Object.keys(bucket.a).length;
             if (!force && !id.startsWith('@') && named >= OPEN_BUCKET_APPS) return this._add(bucket, MORE, cpu, fg, wh, gpu, true);
-            entry = bucket.a[id] = [0, 0, 0, 0];
+            entry = bucket.a[id] = [0, 0, 0, 0, 0, 0];
         }
         entry[0] += cpu;
         entry[1] += fg;
         entry[2] += wh;
-        // Entries saved before GPU time was recorded have three fields.
+        // Entries saved before GPU time was recorded have three fields, before
+        // memory was recorded four.
         entry[3] = (entry[3] ?? 0) + gpu;
+        entry[4] ??= 0;
+        entry[5] ??= 0;
         return entry;
+    }
+
+    /** Memory of each app (summed over its units) and of the machine over `dt` seconds. */
+    _addMemory(bucket, units, machine, dt) {
+        const perApp = new Map();
+        for (const u of units) {
+            if (Number.isFinite(u.memory)) perApp.set(u.id, (perApp.get(u.id) ?? 0) + u.memory);
+        }
+        for (const [id, bytes] of perApp) {
+            const mib = bytes / MIB;
+            if (mib < MEMORY_MIN_MIB) continue;
+            const entry = this._add(bucket, id, 0, 0, 0);
+            entry[4] += mib * dt;
+            entry[5] = Math.max(entry[5], mib);
+        }
+        if (Number.isFinite(machine?.memUsed) && Number.isFinite(machine.memTotal)) {
+            bucket.ms += dt;
+            bucket.mu += machine.memUsed / MIB * dt;
+            bucket.mx = Math.max(bucket.mx, machine.memUsed / MIB);
+            bucket.mt = Math.max(bucket.mt, machine.memTotal / MIB);
+        }
+        if (Number.isFinite(machine?.swapUsed) && Number.isFinite(machine.swapTotal)) {
+            bucket.sx = Math.max(bucket.sx, machine.swapUsed / MIB);
+            bucket.st = Math.max(bucket.st, machine.swapTotal / MIB);
+        }
+    }
+
+    /** Swap traffic and stall times since the previous reading. */
+    _addCounters(bucket, machine, prev, dt) {
+        if (!machine || !prev) return;
+        const delta = (cur, before) => (Number.isFinite(cur) && Number.isFinite(before) ? counterDelta(cur, before) : null);
+        const swapIn = delta(machine.swapInBytes, prev.swapInBytes);
+        const swapOut = delta(machine.swapOutBytes, prev.swapOutBytes);
+        if (swapIn !== null) bucket.si += swapIn / MIB;
+        if (swapOut !== null) bucket.so += swapOut / MIB;
+        const p = machine.pressure;
+        const q = prev.pressure;
+        if (p && q) {
+            // µs stalled; never more than the interval (a counter reset reads as 0).
+            const stall = key => Math.min(dt, (delta(p[key], q[key]) ?? 0) / 1e6);
+            bucket.ps += dt;
+            bucket.pc += stall('cpu');
+            bucket.pm += stall('memory');
+            bucket.pf += stall('memoryFull');
+            bucket.pi += stall('io');
+        }
+    }
+
+    /** Network bytes since the previous reading; with `idle`, also counted as while away. */
+    _addNetwork(bucket, net, prev, dt, idle) {
+        if (!net || !prev) return;
+        let rx = 0;
+        let tx = 0;
+        for (const { iface, rxBytes, txBytes } of net) {
+            // An interface that appeared since the last reading counts from
+            // the next one: its counters started before it was seen.
+            const before = prev.get(iface);
+            if (!before) continue;
+            rx += counterDelta(rxBytes, before.rx);
+            tx += counterDelta(txBytes, before.tx);
+        }
+        bucket.ns += dt;
+        bucket.rx += rx;
+        bucket.tx += tx;
+        if (idle) {
+            bucket.ir += rx;
+            bucket.it += tx;
+        }
     }
 
     /**
@@ -193,9 +314,13 @@ export class BatteryLedger {
      * @param {boolean} [s.hot] the CPU is above the temperature alert
      * @param {?number} [s.uncoreW] average power of the package's uncore (Intel: integrated graphics), part of packageW
      * @param {?Map<string, number>} [s.gpu] cumulative GPU busy ns per unit
+     * @param {?object} [s.machine] MachineUsageSampler reading
+     * @param {?Array<{iface: string, rxBytes: number, txBytes: number}>} [s.net] physical interfaces
+     * @param {boolean} [s.idle] the user was away (no input) through the interval
      * @returns {boolean} whether the interval was attributed (false for the first sample and gaps)
      */
-    ingest({ mono, wall, usage, packageW, battery, focusUsec = {}, hot = false, uncoreW = null, gpu = null }) {
+    ingest({ mono, wall, usage, packageW, battery, focusUsec = {}, hot = false, uncoreW = null, gpu = null,
+        machine = null, net = null, idle = false }) {
         const onBattery = !!(battery?.present && battery.onBattery);
         const batteryWh = battery?.present && Number.isFinite(battery.energyWh) ? battery.energyWh : null;
         const first = this._prevUnits === null;
@@ -217,6 +342,11 @@ export class BatteryLedger {
             bucket.s += dt;
             bucket.bw += delivered;
             if (hot) bucket.hs = (bucket.hs ?? 0) + dt;
+            this._upgrade(bucket);
+            if (idle) bucket.is += dt;
+            this._addMemory(bucket, usage.units, machine, dt);
+            this._addCounters(bucket, machine, this._prevMachine, dt);
+            this._addNetwork(bucket, net, this._prevNet, dt, idle);
             const totalCpu = Math.max(0, usage.total - this._prevTotal);
             bucket.cpu += totalCpu;
 
@@ -290,6 +420,8 @@ export class BatteryLedger {
 
         this._prevUnits = new Map(usage.units.map(u => [u.unit, u.usec]));
         if (gpu) this._prevGpu = gpu;
+        this._prevMachine = machine;
+        this._prevNet = net ? new Map(net.map(i => [i.iface, { rx: i.rxBytes, tx: i.txBytes }])) : null;
         this._prevMono = mono;
         this._prevWall = wall;
         this._prevTotal = usage.total;
@@ -307,7 +439,13 @@ export class BatteryLedger {
      * @param {boolean} [range.batteryOnly]
      */
     summarize({ from = -Infinity, to = Infinity, batteryOnly = false } = {}) {
-        const sum = { seconds: 0, batteryWh: 0, packageWh: 0, idleWh: 0, gapWh: 0, hotSeconds: 0, graphicsWh: 0, gpu: 0, cpu: 0, hasEnergy: false, apps: [] };
+        const sum = {
+            seconds: 0, batteryWh: 0, packageWh: 0, idleWh: 0, gapWh: 0, hotSeconds: 0, graphicsWh: 0, gpu: 0, cpu: 0, hasEnergy: false, apps: [],
+            // Since version 2 (0 over hours from version 1 files; the *Seconds say how much was read).
+            memSeconds: 0, memUsedMiBs: 0, memMaxMiB: 0, memTotalMiB: 0, swapMaxMiB: 0, swapTotalMiB: 0, swapInMiB: 0, swapOutMiB: 0,
+            stallSeconds: 0, stall: { cpu: 0, memory: 0, memoryFull: 0, io: 0 },
+            netSeconds: 0, rxBytes: 0, txBytes: 0, idleSeconds: 0, idleRxBytes: 0, idleTxBytes: 0,
+        };
         const apps = new Map();
         for (const b of this.buckets) {
             if (b.t < from || b.t >= to || (batteryOnly && !b.b)) continue;
@@ -321,12 +459,33 @@ export class BatteryLedger {
             sum.gpu += b.gpu ?? 0;
             sum.cpu += b.cpu;
             sum.hasEnergy ||= b.energy;
-            for (const [id, [cpu, fg, wh, gpu = 0]] of Object.entries(b.a)) {
-                const app = apps.get(id) ?? { id, cpu: 0, fg: 0, wh: 0, gpu: 0 };
+            sum.memSeconds += b.ms ?? 0;
+            sum.memUsedMiBs += b.mu ?? 0;
+            sum.memMaxMiB = Math.max(sum.memMaxMiB, b.mx ?? 0);
+            sum.memTotalMiB = Math.max(sum.memTotalMiB, b.mt ?? 0);
+            sum.swapMaxMiB = Math.max(sum.swapMaxMiB, b.sx ?? 0);
+            sum.swapTotalMiB = Math.max(sum.swapTotalMiB, b.st ?? 0);
+            sum.swapInMiB += b.si ?? 0;
+            sum.swapOutMiB += b.so ?? 0;
+            sum.stallSeconds += b.ps ?? 0;
+            sum.stall.cpu += b.pc ?? 0;
+            sum.stall.memory += b.pm ?? 0;
+            sum.stall.memoryFull += b.pf ?? 0;
+            sum.stall.io += b.pi ?? 0;
+            sum.netSeconds += b.ns ?? 0;
+            sum.rxBytes += b.rx ?? 0;
+            sum.txBytes += b.tx ?? 0;
+            sum.idleSeconds += b.is ?? 0;
+            sum.idleRxBytes += b.ir ?? 0;
+            sum.idleTxBytes += b.it ?? 0;
+            for (const [id, [cpu, fg, wh, gpu = 0, mibS = 0, maxMib = 0]] of Object.entries(b.a)) {
+                const app = apps.get(id) ?? { id, cpu: 0, fg: 0, wh: 0, gpu: 0, memMiBs: 0, memMaxMiB: 0 };
                 app.cpu += cpu;
                 app.fg += fg;
                 app.wh += wh;
                 app.gpu += gpu;
+                app.memMiBs += mibS;
+                app.memMaxMiB = Math.max(app.memMaxMiB, maxMib);
                 apps.set(id, app);
             }
         }
@@ -336,8 +495,50 @@ export class BatteryLedger {
             app.cpuShare = sum.cpu > 0 ? app.cpu / sum.cpu : 0;
             // Share of what the battery delivered, when there is a battery figure.
             app.batteryShare = sum.batteryWh > 0 ? app.wh / sum.batteryWh : null;
+            // Average memory over the time memory was read, the hours it was not running included.
+            app.memAvgMiB = sum.memSeconds > 0 ? app.memMiBs / sum.memSeconds : 0;
         }
         return sum;
+    }
+
+    /**
+     * The hours of a range, AC and battery merged, oldest first: for rules
+     * that look at how things change from hour to hour.
+     * @returns {Array<{t: number, seconds: number, memSeconds: number, memMaxMiB: number,
+     *   memTotalMiB: number, netSeconds: number, rxBytes: number, txBytes: number,
+     *   idleSeconds: number, idleRxBytes: number, idleTxBytes: number,
+     *   apps: Map<string, {cpu: number, fg: number, memMiBs: number, memMaxMiB: number}>}>}
+     */
+    hours({ from = -Infinity, to = Infinity } = {}) {
+        const byHour = new Map();
+        for (const b of this.buckets) {
+            if (b.t < from || b.t >= to) continue;
+            let h = byHour.get(b.t);
+            if (!h) {
+                h = { t: b.t, seconds: 0, memSeconds: 0, memMaxMiB: 0, memTotalMiB: 0, netSeconds: 0, rxBytes: 0, txBytes: 0,
+                    idleSeconds: 0, idleRxBytes: 0, idleTxBytes: 0, apps: new Map() };
+                byHour.set(b.t, h);
+            }
+            h.seconds += b.s;
+            h.memSeconds += b.ms ?? 0;
+            h.memMaxMiB = Math.max(h.memMaxMiB, b.mx ?? 0);
+            h.memTotalMiB = Math.max(h.memTotalMiB, b.mt ?? 0);
+            h.netSeconds += b.ns ?? 0;
+            h.rxBytes += b.rx ?? 0;
+            h.txBytes += b.tx ?? 0;
+            h.idleSeconds += b.is ?? 0;
+            h.idleRxBytes += b.ir ?? 0;
+            h.idleTxBytes += b.it ?? 0;
+            for (const [id, [cpu, fg, , , mibS = 0, maxMib = 0]] of Object.entries(b.a)) {
+                const app = h.apps.get(id) ?? { cpu: 0, fg: 0, memMiBs: 0, memMaxMiB: 0 };
+                app.cpu += cpu;
+                app.fg += fg;
+                app.memMiBs += mibS;
+                app.memMaxMiB = Math.max(app.memMaxMiB, maxMib);
+                h.apps.set(id, app);
+            }
+        }
+        return [...byHour.values()].sort((x, y) => x.t - y.t);
     }
 }
 
@@ -361,8 +562,9 @@ export function loadLedger(path) {
                 resolve({ ledger: new BatteryLedger(), problem: `cannot read ${path}: ${e.message}` });
                 return;
             }
+            let ledger;
             try {
-                resolve({ ledger: BatteryLedger.fromJSON(new TextDecoder().decode(text)), problem: null });
+                ledger = BatteryLedger.fromJSON(new TextDecoder().decode(text));
             } catch (e) {
                 const aside = `${path}.damaged-${GLib.DateTime.new_now_local().format('%Y%m%d-%H%M%S')}`;
                 let moved = '';
@@ -373,9 +575,26 @@ export function loadLedger(path) {
                     moved = `; could not move it aside: ${moveError.message}`;
                 }
                 resolve({ ledger: new BatteryLedger(), problem: `${path} is damaged (${e.message})${moved}` });
+                return;
             }
+            resolve({ ledger, problem: ledger.loadedVersion < LEDGER_VERSION ? keepOldVersion(file, ledger.loadedVersion) : null });
         });
     });
+}
+
+/**
+ * Copy a file of an older version to <path>.v<version> before it is saved in
+ * the new format, so the change can be undone. An existing copy is kept.
+ * @returns {?string} a problem, or null
+ */
+function keepOldVersion(file, version) {
+    const copy = Gio.File.new_for_path(`${file.get_path()}.v${version}`);
+    try {
+        file.copy(copy, Gio.FileCopyFlags.NONE, null, null);
+    } catch (e) {
+        if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.EXISTS)) return `cannot keep a copy of the version ${version} history: ${e.message}`;
+    }
+    return null;
 }
 
 /** Write the ledger atomically (temporary file, then rename). */

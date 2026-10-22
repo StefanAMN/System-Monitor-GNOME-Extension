@@ -101,6 +101,18 @@ export class AppUsageSampler {
         }
     }
 
+    async _readMemory(path) {
+        try {
+            const bytes = Number((await readFileAsync(`${path}/memory.current`)).trim());
+            return Number.isFinite(bytes) ? bytes : null;
+        } catch (e) {
+            // ENOENT: the unit ended after it was listed, or the memory
+            // controller is not enabled for it; a normal event.
+            noteReadError(e);
+            return null;
+        }
+    }
+
     async _readPids(path) {
         try {
             return (await readFileAsync(`${path}/cgroup.procs`)).split('\n').filter(Boolean).map(Number);
@@ -114,13 +126,15 @@ export class AppUsageSampler {
      * One reading of every session unit's CPU time.
      * @param {object} [opts]
      * @param {boolean} [opts.withPids] also list each unit's processes (unit.pids), for GPU time
+     * @param {boolean} [opts.withMemory] also read each unit's memory in bytes
+     *   (unit.memory, null when it cannot be read)
      * @returns {Promise<{time: number, total: ?number, system: ?number,
      *   units: Array<{unit: string, id: string, kind: string, label: string, usec: number}>}>}
      *   time is monotonic µs; total is all CPU time of the machine, system that of
      *   system services; a unit whose counter cannot be read is left out (and the
      *   error is reported once by noteReadError)
      */
-    async sample({ withPids = false } = {}) {
+    async sample({ withPids = false, withMemory = false } = {}) {
         const time = GLib.get_monotonic_time();
         const root = await this._sessionRoot();
         const units = [];
@@ -141,6 +155,7 @@ export class AppUsageSampler {
                     if (usec === null) continue;
                     const unit = { unit: name, usec, ...what };
                     if (withPids) unit.pids = await this._readPids(`${dir}/${name}`);
+                    if (withMemory) unit.memory = await this._readMemory(`${dir}/${name}`);
                     units.push(unit);
                 }
             }
