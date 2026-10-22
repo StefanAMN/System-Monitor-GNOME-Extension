@@ -493,7 +493,8 @@ function findScrolled(widget) {
 }
 
 // The Tracking and Diagnostics pages on a fixture history: two hours on
-// battery with a chat app working in the background and an editor in use.
+// battery with a chat app working in the background and an editor in use,
+// the machine swapping, and data moving while the user is away.
 /**
  * A battery history of two hours on battery with two apps (chat, editor), saved
  * to a temporary file: the Tracking and Diagnostics pages' fixture.
@@ -522,6 +523,11 @@ async function fixtureHistory() {
             focusUsec: { editor: 30e6 },
             uncoreW: 3,
             gpu: new Map([['app-gnome-chat-1.scope', i * 2e9], ['app-gnome-editor-2.scope', i * 0.5e9]]),
+            // 150 MiB of swap traffic an hour; 50 kB/s while away.
+            machine: { memTotal: 8 * 2 ** 30, memUsed: 6 * 2 ** 30, swapTotal: 2 * 2 ** 30, swapUsed: 2 ** 30,
+                swapInBytes: i * 1.25 * 2 ** 20, swapOutBytes: 0, pressure: { cpu: 0, memory: 0, memoryFull: 0, io: 0 } },
+            net: [{ iface: 'wlan0', rxBytes: i * 1.5e6, txBytes: 0 }],
+            idle: true,
         });
     }
     await saveLedger(path, ledger);
@@ -601,9 +607,18 @@ async function batteryPages(styleWindow) {
     const ids = found().map(row => row.findingId);
     ok(['wear', 'background:chat', 'power-profile', 'brightness', 'charge-limit'].every(id => ids.includes(id)) && !ids.includes('background:editor'),
         `diagnostics: findings ${ids.join(', ')}`);
-    const lifespan = [];
-    for (let row = diagnostics.lists.lifespan.get_first_child(); row; row = row.get_next_sibling()) lifespan.push(row.findingId);
-    ok(lifespan.join() === 'wear,charge-limit', `diagnostics: battery-life findings ${lifespan.join()}, the warning first`);
+    const inArea = area => {
+        const out = [];
+        for (let row = diagnostics.lists[area].get_first_child(); row; row = row.get_next_sibling()) out.push(row.findingId);
+        return out;
+    };
+    const batteryIds = inArea('battery');
+    ok(batteryIds[0] === 'wear' && batteryIds.includes('charge-limit') && batteryIds.includes('background:chat'),
+        `diagnostics: battery findings ${batteryIds.join()}, the warning first`);
+    ok(inArea('memory').join() === 'swapping' && inArea('network').join() === 'traffic-away',
+        `diagnostics: memory ${inArea('memory').join()}, network ${inArea('network').join()}`);
+    ok(!diagnostics.nothing.visible && !diagnostics.groups.data.visible && diagnostics.groups.memory.visible,
+        'diagnostics: areas without findings are hidden, and so is "nothing found"');
     const chat = found().find(row => row.findingId === 'background:chat');
     ok(/Saves about [\d.]+ W, about \d+ min more per full charge/.test(chat.subtitle), `diagnostics: estimate shown ('${chat.subtitle.split('\n').pop()}')`);
     found().find(row => row.findingId === 'charge-limit').actionButton.emit('clicked');
@@ -626,8 +641,9 @@ async function batteryPages(styleWindow) {
     }));
     ok(/^Resource Pulse diagnostics, \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\nSystem: on battery, .*battery holds 72 % of its design capacity after 610 cycles, charge limit off/.test(copied ?? ''),
         `copy report: header and system line ('${(copied ?? '').split('\n').slice(0, 2).join(' / ')}')`);
-    ok(/\nLonger runtime per charge\n- \[\w+\] chat works in the background: /.test(copied ?? '') && /\nLonger battery life\n/.test(copied ?? ''),
-        'copy report: findings grouped by goal');
+    ok(/\nBattery\n- \[\w+\] The battery is worn: /.test(copied ?? '') && /\nMemory\n- \[warning\] The machine swaps: /.test(copied ?? '') &&
+        /\n- \[\w+\] chat works in the background: /.test(copied ?? '') && /\nNetwork\n/.test(copied ?? ''),
+        'copy report: findings grouped by area');
     ok(diagnostics.copy.label === 'Copied', `copy report: the button says '${diagnostics.copy.label}'`);
 
     // The file changes (the extension saved): both pages follow.
