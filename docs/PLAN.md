@@ -1100,3 +1100,5 @@ Found and fixed on the way:
 Not verified: how each real agent handles the prompt (none was started for real); a machine that really swaps or stalls on memory (rules proven by unit tests only); GNOME Console (`kgx`) flags, which is not installed here; CI on GNOME 46-49 (runs when the branch is pushed or merged).
 
 First CI run on master (39827661575, 2026-10-22): check, GNOME 49 and 50 passed; GNOME 46-48 failed "agent (pointer): Preview report opened the report": those shells start in the Activities overview, where the settings window is a thumbnail, so the pointer clicked the thumbnail (the CI screenshots show it). The driver now leaves the overview and raises the window before each click and screenshot; GNOME 46 then passes in its container (`RP_COMPAT_TESTS=test-ui ./dev.sh test-compat 46`). The memory soak failed with shell RSS 300.7 -> 329.7 MB (0.996 MB/min) while the JS heap, fds and actors stayed flat; the same container soak on the same commit locally gave 295.2 -> 287.9 MB (0.029 MB/min), so it is not reproduced; the next CI run decides.
+
+Second CI run (39835407264, commit a0e899c): green on every job (check, GNOME 46-50, memory soak).
