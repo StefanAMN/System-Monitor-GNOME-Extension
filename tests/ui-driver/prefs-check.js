@@ -201,7 +201,7 @@ async function main() {
                 window.present();
                 if (window === battery.window) window.set_visible_page_name(name);
                 const adj = findScrolled(window.get_visible_page())?.get_vadjustment();
-                for (let part = 0, done = false; !done && part < 4; part++) {
+                for (let part = 0, done = false; !done && part < 6; part++) {
                     await sleep(300);
                     if (adj) {
                         adj.value = Math.min(part * (adj.page_size - 60), adj.upper - adj.page_size);
@@ -214,6 +214,8 @@ async function main() {
                 }
             }
         }
+        shown.window.hide();
+        await agentClicks(battery.window, battery.settings, battery.diagnostics, battery.fake);
         shown.window.destroy();
     }
     shown.dispose();
@@ -551,7 +553,18 @@ async function batteryPages(styleWindow) {
     const profileCalls = [];
     const launched = [];
     let profile = 'performance';
+    const fake = fakeAgentBin();
+    const confirmAnswers = [];
     const diagnostics = buildDiagnosticsPage(history, {
+        settings,
+        agent: {
+            dir: fake.agentDir,
+            which: fake.which,
+            spawn: fake.spawn,
+            // Driven by the shell (linger), the real dialog is clicked with the
+            // pointer; alone, the answers are given here.
+            ...(driven ? {} : { confirm: () => Promise.resolve(confirmAnswers.shift() ?? 'cancel') }),
+        },
         readState: () => Promise.resolve({
             battery: { healthPct: 72, cycles: 610, fullWh: 40, chargeLimit: 'off' },
             onBattery: true, backlight: 0.95, powerProfile: profile, energyReadable: true,
@@ -662,16 +675,192 @@ async function batteryPages(styleWindow) {
     for (let i = 0; i < 100 && r.appRows.length === 0; i++) await sleep(100);
     ok(r.appRows.length === 4, `tracking: did not pick up the restored file within 10 s (${r.appRows.length} rows)`);
 
+    await agentSection(window, settings, diagnostics, fake, confirmAnswers);
+
     return {
         window,
+        diagnostics,
+        settings,
+        fake,
         dispose: () => {
             tracking.dispose();
             diagnostics.dispose();
             history.dispose();
+            fake.remove();
             GLib.unlink(path);
             GLib.rmdir(dir);
         },
     };
+}
+
+const driven = Number(ARGV[1] ?? 0) > 0;
+
+/**
+ * A terminal and agents that only record what they were given, on a PATH of
+ * their own: nothing real is started. Arguments are kept NUL-separated, so a
+ * prompt with newlines and quotes reads back exactly.
+ */
+function fakeAgentBin() {
+    const base = GLib.dir_make_tmp('rp-agent-XXXXXX');
+    const bin = `${base}/bin`;
+    const agentDir = `${base}/agent`;
+    GLib.mkdir_with_parents(bin, 0o755);
+    const script = (name, body) => {
+        GLib.file_set_contents(`${bin}/${name}`, `#!/bin/sh\n${body}\n`);
+        GLib.chmod(`${bin}/${name}`, 0o755);
+    };
+    const record = name => `pwd > "$RP_FAKE_DIR/${name}-cwd"; printf '%s\\0' "$@" > "$RP_FAKE_DIR/${name}-args"`;
+    script('xdg-terminal-exec', `${record('terminal')}\nwhile [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"`);
+    script('claude', record('claude'));
+    script('fake-agent', record('custom'));
+    const read = name => {
+        try {
+            const [, bytes] = GLib.file_get_contents(`${base}/${name}`);
+            return new TextDecoder().decode(bytes);
+        } catch {
+            return null;
+        }
+    };
+    return {
+        base, bin, agentDir,
+        which: program => (GLib.file_test(`${bin}/${program}`, GLib.FileTest.IS_EXECUTABLE) ? `${bin}/${program}` : null),
+        spawn: (argv, cwd) => {
+            // Programs are looked up on this PATH, not the test's: the real
+            // terminal and agents are never reached.
+            const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.SEARCH_PATH_FROM_ENVP });
+            launcher.set_cwd(cwd);
+            launcher.setenv('PATH', `${bin}:/usr/bin:/bin`, true);
+            launcher.setenv('RP_FAKE_DIR', base, true);
+            return launcher.spawnv(argv);
+        },
+        args: name => read(`${name}-args`)?.split('\0').slice(0, -1) ?? null,
+        cwd: name => read(`${name}-cwd`)?.trim() ?? null,
+        clear: () => {
+            for (const name of ['terminal', 'claude', 'custom'])
+                for (const what of ['args', 'cwd']) if (GLib.file_test(`${base}/${name}-${what}`, GLib.FileTest.EXISTS)) GLib.unlink(`${base}/${name}-${what}`);
+        },
+        remove: () => GLib.spawn_command_line_sync(`rm -rf ${GLib.shell_quote(base)}`),
+    };
+}
+
+/** Wait until `cond()` holds, up to `ms`. */
+async function until(cond, ms = 5000) {
+    for (let t = 0; t < ms && !cond(); t += 100) await sleep(100);
+    return cond();
+}
+
+/** The agent section: rows, preview, consent, the launch, a hostile custom command. */
+async function agentSection(window, settings, diagnostics, fake, confirmAnswers) {
+    const a = diagnostics.agent;
+    ok(a, 'agent: the Diagnostics page has the agent section when it has the settings');
+    const names = [];
+    for (let i = 0; i < a.agentRow.model.get_n_items(); i++) names.push(a.agentRow.model.get_string(i));
+    ok(names.join() === 'Claude Code,Custom command', `agent: offered ${names.join()} (only the installed one, and a custom command)`);
+    ok(a.open.label === 'Open Claude Code' && !a.commandRow.visible, `agent: '${a.open.label}', no command row for a preset`);
+    ok(a.promptView.buffer.text.includes('report.md') && settings.get_string('agent-prompt') === '', 'agent: the built-in prompt is shown and not stored');
+
+    const report = await diagnostics.makeReport();
+    ok(report.startsWith('# Resource Pulse report') && report.includes('### Memory') && report.includes('`swapping`') && report.includes('| `chat` | `chat` |'),
+        'agent: the report has the findings by area and the apps');
+    if (driven) return;
+
+    a.preview.emit('clicked');
+    ok(await until(() => a.state.preview), 'agent: Preview report shows the report');
+    ok(a.state.preview?.reportView.buffer.text === report.replace(/^# Resource Pulse report, [^\n]*/, a.state.preview.reportView.buffer.text.split('\n')[0]),
+        'agent: the preview is the report that will be sent');
+    a.state.preview?.force_close();
+
+    // Cancelled first: nothing is written or started, and no consent is kept.
+    confirmAnswers.push('cancel');
+    a.open.emit('clicked');
+    await sleep(500);
+    ok(!fake.args('terminal') && settings.get_strv('agent-consent').length === 0 && !GLib.file_test(`${fake.agentDir}/report.md`, GLib.FileTest.EXISTS),
+        'agent: cancelling starts nothing, writes nothing, keeps no consent');
+    confirmAnswers.push('open');
+    a.open.emit('clicked');
+    await checkLaunch(settings, a, fake, 'the button');
+
+    // A custom command is split, never run by a shell.
+    fake.clear();
+    a.agentRow.selected = 1;
+    ok(a.commandRow.visible && settings.get_string('agent') === 'custom', 'agent: a custom command shows its row');
+    settings.set_string('agent-command', 'fake-agent --flag "$(touch PWNED)" ; --prompt={prompt}');
+    settings.set_strv('agent-consent', ['claude', 'custom']);
+    a.open.emit('clicked');
+    ok(await until(() => fake.args('custom')), 'agent: the custom command was started');
+    const custom = fake.args('custom') ?? [];
+    ok(custom[0] === '--flag' && custom[1] === '$(touch PWNED)' && custom[2] === ';' && custom[3] === `--prompt=${a.promptView.buffer.text}`,
+        `agent: the custom command's arguments arrive literally (${JSON.stringify(custom.slice(0, 3))})`);
+    ok(!GLib.file_test(`${fake.agentDir}/PWNED`, GLib.FileTest.EXISTS) && !GLib.file_test(`${GLib.get_current_dir()}/PWNED`, GLib.FileTest.EXISTS),
+        'agent: nothing in the command was run by a shell');
+    settings.set_string('agent-command', 'not-installed-agent {prompt}');
+    a.open.emit('clicked');
+    await sleep(300);
+    ok(a.status.visible && a.status.label.includes('"not-installed-agent" was not found'), `agent: a missing program is reported ('${a.status.label}')`);
+    a.agentRow.selected = 0;
+    settings.reset('agent-command');
+}
+
+/** After the open button: the terminal ran the agent in the agent's folder with the prompt, and report.md is there, private. */
+async function checkLaunch(settings, a, fake, how) {
+    ok(await until(() => fake.args('claude')), `agent (${how}): the agent was started through the terminal`);
+    const prompt = a.promptView.buffer.text;
+    const terminal = fake.args('terminal') ?? [];
+    ok(terminal.join('\n') === [`--dir=${fake.agentDir}`, '--', 'claude', prompt].join('\n'),
+        `agent (${how}): the terminal got ${JSON.stringify(terminal.slice(0, 3))}`);
+    ok(JSON.stringify(fake.args('claude')) === JSON.stringify([prompt]) && fake.cwd('claude') === fake.agentDir,
+        `agent (${how}): the agent got the prompt as one argument, in ${fake.cwd('claude')}`);
+    ok(settings.get_strv('agent-consent').includes('claude'), `agent (${how}): the consent is kept for this agent`);
+    const info = Gio.File.new_for_path(`${fake.agentDir}/report.md`).query_info('unix::mode', Gio.FileQueryInfoFlags.NONE, null);
+    const dirInfo = Gio.File.new_for_path(fake.agentDir).query_info('unix::mode', Gio.FileQueryInfoFlags.NONE, null);
+    ok((info.get_attribute_uint32('unix::mode') & 0o777) === 0o600 && (dirInfo.get_attribute_uint32('unix::mode') & 0o777) === 0o700,
+        `agent (${how}): report.md is private (${(info.get_attribute_uint32('unix::mode') & 0o777).toString(8)}, folder ${(dirInfo.get_attribute_uint32('unix::mode') & 0o777).toString(8)})`);
+    ok(a.status.label.startsWith('Started in a terminal'), `agent (${how}): status '${a.status.label}'`);
+}
+
+/**
+ * Driven by the shell: the agent's buttons and the confirmation, clicked with
+ * the real pointer. A CLICK line gives the point in the window's surface; the
+ * driver adds where the surface is and clicks there.
+ */
+async function agentClicks(window, settings, diagnostics, fake) {
+    const a = diagnostics.agent;
+    const clickAt = async (widget, name) => {
+        const [, p] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() / 2, widget.get_height() / 2));
+        const [sx, sy] = window.get_surface_transform();
+        print(`PREFS-CHECK CLICK ${name} ${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`);
+    };
+    window.present();
+    window.set_visible_page_name('diagnostics');
+    const adj = findScrolled(window.get_visible_page())?.get_vadjustment();
+    await sleep(400);
+    adj.value = adj.upper - adj.page_size;
+    await sleep(600);
+    fake.clear();
+    settings.set_strv('agent-consent', []);
+
+    await clickAt(a.preview, 'preview');
+    ok(await until(() => a.state.preview), 'agent (pointer): Preview report opened the report');
+    a.state.preview?.force_close();
+    await sleep(600);
+
+    await clickAt(a.open, 'open');
+    let dialog = null;
+    ok(await until(() => (dialog = findAll(window, w => w instanceof Adw.AlertDialog)[0])), 'agent (pointer): the first hand-off asks first');
+    if (!dialog) return;
+    await sleep(600);
+    const look = render(window);
+    const sheet = findAll(dialog, w => w.get_css_name() === 'sheet')[0];
+    if (look && sheet) {
+        const { palette } = await import(`file://${root}/ui/prefs/style.js`);
+        const p = palette(Adw.StyleManager.get_default().dark);
+        const [, at] = sheet.compute_point(window, new Graphene.Point().init(sheet.get_width() / 2, 8));
+        const bg = look.at(at.x, at.y);
+        ok(near(bg, p.card), `agent (pointer): the confirmation is ${show(bg)}, not ${p.card}`);
+    }
+    const openButton = findAll(dialog, w => w instanceof Gtk.Button && w.label === 'Open')[0];
+    await clickAt(openButton, 'confirm-open');
+    await checkLaunch(settings, a, fake, 'pointer');
 }
 
 /**

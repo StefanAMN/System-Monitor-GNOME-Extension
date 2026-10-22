@@ -9,9 +9,11 @@ import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 
 import { diagnose, AREAS } from '../../lib/engine/diagnostics.js';
+import { agentReport, codeSpan } from '../../lib/engine/agentreport.js';
+import { buildAgentGroup } from './agent.js';
 import { NetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { appInfo } from '../../lib/common/appnames.js';
-import { readSystemState, setPowerProfile } from '../../lib/collectors/systemstate.js';
+import { readSystemState, setPowerProfile, readMachineInfo } from '../../lib/collectors/systemstate.js';
 import { _, fill, N_ } from '../../lib/common/i18n.js';
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
@@ -96,6 +98,9 @@ export function readNetDays(path = netUsagePath()) {
 /**
  * @param {HistorySource} history
  * @param {object} [opts]
+ * @param {Gio.Settings} [opts.settings] the extension's settings: with them the page has the agent section
+ * @param {object} [opts.agent] options for buildAgentGroup, for tests
+ * @param {function(): Promise<object>} [opts.readMachine] for tests
  * @param {function(): Promise<object>} [opts.readState] for tests
  * @param {function(string): Promise} [opts.switchProfile] for tests
  * @param {function(Array<string>)} [opts.launch] for tests
@@ -105,6 +110,9 @@ export function buildDiagnosticsPage(history, {
     switchProfile = value => setPowerProfile(value),
     launch = argv => Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE),
     netDays = () => readNetDays(),
+    settings = null,
+    agent: agentOpts = {},
+    readMachine = () => readMachineInfo(),
 } = {}) {
     const page = new Adw.PreferencesPage({ title: _('Diagnostics'), name: 'diagnostics', icon_name: 'dialog-information-symbolic' });
     const intro = new Adw.PreferencesGroup({
@@ -137,6 +145,24 @@ export function buildDiagnosticsPage(history, {
         page.add(groups[area]);
     }
     const state = { findings: [], system: null, running: false, gen: 0 };
+
+    // The report for an agent, from the same figures. Finding titles name
+    // apps: there the names are code spans, like everywhere in the report.
+    const makeReport = async () => {
+        const from = Date.now() - WEEK_MS;
+        const net = netDays();
+        const inputs = {
+            battery: history.ledger.summarize({ from, batteryOnly: true }),
+            all: history.ledger.summarize({ from }),
+            hours: history.ledger.hours({ from }),
+            netDays: net.days,
+        };
+        const system = state.system ?? await readState();
+        const findings = diagnose({ ...inputs, state: system, appName: id => codeSpan(appInfo(id).name), isApp: id => appInfo(id).desktop });
+        return agentReport({ ...inputs, findings, system, machine: await readMachine(), appName: id => appInfo(id).name });
+    };
+    const agent = settings ? buildAgentGroup(settings, { makeReport, ...agentOpts }) : null;
+    if (agent) page.add(agent.group);
 
     const row = finding => {
         const lines = [finding.detail, finding.evidence, estimateText(finding.estimate)].filter(Boolean);
@@ -230,9 +256,10 @@ export function buildDiagnosticsPage(history, {
     refresh();
 
     const dispose = () => {
+        agent?.dispose();
         unsubscribe();
         if (copiedId) GLib.source_remove(copiedId);
         copiedId = 0;
     };
-    return { page, lists, groups, nothing, state, refresh, copy, dispose };
+    return { page, lists, groups, nothing, agent, makeReport, state, refresh, copy, dispose };
 }

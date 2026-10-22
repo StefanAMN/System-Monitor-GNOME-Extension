@@ -72,6 +72,24 @@ async function clickActor(actor) {
     await sleep(600);
 }
 
+// A click inside a client's window (the preferences, a GTK process): the
+// client gives the point in its surface, the window's buffer rect says where
+// that surface is on the stage.
+async function clickInWindow(metaWindow, x, y) {
+    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    const rect = metaWindow.get_buffer_rect();
+    const now = () => GLib.get_monotonic_time();
+    // Two motions: the first event of a just-created virtual pointer only places it.
+    pointer.notify_absolute_motion(now(), rect.x + x + 2, rect.y + y + 2);
+    await sleep(150);
+    pointer.notify_absolute_motion(now(), rect.x + x, rect.y + y);
+    await sleep(200);
+    pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+    await sleep(80);
+    pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+    await sleep(300);
+}
+
 // Scroll an actor into view and wait until the scroll animation has
 // finished: a click sent while the content still moves lands elsewhere
 // (seen in the slower compat containers).
@@ -650,7 +668,11 @@ async function prefsWindow(rp) {
     for (let line = await readLine(); line !== null; line = await readLine()) {
         if (!line.startsWith('PREFS-CHECK')) continue;
         const show = /^PREFS-CHECK SHOW ([\w-]+)/.exec(line);
-        if (show) {
+        const click = /^PREFS-CHECK CLICK ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
+        if (click) {
+            check(titled(), `prefs: no window to click ${click[1]} in`);
+            await clickInWindow(titled(), Number(click[2]), Number(click[3]));
+        } else if (show) {
             await sleep(700);
             check(titled(), `prefs: no window on screen for the ${show[1]} page`);
             await shot(`prefs-${show[1]}`);

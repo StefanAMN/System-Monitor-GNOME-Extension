@@ -143,6 +143,16 @@ window.rp-window button.destructive-action {
 window.rp-window row spinbutton,
 window.rp-window row spinbutton > text { background-color: transparent; box-shadow: none; }
 window.rp-window entry { background-color: ${p.button}; box-shadow: none; }
+/* Text views (the agent's prompt, the report preview): themes such as
+   Orchis paint them white whatever the variant. */
+window.rp-window textview,
+window.rp-window textview > text { background-color: ${p.card}; color: ${p.fg}; }
+window.rp-window textview > text selection { background-color: ${p.selected}; }
+window.rp-window frame { border: 1px solid ${p.border}; border-radius: 8px; }
+/* Dialogs (the agent confirmation, the report preview) draw on a sheet,
+   which themes give their own .background colour. */
+window.rp-window sheet,
+window.rp-window sheet.background { background-color: ${p.card}; color: ${p.fg}; }
 window.rp-window switch { background-color: ${dark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.15)'}; border-color: transparent; }
 window.rp-window switch:checked { background-color: ${ACCENT}; }
 window.rp-window switch > slider { background-color: #ffffff; }
