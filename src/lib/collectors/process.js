@@ -9,6 +9,7 @@ const decoder = new TextDecoder('utf-8', { fatal: false });
 // proc(5) numbers fields from 1 with state as field 3.
 const F_UTIME = 14 - 3;
 const F_STIME = 15 - 3;
+const F_NICE = 19 - 3;
 const F_STARTTIME = 22 - 3;
 const F_RSS = 24 - 3;
 const MIN_FIELDS = F_RSS + 1;
@@ -18,7 +19,7 @@ const MIN_FIELDS = F_RSS + 1;
  * comm may contain spaces, parentheses and newlines, so each record is split
  * at its last ')' and a record is only complete once enough fields follow it.
  * @param {string} text
- * @returns {{pid: number, comm: string, ticks: number, start: number, rss: number}[]}
+ * @returns {{pid: number, comm: string, state: string, ticks: number, start: number, rss: number}[]}
  */
 export function parseStatBlob(text) {
     const out = [];
@@ -43,6 +44,7 @@ export function parseStatBlob(text) {
         out.push({
             pid,
             comm: record.slice(open + 1, close),
+            state: fields[0],
             ticks: Number(fields[F_UTIME]) + Number(fields[F_STIME]),
             start: Number(fields[F_STARTTIME]),
             rss: Number(fields[F_RSS])
@@ -82,12 +84,16 @@ export function filterGroups(groups, query) {
     return q ? groups.filter(g => g.comm.toLocaleLowerCase().includes(q)) : groups;
 }
 
+const isStopped = row => row.state === 'T' || row.state === 't';
+
 export function groupByName(rows) {
     const groups = new Map();
     for (const row of rows) {
         const g = groups.get(row.comm);
         if (g) {
             g.count++;
+            g.stopped += isStopped(row) ? 1 : 0;
+            g.paused = g.stopped === g.count;
             g.members.push({ pid: row.pid, start: row.start });
             g.ioRate += row.ioRate ?? 0;
             g.cpu += row.cpu;
@@ -98,6 +104,8 @@ export function groupByName(rows) {
             groups.set(row.comm, {
                 comm: row.comm, pid: row.pid, count: 1,
                 cpu: row.cpu, rss: row.rss, rssBytes: row.rssBytes, mem: row.mem, ioRate: row.ioRate ?? 0,
+                // Paused: every member stopped (by the panel, or Ctrl+Z in a terminal).
+                stopped: isStopped(row) ? 1 : 0, paused: isStopped(row),
                 // Start times guard against a PID reused by a later process.
                 members: [{ pid: row.pid, start: row.start }]
             });
@@ -300,11 +308,13 @@ export class ProcessSampler {
         this._prevIo = io;
 
         const groups = groupByName(rows);
+        // A paused group uses no CPU: by CPU it would drop out of the list
+        // it can be resumed from, so paused groups come first there.
         groups.sort(io
             ? (a, b) => (b.ioRate - a.ioRate) || (b.cpu - a.cpu)
             : byMemory
                 ? (a, b) => b.rss - a.rss
-                : (a, b) => (b.cpu - a.cpu) || (b.rss - a.rss));
+                : (a, b) => (b.paused - a.paused) || (b.cpu - a.cpu) || (b.rss - a.rss));
         return {
             warmingUp,
             count: rows.length,
@@ -361,7 +371,68 @@ export function processIdentity(pid, proc = '/proc') {
     const close = text.lastIndexOf(')');
     const fields = text.slice(close + 2).split(' ');
     if (fields[0] === 'Z' || fields[0] === 'X') return null;
-    return { start: Number(fields[F_STARTTIME]), state: fields[0], uid };
+    return { start: Number(fields[F_STARTTIME]), state: fields[0], nice: Number(fields[F_NICE]), uid };
+}
+
+// Niceness a lowered process gets: half way to the lowest priority, so
+// what it does still moves; an unprivileged user cannot raise it back.
+export const LOWER_NICE = 10;
+
+/**
+ * How a group's own processes run now: stopped (all paused), and the
+ * lowest priority among them.
+ * @param {{pid: number, start: number}[]} members
+ * @param {number} uid
+ * @returns {{mine: number[], paused: boolean, nice: number}} paused is false with no member left
+ */
+export function groupState(members, uid, proc = '/proc') {
+    const mine = [];
+    let stopped = 0;
+    let nice = -Infinity;
+    for (const m of members) {
+        const id = processIdentity(m.pid, proc);
+        if (!id || id.start !== m.start || id.uid !== uid) continue;
+        mine.push(m.pid);
+        // T: stopped by a signal; t: stopped by a debugger.
+        if (id.state === 'T' || id.state === 't') stopped++;
+        nice = Math.max(nice, id.nice);
+    }
+    return { mine, paused: mine.length > 0 && stopped === mine.length, nice: mine.length ? nice : 0 };
+}
+
+/**
+ * Lower the priority of processes with renice(1): an unprivileged user may
+ * only raise niceness, never lower it again.
+ * @param {number[]} pids
+ * @param {number} [nice]
+ * @returns {Promise<{ok: boolean, error: string}>}
+ */
+export function reniceProcesses(pids, nice = LOWER_NICE) {
+    return runQuiet(['renice', '-n', String(nice), '-p', ...pids.map(String)], pids.length === 0);
+}
+
+function runQuiet(argv, nothing) {
+    return new Promise(resolve => {
+        if (nothing) {
+            resolve({ ok: true, error: '' });
+            return;
+        }
+        let proc;
+        try {
+            proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_PIPE);
+        } catch (e) {
+            resolve({ ok: false, error: e.message });
+            return;
+        }
+        proc.communicate_utf8_async(null, null, (obj, res) => {
+            try {
+                const [, , stderr] = obj.communicate_utf8_finish(res);
+                resolve({ ok: obj.get_successful(), error: (stderr || '').trim() });
+            } catch (e) {
+                resolve({ ok: false, error: e.message });
+            }
+        });
+    });
 }
 
 /**
@@ -386,32 +457,11 @@ export function liveMembers(members, uid, proc = '/proc') {
 /**
  * Send a signal with kill(1).
  * @param {number[]} pids
- * @param {'TERM'|'KILL'} signal
+ * @param {'TERM'|'KILL'|'STOP'|'CONT'} signal
  * @returns {Promise<{ok: boolean, error: string}>} error is kill's own message
  *   (e.g. "Operation not permitted"); a process that exited in the meantime
  *   makes kill fail too, and the caller checks liveness afterwards anyway.
  */
 export function signalProcesses(pids, signal) {
-    return new Promise(resolve => {
-        if (pids.length === 0) {
-            resolve({ ok: true, error: '' });
-            return;
-        }
-        let proc;
-        try {
-            proc = Gio.Subprocess.new(['kill', '-s', signal, '--', ...pids.map(String)],
-                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_PIPE);
-        } catch (e) {
-            resolve({ ok: false, error: e.message });
-            return;
-        }
-        proc.communicate_utf8_async(null, null, (obj, res) => {
-            try {
-                const [, , stderr] = obj.communicate_utf8_finish(res);
-                resolve({ ok: obj.get_successful(), error: (stderr || '').trim() });
-            } catch (e) {
-                resolve({ ok: false, error: e.message });
-            }
-        });
-    });
+    return runQuiet(['kill', '-s', signal, '--', ...pids.map(String)], pids.length === 0);
 }

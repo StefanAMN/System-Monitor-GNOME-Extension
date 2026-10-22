@@ -616,7 +616,7 @@ async function screenReader(rp) {
         for (const w of rows) {
             check(items.some(n => n.name.startsWith(w.group.comm) && n.name.endsWith('opens System Monitor')), `a11y: no list item for ${w.group.comm} (have ${items.map(n => `'${n.name}'`).join(', ')})`);
             if (w.endBtn.reactive)
-                check(nodes.some(n => n.sensitive && A11Y_BUTTON.test(n.role) && n.name.startsWith(`End ${w.group.comm}`)), `a11y: no 'End ${w.group.comm}' button`);
+                check(nodes.some(n => n.sensitive && A11Y_BUTTON.test(n.role) && n.name.startsWith(`Actions for ${w.group.comm}`)), `a11y: no 'Actions for ${w.group.comm}' button`);
         }
         rp._launchSystemMonitor = view => launched.push(view);
         rows[0].item.grab_key_focus();
@@ -1316,19 +1316,55 @@ async function endProcesses(rp) {
         for (let t = 0; t < ms && !cond(); t += 200) await sleep(200);
         return cond();
     };
-    const clickEnd = async w => {
-        await scrollIntoView(rp, w.endBtn);
-        await clickActor(w.endBtn);
-    };
     const bar = () => rp._procEnd;
     const clickBar = async button => {
         await scrollIntoView(rp, button);
         await clickActor(button);
     };
+    // The row's button opens the action line; End… asks for confirmation.
+    const openActions = async w => {
+        await scrollIntoView(rp, w.endBtn);
+        await clickActor(w.endBtn);
+        check(bar().step === 'menu' && bar().box.visible, `actions: the row's button left the line '${bar().box.visible ? bar().label.text : 'hidden'}' (step ${bar().step})`);
+    };
+    const clickEnd = async w => {
+        await openActions(w);
+        await clickBar(bar().confirm);
+    };
+    const { processIdentity } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/collectors/process.js`);
     try {
         rp._indicator.menu.open();
         rp._activeTab = 'cpu';
         rp._updateTabVisibility();
+
+        // 0. Pause, resume and lower priority, with real clicks.
+        const busy = spawn('rpendpause', 'while :; do :; done');
+        const pid = Number(busy.get_identifier());
+        await openActions(await rowFor('rpendpause'));
+        check(bar().label.text === 'rpendpause' && bar().pause.label === 'Pause' && bar().lower.visible && bar().confirm.label === 'End…',
+            `actions: the line reads '${bar().label.text}' with ${bar().pause.label} / ${bar().lower.visible ? bar().lower.label : '-'} / ${bar().confirm.label}`);
+        await shot('actions');
+        await clickBar(bar().pause);
+        check(await until(() => processIdentity(pid)?.state === 'T', 3000), `pause: rpendpause is ${processIdentity(pid)?.state}, not stopped`);
+        check(await until(() => bar().label.text === 'rpendpause paused', 3000), `pause: the line says '${bar().label.text}'`);
+        // Paused uses no CPU, yet it stays first in the CPU list, with the pause icon.
+        check(await until(() => rp._procWidgets[0]?.group?.comm === 'rpendpause' && rp._procWidgets[0].group.paused &&
+            rp._procWidgets[0].icon.icon_name === 'media-playback-pause-symbolic', 6000),
+        `pause: the CPU list starts with ${rp._procWidgets[0]?.group?.comm} (paused ${rp._procWidgets[0]?.group?.paused}, icon ${rp._procWidgets[0]?.icon.icon_name})`);
+        await openActions(await rowFor('rpendpause'));
+        check(bar().pause.label === 'Resume', `resume: the line offers '${bar().pause.label}'`);
+        await clickBar(bar().pause);
+        check(await until(() => processIdentity(pid)?.state !== 'T', 3000), 'resume: rpendpause is still stopped');
+        await until(() => !bar().box.visible, 4000);
+        await openActions(await rowFor('rpendpause'));
+        await clickBar(bar().lower);
+        check(await until(() => processIdentity(pid)?.nice === 10, 3000), `priority: rpendpause runs at niceness ${processIdentity(pid)?.nice}, not 10`);
+        await until(() => !bar().box.visible, 4000);
+        await openActions(await rowFor('rpendpause'));
+        check(!bar().lower.visible, 'priority: lowered already, it is not offered again');
+        await clickBar(bar().cancel);
+        busy.force_exit();
+        console.log('RP-UITEST actions: pause, resume and lower priority work with real clicks');
 
         // 1. Quits on request.
         const polite = spawn('rpendpolite', 'while :; do :; done');
@@ -1337,7 +1373,7 @@ async function endProcesses(rp) {
         // The press stays on the ✕: the row neither shrinks (which moved the
         // ✕ from under the pointer and lost the click) nor opens anything.
         check(politeRow.item.scale_x === 1, `end: the row reacted to the ✕ press (scale ${politeRow.item.scale_x})`);
-        check(rp._indicator.menu.isOpen, 'end: clicking ✕ closed the menu (the row click went through)');
+        check(rp._indicator.menu.isOpen, 'end: clicking the row button closed the menu (the row click went through)');
         check(bar().box.visible && /^End rpendpolite\?/.test(bar().label.text), `end: confirmation is '${bar().box.visible ? bar().label.text : 'hidden'}'`);
         await shot('end-confirm');
         await clickBar(bar().confirm);
@@ -1367,7 +1403,7 @@ async function endProcesses(rp) {
         for (const p of spawned) p.force_exit();
         rp._indicator.menu.close();
         await sleep(300);
-        for (const name of ['rpendpolite', 'rpendstubborn', 'rpendkept']) GLib.unlink(`${dir}/${name}`);
+        for (const name of ['rpendpause', 'rpendpolite', 'rpendstubborn', 'rpendkept']) GLib.unlink(`${dir}/${name}`);
         GLib.rmdir(dir);
     }
 }

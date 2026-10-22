@@ -1,4 +1,5 @@
-// Top-process lists (CPU, Memory, Disk) and ending processes from them.
+// Top-process lists (CPU, Memory, Disk), and from them pausing, lowering the
+// priority of and ending processes.
 // Methods of the extension (installed by extension.js); `this` is the extension.
 import GLib from 'gi://GLib';
 import Atk from 'gi://Atk';
@@ -6,7 +7,7 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import Pango from 'gi://Pango';
 
-import { canEnd, liveMembers, signalProcesses } from '../../lib/collectors/process.js';
+import { canEnd, liveMembers, signalProcesses, groupState, reniceProcesses, LOWER_NICE } from '../../lib/collectors/process.js';
 import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed } from '../../lib/common/format.js';
 import { PROCESS_ROWS } from './constants.js';
@@ -68,7 +69,7 @@ export class ProcessesMethods {
         }
     }
 
-    /** The confirmation line under a process list. */
+    /** The action line under a process list: what to do with a process, then the confirmation to end it. */
     _buildEndBar() {
         // The message on its own (wrapping) line, the buttons under it.
         const box = new St.BoxLayout({ visible: false, ...VERTICAL, style: 'spacing: 6px; padding-top: 8px;' });
@@ -76,20 +77,27 @@ export class ProcessesMethods {
         label.clutter_text.line_wrap = true;
         label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
         const buttons = new St.BoxLayout({ style: 'spacing: 8px;', x_align: Clutter.ActorAlign.END });
+        const pause = new St.Button({ style_class: 'rp-chip-bg rp-proc-action', label: _('Pause'), can_focus: true, visible: false });
+        const lower = new St.Button({ style_class: 'rp-chip-bg rp-proc-action', label: _('Lower priority'), can_focus: true, visible: false });
         const confirm = new St.Button({ style_class: 'rp-end-confirm', label: _('End'), can_focus: true });
         const cancel = new St.Button({ style_class: 'rp-chip-bg rp-end-cancel', label: _('Cancel'), can_focus: true });
-        buttons.add_child(confirm);
-        buttons.add_child(cancel);
+        for (const b of [pause, lower, confirm, cancel]) buttons.add_child(b);
         box.add_child(label);
         box.add_child(buttons);
-        const bar = { box, label, confirm, cancel, target: null, step: 'idle', run: 0 };
+        const bar = { box, label, pause, lower, confirm, cancel, target: null, step: 'idle', run: 0 };
         confirm.connect('clicked', () => {
-            if (bar.step === 'confirm') this._endGroup(bar, 'TERM');
+            if (bar.step === 'menu') this._askEnd(bar, bar.target);
+            else if (bar.step === 'confirm') this._endGroup(bar, 'TERM');
             else if (bar.step === 'force') this._endGroup(bar, 'KILL');
         });
+        pause.connect('clicked', () => {
+            if (bar.step === 'menu') this._pauseGroup(bar, !bar.paused);
+        });
+        lower.connect('clicked', () => {
+            if (bar.step === 'menu') this._lowerGroup(bar);
+        });
         cancel.connect('clicked', () => this._hideEndBar(bar));
-        this._addClickAnimations(confirm);
-        this._addClickAnimations(cancel);
+        for (const b of [pause, lower, confirm, cancel]) this._addClickAnimations(b);
         return bar;
     }
 
@@ -100,8 +108,12 @@ export class ProcessesMethods {
         bar.box.visible = false;
     }
 
-    _showEndBar(bar, text, { confirm = null, cancel = null } = {}) {
+    _showEndBar(bar, text, { confirm = null, cancel = null, pause = null, lower = null } = {}) {
         bar.label.text = text;
+        bar.pause.visible = !!pause;
+        if (pause) bar.pause.label = pause;
+        bar.lower.visible = !!lower;
+        if (lower) bar.lower.label = lower;
         bar.confirm.visible = !!confirm;
         if (confirm) bar.confirm.label = confirm;
         bar.cancel.visible = !!cancel;
@@ -109,7 +121,87 @@ export class ProcessesMethods {
         bar.box.visible = true;
     }
 
-    /** First step: ask. The group is copied, so later re-sorting cannot change the target. */
+    /**
+     * The row's button: what to do with the process. The group is copied, so
+     * later re-sorting cannot change the target.
+     */
+    _askAction(bar, group) {
+        bar.run++;
+        bar.target = { comm: group.comm, count: group.count, members: group.members.map(m => ({ ...m })) };
+        const { mine, paused, nice } = groupState(bar.target.members, this._uid);
+        if (mine.length === 0) {
+            this._noneLeft(bar);
+            return;
+        }
+        bar.step = 'menu';
+        bar.paused = paused;
+        const name = group.count > 1 ? `${group.comm} ×${group.count}` : group.comm;
+        this._showEndBar(bar, name, {
+            pause: paused ? _('Resume') : _('Pause'),
+            // Lowered already: an unprivileged user cannot lower it further usefully, nor raise it back.
+            lower: nice < LOWER_NICE ? _('Lower priority') : null,
+            confirm: _('End…'),
+            cancel: _('Close'),
+        });
+        bar.pause.grab_key_focus();
+    }
+
+    /** No process of the group is left that is ours to act on. */
+    _noneLeft(bar) {
+        const { comm } = bar.target;
+        const { others } = liveMembers(bar.target.members, this._uid);
+        bar.step = 'done';
+        this._showEndBar(bar, others > 0
+            ? fill(_('{process} belongs to another user and cannot be ended from here.'), { process: comm })
+            : fill(_('{process} has already exited.'), { process: comm }), { cancel: _('Close') });
+    }
+
+    /** Briefly say what happened, then close the line. */
+    async _actionDone(bar, run, text) {
+        bar.step = 'done';
+        this._showEndBar(bar, text);
+        // The list shows the change (the pause icon, a paused group first) now.
+        if (this._menuOpen) this._poll();
+        if (await this._wait(2500) && run === bar.run) this._hideEndBar(bar);
+    }
+
+    /** Stop (SIGSTOP) or continue (SIGCONT) the group's own processes. */
+    async _pauseGroup(bar, pause) {
+        const run = ++bar.run;
+        const { comm } = bar.target;
+        const { mine } = groupState(bar.target.members, this._uid);
+        if (mine.length === 0) {
+            this._noneLeft(bar);
+            return;
+        }
+        bar.step = 'waiting';
+        const sent = await signalProcesses(mine, pause ? 'STOP' : 'CONT');
+        if (run !== bar.run) return;
+        const now = groupState(bar.target.members, this._uid);
+        const ok = pause ? now.paused : !now.paused;
+        await this._actionDone(bar, run, ok
+            ? fill(pause ? _('{process} paused') : _('{process} resumed'), { process: comm })
+            : fill(_('{process} could not be changed{error}'), { process: comm, error: sent.error ? ` (${sent.error})` : '' }));
+    }
+
+    /** Lower the priority of the group's own processes (niceness LOWER_NICE). */
+    async _lowerGroup(bar) {
+        const run = ++bar.run;
+        const { comm } = bar.target;
+        const { mine } = groupState(bar.target.members, this._uid);
+        if (mine.length === 0) {
+            this._noneLeft(bar);
+            return;
+        }
+        bar.step = 'waiting';
+        const sent = await reniceProcesses(mine);
+        if (run !== bar.run) return;
+        await this._actionDone(bar, run, sent.ok
+            ? fill(_('{process}: lower priority'), { process: comm })
+            : fill(_('{process} could not be changed{error}'), { process: comm, error: sent.error ? ` (${sent.error})` : '' }));
+    }
+
+    /** Ending: ask first. */
     _askEnd(bar, group) {
         bar.run++;
         bar.target = { comm: group.comm, count: group.count, members: group.members.map(m => ({ ...m })) };
@@ -126,12 +218,9 @@ export class ProcessesMethods {
         const run = ++bar.run;
         const gen = this._gen;
         const { comm } = bar.target;
-        const { mine, others } = liveMembers(bar.target.members, this._uid);
+        const { mine } = liveMembers(bar.target.members, this._uid);
         if (mine.length === 0) {
-            bar.step = 'done';
-            this._showEndBar(bar, others > 0
-                ? fill(_('{process} belongs to another user and cannot be ended from here.'), { process: comm })
-                : fill(_('{process} has already exited.'), { process: comm }), { cancel: _('Close') });
+            this._noneLeft(bar);
             return;
         }
         bar.step = 'waiting';
@@ -197,16 +286,17 @@ export class ProcessesMethods {
                 statLbl.x_align = Clutter.ActorAlign.END;
                 item.add_child(statLbl);
 
+                // Pause, lower priority or end: the line under the list.
                 const endBtn = new St.Button({
                     style_class: 'rp-end-button',
                     can_focus: true,
-                    accessible_name: _('End process'),
+                    accessible_name: _('Process actions'),
                     y_align: Clutter.ActorAlign.CENTER,
-                    child: new St.Icon({ icon_name: 'window-close-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 12px;' }),
+                    child: new St.Icon({ icon_name: 'view-more-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 12px;' }),
                 });
-                const widgets = { nameLbl, statLbl, pbar, endBtn, group: null };
+                const widgets = { nameLbl, statLbl, pbar, endBtn, icon, group: null };
                 endBtn.connect('clicked', () => {
-                    if (widgets.group) this._askEnd({ cpu: this._procEnd, memory: this._memProcEnd, disk: this._dskProcEnd }[mode], widgets.group);
+                    if (widgets.group) this._askAction({ cpu: this._procEnd, memory: this._memProcEnd, disk: this._dskProcEnd }[mode], widgets.group);
                 });
 
                 item.add_child(endBtn);
@@ -257,15 +347,18 @@ export class ProcessesMethods {
                 w.pbar.setPercent(Math.min(100, valNum));
             }
             w.group = proc;
+            // A paused group: the pause icon in place of the program's.
+            w.icon.icon_name = proc.paused ? 'media-playback-pause-symbolic' : 'application-x-executable-symbolic';
             // Process lists change with samples, not glide frames.
-            const who = proc.count > 1 ? fill(ngettext('{process}, {n} process', '{process}, {n} processes', proc.count), { process: proc.comm, n: proc.count }) : proc.comm;
+            const named = proc.count > 1 ? fill(ngettext('{process}, {n} process', '{process}, {n} processes', proc.count), { process: proc.comm, n: proc.count }) : proc.comm;
+            const who = proc.paused ? fill(_('{process}, paused'), { process: named }) : named;
             w.item.accessible_name = fill(SPOKEN_MODE[mode], { process: who, value: spokenValue(w.statLbl.text) });
             // Hidden but still taking its room, so the values stay aligned.
             const endable = canEnd(proc, this._selfPid);
             w.endBtn.opacity = endable ? 255 : 0;
             w.endBtn.reactive = endable;
             w.endBtn.can_focus = endable;
-            w.endBtn.accessible_name = endable ? fill(_('End {process}'), { process: who }) : '';
+            w.endBtn.accessible_name = endable ? fill(_('Actions for {process}'), { process: who }) : '';
         });
     }
 }

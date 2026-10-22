@@ -8,7 +8,7 @@ import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime,
 import { RingBuffer } from '../../src/lib/engine/ringbuffer.js';
 import { RunningStats } from '../../src/lib/engine/stats.js';
 import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned, movePinned } from '../../src/lib/common/settingsmodel.js';
-import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses, filterGroups } from '../../src/lib/collectors/process.js';
+import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses, filterGroups, groupState, reniceProcesses, LOWER_NICE } from '../../src/lib/collectors/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
 import { listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
 import { parseNetDev, counterDelta, NetworkSampler } from '../../src/lib/collectors/network.js';
@@ -177,7 +177,7 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     const rows = parseStatBlob(blob);
     eq(rows.map(r => r.pid), [1, 4194304, 77, 88, 99], 'stat: pids incl. > 65535; truncated record dropped');
     eq(rows.map(r => r.comm), ['systemd', 'big pid', 'a) b) (c', 'naïve-日本語', 'new\nline'], 'stat: comm with spaces, parens, non-ASCII, newline');
-    eq([rows[0].ticks, rows[0].start, rows[0].rss], [15, 100, 3000], 'stat: utime+stime, starttime, rss fields');
+    eq([rows[0].ticks, rows[0].start, rows[0].rss, rows[0].state], [15, 100, 3000, 'S'], 'stat: utime+stime, starttime, rss, state fields');
     eq(parseStatBlob(''), [], 'stat: empty input (every process vanished)');
 
     eq(cpuPercent({ start: 100, ticks: 100 }, { start: 100, ticks: 150 }, 0.5, 100), 100, 'proc cpu: 50 ticks in 0.5 s at 100 Hz = one core');
@@ -196,6 +196,9 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     eq(g[0].pid, 10, 'group: keeps a representative pid');
     eq(groupByName([]), [], 'group: empty');
     eq(g[0].members.map(m => m.pid), [10, 12, 13], 'group: keeps every member pid, for ending the group');
+    const st = (comm, pid, state) => ({ ...row(comm, pid, 0, 10), state });
+    const p = groupByName([st('vim', 1, 'T'), st('vim', 2, 'T'), st('app', 3, 'T'), st('app', 4, 'S'), st('sh', 5, 'S')]);
+    eq(p.map(x => [x.comm, x.paused]), [['vim', true], ['app', false], ['sh', false]], 'pause: a group is paused when every member is stopped');
     ok(canEnd({ comm: 'firefox', members: [{ pid: 10 }] }, 999), 'end: an ordinary app may be ended');
     ok(!canEnd({ comm: 'gnome-shell', members: [{ pid: 10 }] }, 999), 'end: never the shell');
     ok(!canEnd({ comm: 'Xwayland', members: [{ pid: 10 }] }, 999), 'end: never Xwayland');
@@ -206,19 +209,26 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
 // ── ending processes: identity from a fixture /proc ──
 {
     const root = GLib.dir_make_tmp('rp-proc-XXXXXX');
-    const stat = (pid, state, start) => `${pid} (a b) ${state} 1 1 1 0 -1 0 0 0 0 0 5 5 0 0 20 0 1 0 ${start} 1000 10\n`;
-    for (const [pid, state, start] of [[100, 'S', 5000], [101, 'Z', 5001], [102, 'R', 7777]]) {
+    const stat = (pid, state, start, nice = 0) => `${pid} (a b) ${state} 1 1 1 0 -1 0 0 0 0 0 5 5 0 0 20 ${nice} 1 0 ${start} 1000 10\n`;
+    const made = [[100, 'S', 5000], [101, 'Z', 5001], [102, 'R', 7777], [104, 'T', 6000], [105, 'T', 6001, 10], [106, 'S', 6002, 5]];
+    for (const [pid, state, start, nice] of made) {
         GLib.mkdir_with_parents(`${root}/${pid}`, 0o755);
-        GLib.file_set_contents(`${root}/${pid}/stat`, stat(pid, state, start));
+        GLib.file_set_contents(`${root}/${pid}/stat`, stat(pid, state, start, nice));
     }
     const uid = Gio.Credentials.new().get_unix_user();
-    eq(processIdentity(100, root), { start: 5000, state: 'S', uid }, 'end: identity of a live process (start, state, owner)');
+    eq(processIdentity(100, root), { start: 5000, state: 'S', nice: 0, uid }, 'end: identity of a live process (start, state, niceness, owner)');
+    // Pause and priority: a group is paused only when all its own members are stopped.
+    eq(groupState([{ pid: 104, start: 6000 }, { pid: 105, start: 6001 }], uid, root), { mine: [104, 105], paused: true, nice: 10 }, 'pause: every member stopped is a paused group; its lowest priority');
+    eq(groupState([{ pid: 104, start: 6000 }, { pid: 106, start: 6002 }], uid, root), { mine: [104, 106], paused: false, nice: 5 }, 'pause: one member running is not paused');
+    eq(groupState([{ pid: 101, start: 5001 }, { pid: 103, start: 1 }], uid, root), { mine: [], paused: false, nice: 0 }, 'pause: no member left is not paused');
+    eq(groupState([{ pid: 104, start: 6000 }], uid + 1, root).mine, [], 'pause: someone else\'s process is never ours to pause');
+    ok(LOWER_NICE > 0 && LOWER_NICE < 20, 'priority: lowering sets a niceness between normal and the lowest');
     eq(processIdentity(101, root), null, 'end: a zombie counts as exited');
     eq(processIdentity(103, root), null, 'end: a missing pid is exited, silently');
     eq(liveMembers([{ pid: 100, start: 5000 }, { pid: 101, start: 5001 }, { pid: 102, start: 1 }, { pid: 103, start: 1 }], uid, root),
         { mine: [100], others: 0 }, 'end: only live members with the same start time (102 is a reused pid)');
     eq(liveMembers([{ pid: 100, start: 5000 }], uid + 1, root), { mine: [], others: 1 }, 'end: someone else\'s process is counted, not taken');
-    for (const pid of [100, 101, 102]) {
+    for (const [pid] of made) {
         GLib.unlink(`${root}/${pid}/stat`);
         GLib.rmdir(`${root}/${pid}`);
     }
@@ -759,6 +769,29 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
 const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));
 (async () => {
+    // ── pausing and lowering a real process (a child of this test) ──
+    {
+        const child = Gio.Subprocess.new(['sleep', '30'], Gio.SubprocessFlags.NONE);
+        const pid = Number(child.get_identifier());
+        const uid = Gio.Credentials.new().get_unix_user();
+        const id = processIdentity(pid);
+        const members = [{ pid, start: id.start }];
+        const settle = () => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+            r();
+            return GLib.SOURCE_REMOVE;
+        }));
+        ok((await signalProcesses([pid], 'STOP')).ok, 'pause: SIGSTOP sent');
+        await settle();
+        ok(groupState(members, uid).paused, 'pause: the process reads as stopped');
+        ok((await signalProcesses([pid], 'CONT')).ok, 'resume: SIGCONT sent');
+        await settle();
+        ok(!groupState(members, uid).paused, 'resume: the process runs again');
+        ok((await reniceProcesses([pid])).ok && groupState(members, uid).nice === LOWER_NICE, `priority: renice set niceness ${groupState(members, uid).nice}`);
+        const back = await reniceProcesses([pid], 0);
+        ok(!back.ok && /permission|denied/i.test(back.error), `priority: raising it back is refused for a user ('${back.error}')`);
+        child.force_exit();
+    }
+
     {
         // Two DRM cards in a sysfs fixture: an Intel iGPU, awake, and an AMD
         // dGPU that is powered down. The sleeping card is reported asleep
