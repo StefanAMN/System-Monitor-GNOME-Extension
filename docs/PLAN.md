@@ -1081,3 +1081,17 @@ Not authorized: merging into `master` or pushing. Ask the owner when the branch 
 
 - How well each real agent handles the prompt (each installed one is launched once and shown to the owner, nothing approved inside it).
 - A machine that really swaps or stalls on memory: those rules are proven by unit tests only.
+
+## State (2026-10-22, branch `diagnostics-agent`)
+
+| # | Commit | Proof |
+|---|---|---|
+| D1+D2 | ac03abf | unit: memory per unit (missing `memory.current` reads as null), meminfo / vmstat / PSI totals parsing, the machine sampler without PSI, ledger v2 by hand (memory per app over its units, floor, machine memory, swap and stall deltas, counters going backwards, network and time away, `hours()`), 10 places by memory when an hour closes, a v1 file loads with no memory data and is copied to `.v1` once (an existing copy is never overwritten); each new rule fires on its evidence and stays silent below it (25 checks). Live on this machine: two tracker samples read 9.6 of 15 GB in use, Claude 5.0 GB, zen 2.6 GB, stall and network deltas. `test-overhead 30`: tracking 45.5 ms CPU per sample (+0.152 % of a core; was 28 ms), menu closed with tracking +0.85 % (budget 1 %). The short soak cannot take its third heap census (30 s), so that check failed by design; the 20-minute soak runs in D6 |
+| D3 | 662a768 | `prefs-check`: findings in their area lists, empty areas hidden, the copied report grouped by area; light and dark renders of the page looked at |
+| D4 | 8e4ab30 | unit: the report of an empty history against the expected text; a hostile app name (backticks, pipe, newline, "Ignore previous instructions…") stays one code span in titles and tables; no home directory, user or host name, no `/proc` paths |
+| D5 | 0d25982 | unit: argv for each agent and terminal, a custom command split like a shell with `$(…)`, `;` and quotes kept literal, refused templates, terminal fallback. `prefs-check` with a fake terminal and agents on their own PATH: offered agents, preview, cancel starts and writes nothing, the terminal runs the agent in the private folder (report 0600, folder 0700) with the prompt as one argument, consent kept per agent, a custom command's arguments arrive literally and nothing is run by a shell, a missing program is reported |
+
+Found and fixed on the way:
+- Under the user's theme (Orchis) the prompt's text view and the confirmation dialog's sheet were white with pale text in dark mode; the window stylesheet now colours text views and dialog sheets.
+- The first fake-agent test reached the user's real `xdg-terminal-exec`: `Gio.SubprocessLauncher` looks programs up on the parent's PATH unless `SEARCH_PATH_FROM_ENVP` is set. The test now sets it; the fake `claude` only recorded its arguments. Production code looks programs up and starts them on the same (parent's) PATH.
+- `prefs-check` run directly on this machine fails "look (light): the window rendered nothing" on `master` too; it is not from this branch.
