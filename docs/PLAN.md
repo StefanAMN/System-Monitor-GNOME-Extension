@@ -1130,3 +1130,12 @@ The Tracking tab gets a Component choice beside Period: Battery (as today), Proc
 | T2 | `trackingview.js`: per component the tiles' figures, the bar points and the ranked apps, pure | Engine | unit: answers by hand per component, per hour and per day |
 | T3 | The Component choice, tiles, one chart drawing for every component, app lists, empty states (Network: no per-app figures; Temperature: no app list) | UI | prefs-check on a fixture history, every component in light and dark by rendered pixels under the user's theme, the dropdown list's colours; real pointer clicks on the choice in `test-ui` |
 | T4 | Translation template, accessibility labels, `test-i18n`, CI on GNOME 46-50, 20-minute soak | All | as earlier work |
+
+## State (2026-10-23, branch `tracking-components`)
+
+| # | Commit | Proof |
+|---|---|---|
+| T1+T2 | a1a4a37 | unit: `/proc/<pid>/io` parsing; per-pid deltas (a new pid from zero, a reused pid, a process that ended between listing and reading, an unreadable one counted as denied, a unit whose CPU time did not move skipped and carried over, reset); the ledger's disk and temperature fields by hand (a unit the usage reading does not know is left out, a new disk counts from the next reading, a counter reset counts nothing, no temperature reading left out of the average); a file without them reads as no data; each component's tiles, bars per hour and per day, ranked apps by hand. Live: a 64 MiB `dd` in its own app scope on the real disk shows as 64 MiB written by that app and by the machine. CPU per sample (standalone, 10 samples): 49 ms with disk per app, 37 ms without. `test-overhead 120` (before the skip of idle units): tracking 73.3 ms per sample in the shell, menu closed with tracking +0.78 % (budget 1 %) |
+| T3 | ad2ee77 | prefs-check: the Component choice offers the seven, each view has its tiles, chart and apps (or says why not), the disk figure for the editor (239 intervals × 2 MB), temperatures 55 / 60 °C, back to the battery view unchanged; the views rendered and looked at in light and dark |
+
+Pending when this was written (the session was locked, so nothing can render and the nested shell locks too): the tile colours by rendered pixels, the pointer clicks on the Component dropdown (`componentClicks`, driven by `test-ui`), `test-i18n`, the CPU budgets after the skip of idle units.
