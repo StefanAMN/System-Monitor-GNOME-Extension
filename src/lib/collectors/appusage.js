@@ -72,6 +72,10 @@ function usageUsec(stat) {
     return m ? Number(m[1]) : null;
 }
 
+// An idle unit's memory is read again after this many readings: the kernel
+// can take memory back from an app that does not run.
+export const IDLE_MEMORY_EVERY = 4;
+
 export class AppUsageSampler {
     /**
      * @param {object} [paths] for tests: { mount, session }
@@ -80,6 +84,10 @@ export class AppUsageSampler {
         this._mount = mount;
         this._session = session;
         this.available = null;
+        // unit -> { usec, pids, memory, age } at the previous reading. A unit
+        // whose CPU time did not move started and ended no process, so its
+        // process list and (for a few readings) its memory are kept.
+        this._cache = new Map();
     }
 
     async _sessionRoot() {
@@ -154,12 +162,19 @@ export class AppUsageSampler {
                     const usec = await this._readUsage(`${dir}/${name}`);
                     if (usec === null) continue;
                     const unit = { unit: name, usec, ...what };
-                    if (withPids) unit.pids = await this._readPids(`${dir}/${name}`);
-                    if (withMemory) unit.memory = await this._readMemory(`${dir}/${name}`);
+                    const before = this._cache.get(name);
+                    const idle = before?.usec === usec;
+                    if (withPids) unit.pids = idle && before.pids ? before.pids : await this._readPids(`${dir}/${name}`);
+                    if (withMemory) {
+                        const fresh = !idle || before.memory === undefined || before.age + 1 >= IDLE_MEMORY_EVERY;
+                        unit.memory = fresh ? await this._readMemory(`${dir}/${name}`) : before.memory;
+                        unit.memoryAge = fresh ? 0 : before.age + 1;
+                    }
                     units.push(unit);
                 }
             }
         }
+        this._cache = new Map(units.map(u => [u.unit, { usec: u.usec, pids: u.pids, memory: u.memory, age: u.memoryAge ?? 0 }]));
         const [total, system] = await Promise.all([
             this._readUsage(this._mount),
             this._readUsage(`${this._mount}/system.slice`),

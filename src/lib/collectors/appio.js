@@ -12,31 +12,20 @@
 // read) and counts from zero; a counter lower than before is a new process
 // with a reused pid. The first call reads every unit.
 //
+// The files are read synchronously in batches, one batch per idle callback,
+// as the process list does (process.js): /proc reads do not touch a disk, and
+// a few hundred asynchronous reads cost the shell far more CPU.
+//
 // HAL layer: bytes per unit, nothing formatted.
-import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
-import { readFileAsync, logOnce } from '../common/utils.js';
+import { logOnce, noteReadError } from '../common/utils.js';
+import { parseProcIo } from './process.js';
 
-/**
- * @param {string} text /proc/<pid>/io
- * @returns {?{read: number, write: number}} bytes that reached the storage layer
- */
-export function parseProcIo(text) {
-    let read = null;
-    let write = null;
-    for (const line of text.split('\n')) {
-        if (line.startsWith('read_bytes: ')) read = Number(line.slice(12));
-        else if (line.startsWith('write_bytes: ')) write = Number(line.slice(13));
-    }
-    return Number.isFinite(read) && Number.isFinite(write) ? { read, write } : null;
-}
+export { parseProcIo };
 
-function isMissing(e) {
-    return e?.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND) || e?.matches?.(GLib.FileError, GLib.FileError.NOENT) ||
-        // A process that ended while its file was open reads as ESRCH.
-        /No such process/.test(e?.message ?? '');
-}
+const BATCH = 32;
+const decoder = new TextDecoder('utf-8', { fatal: false });
 
 export class AppIoSampler {
     /** @param {string} [proc] /proc, or a fixture in tests */
@@ -49,13 +38,44 @@ export class AppIoSampler {
         this._prevUsec = new Map();
         // Processes whose counters could not be read at the last call.
         this.denied = 0;
+        this._denied = 0;
+        this._idleId = 0;
+        this._finish = null;
     }
 
     /** Forget the previous reading (tracking restarted): the next call only sets the baseline. */
     reset() {
+        this.cancel();
         this._prev = new Map();
         this._prevUsec = new Map();
         this._primed = false;
+    }
+
+    /** Stop a reading in progress (tracking stopped); its call resolves with nothing. */
+    cancel() {
+        if (this._idleId) GLib.source_remove(this._idleId);
+        this._idleId = 0;
+        this._finish?.(new Map());
+        this._finish = null;
+    }
+
+    /** One process's counters, or null when it ended or cannot be read. */
+    _read(pid) {
+        try {
+            return parseProcIo(decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/io`)[1]));
+        } catch (e) {
+            // ENOENT: ended before open(); ESRCH (FAILED to GLib): ended
+            // while being read. Both are normal.
+            if (e.matches?.(GLib.FileError, GLib.FileError.NOENT) || e.matches?.(GLib.FileError, GLib.FileError.FAILED)) return null;
+            if (e.matches?.(GLib.FileError, GLib.FileError.ACCES) || e.matches?.(GLib.FileError, GLib.FileError.PERM)) {
+                this._denied++;
+                // Once, not per process (the message names the path).
+                logOnce('ResourcePulse: some per-process disk counters cannot be read (permission denied); disk use per app leaves those processes out');
+                return null;
+            }
+            noteReadError(e);
+            return null;
+        }
     }
 
     /**
@@ -63,11 +83,12 @@ export class AppIoSampler {
      * @returns {Promise<Map<string, {read: number, write: number}>>} bytes per
      *   unit since the previous call; empty on the first call
      */
-    async sample(units) {
+    sample(units) {
+        this.cancel();
         const next = new Map();
         const out = new Map();
         const usec = new Map();
-        let denied = 0;
+        const todo = [];
         for (const { unit, usec: cpu, pids = [] } of units) {
             usec.set(unit, cpu);
             if (this._primed && this._prevUsec.get(unit) === cpu) {
@@ -75,36 +96,39 @@ export class AppIoSampler {
                 for (const pid of pids) if (this._prev.has(pid)) next.set(pid, this._prev.get(pid));
                 continue;
             }
-            for (const pid of pids) {
-                let io;
-                try {
-                    io = parseProcIo(await readFileAsync(`${this._proc}/${pid}/io`));
-                } catch (e) {
-                    // The process ended since it was listed: a normal event.
-                    if (!isMissing(e)) {
-                        denied++;
-                        // Once per reason, not per process (the message names the path).
-                        logOnce(`ResourcePulse: per-process disk counters cannot be read (${e.message.replace(/^.*: /, '')}); disk use per app leaves those processes out`);
-                    }
-                    continue;
-                }
-                if (!io) continue;
-                next.set(pid, io);
-                if (!this._primed) continue;
-                const before = this._prev.get(pid);
-                const read = !before || io.read < before.read ? io.read : io.read - before.read;
-                const write = !before || io.write < before.write ? io.write : io.write - before.write;
-                if (read === 0 && write === 0) continue;
-                const sum = out.get(unit) ?? { read: 0, write: 0 };
-                sum.read += read;
-                sum.write += write;
-                out.set(unit, sum);
-            }
+            for (const pid of pids) todo.push([unit, pid]);
         }
-        this._prev = next;
-        this._prevUsec = usec;
-        this._primed = true;
-        this.denied = denied;
-        return out;
+        this._denied = 0;
+        return new Promise(resolve => {
+            this._finish = resolve;
+            let i = 0;
+            const step = () => {
+                for (const end = Math.min(i + BATCH, todo.length); i < end; i++) {
+                    const [unit, pid] = todo[i];
+                    const io = this._read(pid);
+                    if (!io) continue;
+                    next.set(pid, io);
+                    if (!this._primed) continue;
+                    const before = this._prev.get(pid);
+                    const read = !before || io.read < before.read ? io.read : io.read - before.read;
+                    const write = !before || io.write < before.write ? io.write : io.write - before.write;
+                    if (read === 0 && write === 0) continue;
+                    const sum = out.get(unit) ?? { read: 0, write: 0 };
+                    sum.read += read;
+                    sum.write += write;
+                    out.set(unit, sum);
+                }
+                if (i < todo.length) return GLib.SOURCE_CONTINUE;
+                this._idleId = 0;
+                this._finish = null;
+                this._prev = next;
+                this._prevUsec = usec;
+                this._primed = true;
+                this.denied = this._denied;
+                resolve(out);
+                return GLib.SOURCE_REMOVE;
+            };
+            this._idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, step);
+        });
     }
 }
