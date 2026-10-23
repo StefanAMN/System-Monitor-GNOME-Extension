@@ -65,6 +65,12 @@
       <summary>Disk Space Alert Threshold</summary>
       <description>Percentage of space used on / that raises an alert.</description>
     </key>
+    <key name="threshold-battery" type="i">
+      <range min="5" max="50"/>
+      <default>15</default>
+      <summary>Low Battery Alert Threshold</summary>
+      <description>Battery charge, while running on battery, at or below which an alert is raised.</description>
+    </key>
     <key name="smooth-transitions" type="b">
       <default>true</default>
       <summary>Smooth Changes</summary>

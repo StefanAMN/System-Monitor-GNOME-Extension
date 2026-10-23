@@ -23,6 +23,7 @@ import { PeakScale } from './lib/common/present.js';
 import { RingBuffer } from './lib/engine/ringbuffer.js';
 import { AlertMonitor } from './lib/engine/alerts.js';
 import { PressureSampler } from './lib/collectors/pressure.js';
+import { ThrottleSampler } from './lib/collectors/throttle.js';
 import { BucketSeries, RANGES } from './lib/engine/longhistory.js';
 import { loadNetUsage, netUsagePath, readBootId } from './lib/engine/netusage.js';
 import { RunningStats } from './lib/engine/stats.js';
@@ -80,6 +81,7 @@ export default class ResourcePulseExtension extends Extension {
         this._thm = new ThermalSampler();
         this._gpu = new GpuSampler();
         this._psi = new PressureSampler();
+        this._throttle = new ThrottleSampler();
         // What the panel shows: a glide from _shownFrom to _shownTo over one
         // interval, starting at _shownAt. Raw readings stay in _lastData.
         this._shownFrom = null;
@@ -552,6 +554,7 @@ export default class ResourcePulseExtension extends Extension {
         this._waits = null;
         this._psi = null;
         this._lastPsi = null;
+        this._lastThrottle = null;
         this._dangerBox = null;
 
         // Pages are built lazily, so a field left over from the previous

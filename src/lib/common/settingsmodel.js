@@ -132,6 +132,11 @@ export const SETTINGS_SECTIONS = [
                 detail: N_('Space used on / above this is shown as a warning'),
                 min: 50, max: 100, step: 1, unit: '%',
             },
+            {
+                key: 'threshold-battery', kind: 'number', metric: 'battery', title: N_('Low battery'),
+                detail: N_('Battery charge at or below this, on battery, is shown as a warning'),
+                min: 5, max: 50, step: 5, unit: '%',
+            },
         ],
     },
 ];

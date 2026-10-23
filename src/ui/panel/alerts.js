@@ -9,7 +9,7 @@ import { ProcessSampler } from '../../lib/collectors/process.js';
 import { thermalUnavailable } from '../../lib/common/present.js';
 import { alertReadings, alertLine } from '../../lib/engine/alerts.js';
 import { formatBytes, formatTemp } from '../../lib/common/format.js';
-import { PRESSURE_LIMIT, ALERTS } from './constants.js';
+import { PRESSURE_LIMIT, THROTTLE_LIMIT, ALERTS } from './constants.js';
 import { _, fill } from '../../lib/common/i18n.js';
 
 export class AlertsMethods {
@@ -23,6 +23,8 @@ export class AlertsMethods {
             gpu: s.get_int('threshold-gpu'),
             disk: s.get_int('threshold-disk'),
             pressure: PRESSURE_LIMIT,
+            battery: s.get_int('threshold-battery'),
+            throttle: THROTTLE_LIMIT,
         };
         const { raised, cleared } = this._alerts.update(alertReadings(data, limits, thermalUnavailable), now);
         for (const key of cleared) delete this._alertCauses[key];
