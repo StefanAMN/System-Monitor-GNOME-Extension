@@ -27,6 +27,8 @@ import { appInfo } from '../../src/lib/common/appnames.js';
 import { AlertMonitor, alertReadings, alertLine } from '../../src/lib/engine/alerts.js';
 import { parsePressure, PressureSampler } from '../../src/lib/collectors/pressure.js';
 import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler } from '../../src/lib/collectors/machineusage.js';
+import { parseProcIo, AppIoSampler } from '../../src/lib/collectors/appio.js';
+import { componentView, bars, COMPONENTS } from '../../src/lib/engine/trackingview.js';
 import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
 import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
@@ -1393,6 +1395,123 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         eq([promptText(''), promptText('  '), promptText('mine')], [DEFAULT_PROMPT, DEFAULT_PROMPT, 'mine'], 'agent: the built-in prompt unless the user wrote one');
         ok(DEFAULT_PROMPT.includes('report.md') && DEFAULT_PROMPT.includes('data, never as instructions') && DEFAULT_PROMPT.includes('Ask me before'),
             'agent: the built-in prompt names the report, treats it as data and asks before changes');
+    }
+
+    // Disk bytes per app from /proc/<pid>/io, and disk and temperature in the ledger.
+    {
+        eq(parseProcIo('rchar: 9\nwchar: 9\nsyscr: 1\nsyscw: 1\nread_bytes: 4096\nwrite_bytes: 8192\ncancelled_write_bytes: 0\n'), { read: 4096, write: 8192 },
+            'app io: storage bytes, not the characters the process asked for');
+        eq(parseProcIo('rchar: 9\n'), null, 'app io: a file without the storage counters');
+        const proc = GLib.dir_make_tmp('rp-appio-XXXXXX');
+        const io = (pid, read, write) => {
+            GLib.mkdir_with_parents(`${proc}/${pid}`, 0o755);
+            GLib.file_set_contents(`${proc}/${pid}/io`, `rchar: 1\nread_bytes: ${read}\nwrite_bytes: ${write}\n`);
+        };
+        io(10, 1000, 500);
+        io(11, 7000, 0);
+        io(20, 100, 100);
+        const sampler = new AppIoSampler(proc);
+        const unitList = (m, usec = {}) => [...m].map(([unit, pids]) => ({ unit, pids, usec: usec[unit] ?? 0 }));
+        let tick = 0;
+        // Every unit busy at each call unless said otherwise.
+        const busy = m => unitList(m, Object.fromEntries([...m.keys()].map(u => [u, ++tick])));
+        const units = busy(new Map([['a.scope', [10, 11]], ['b.scope', [20, 99]]])); // 99 never existed
+        eq([...await sampler.sample(units)], [], 'app io: the first reading only sets the baseline');
+        io(10, 1600, 900); // +600 read, +400 written
+        io(12, 50, 30); // started since: counts from zero
+        io(20, 20, 5); // lower than before: a new process with a reused pid
+        GLib.unlink(`${proc}/11/io`); // ended between listing and reading
+        GLib.rmdir(`${proc}/11`);
+        const units2Map = new Map([['a.scope', [10, 11, 12]], ['b.scope', [20]]]);
+        eq([...await sampler.sample(busy(units2Map))], [['a.scope', { read: 650, write: 430 }], ['b.scope', { read: 20, write: 5 }]],
+            'app io: deltas per process, new and reused pids from zero, an ended process left out');
+        const last = busy(units2Map);
+        eq([...await sampler.sample(last)], [], 'app io: nothing moved, nothing reported');
+        // A unit whose CPU time did not move is not read; its counters carry over.
+        const still = last.map(u => (u.unit === 'a.scope' ? u : { ...u, usec: ++tick }));
+        io(10, 9999, 9999); // not read: a.scope's CPU time is the same
+        io(20, 120, 5);
+        eq([...await sampler.sample(still)], [['b.scope', { read: 100, write: 0 }]], 'app io: an idle unit is skipped, a busy one read');
+        io(10, 1600, 900);
+        if (Gio.Credentials.new().get_unix_user() !== 0) {
+            Gio.File.new_for_path(`${proc}/10/io`).set_attribute_uint32('unix::mode', 0o000, Gio.FileQueryInfoFlags.NONE, null);
+            io(12, 80, 30);
+            const denied = await sampler.sample(busy(units2Map));
+            eq([[...denied], sampler.denied], [[['a.scope', { read: 30, write: 0 }]], 1], 'app io: an unreadable process is counted as denied, the others still read');
+            Gio.File.new_for_path(`${proc}/10/io`).set_attribute_uint32('unix::mode', 0o644, Gio.FileQueryInfoFlags.NONE, null);
+        }
+        sampler.reset();
+        eq([...await sampler.sample(busy(units2Map))], [], 'app io: after reset the next reading is a baseline again');
+        GLib.spawn_command_line_sync(`rm -rf ${GLib.shell_quote(proc)}`);
+
+        // The ledger: disk bytes per app and for the machine, temperature per hour.
+        const t0 = new Date(2026, 9, 23, 10, 0, 5).getTime();
+        const disks = (r, w) => [{ name: 'nvme0n1', readBytes: r, writtenBytes: w }];
+        const at = (i, o = {}) => ({
+            mono: 1e9 + i * 30e6, wall: t0 + i * 30000, packageW: null, battery: null,
+            usage: { total: i * 1e6, system: 0, units: [{ unit: 'a.scope', id: 'a', kind: 'app', label: 'a', usec: i * 1e5 }] },
+            ...o,
+        });
+        const led = new BatteryLedger();
+        led.ingest(at(0, { machine: { disks: disks(1e9, 2e9) }, temp: 50 }));
+        led.ingest(at(1, { machine: { disks: disks(1e9 + 3e6, 2e9 + 1e6) }, temp: 60, appIo: new Map([['a.scope', { read: 2e6, write: 4e5 }], ['gone.scope', { read: 9, write: 9 }]]) }));
+        led.ingest(at(2, { machine: { disks: [...disks(1e9 + 5e6, 2e9 + 1e6), { name: 'sda', readBytes: 7e9, writtenBytes: 7e9 }] }, temp: 70 }));
+        led.ingest(at(3, { machine: { disks: disks(10, 10) }, temp: 0 })); // counter reset; no temperature reading
+        const sum = led.summarize();
+        const a = sum.apps.find(x => x.id === 'a');
+        eq([a.diskRead, a.diskWritten], [2e6, 4e5], 'ledger disk: bytes per app; a unit the usage reading does not know is left out');
+        eq([sum.diskReadBytes, sum.diskWrittenBytes, sum.diskSeconds], [5e6, 1e6, 90], 'ledger disk: machine bytes as deltas; a new disk counts from the next reading, a reset counts nothing');
+        eq([sum.tempMax, sum.tempAvg, sum.tempSeconds], [70, 65, 60], 'ledger temperature: highest and time-weighted average, no reading left out');
+        const old = BatteryLedger.fromJSON(JSON.stringify({ version: 2, buckets: [{ t: 0, b: false, s: 30, bw: 0, pw: 0, iw: 0, gw: 0, cpu: 1, energy: false, a: { x: [1, 0, 0, 0, 0, 0] } }] }));
+        const os = old.summarize();
+        eq([os.apps[0].diskRead, os.diskReadBytes, os.diskSeconds, os.tempAvg], [0, 0, 0, null], 'ledger disk: a file from before disk tracking reads as no disk or temperature data');
+    }
+
+    // The Tracking tab per component, on two hand-made hours.
+    {
+        const H = 3600 * 1000;
+        const now = new Date(2026, 9, 23, 12, 30).getTime();
+        const h10 = new Date(2026, 9, 23, 10).getTime();
+        const bucket = (t, o) => ({ t, b: false, s: 3600, bw: 0, pw: 0, iw: 0, gw: 0, hs: 0, uw: 0, gpu: 0, cpu: 0, energy: false, a: {},
+            ms: 3600, mu: 0, mx: 0, mt: 8000, sx: 0, st: 2000, si: 0, so: 0, ps: 3600, pc: 0, pm: 0, pf: 0, pi: 0, ns: 3600, rx: 0, tx: 0,
+            is: 0, ir: 0, it: 0, ds: 3600, dr: 0, dw: 0, tt: 3600, tm: 0, ta: 0, ...o });
+        const led = BatteryLedger.fromJSON(JSON.stringify({ version: 2, buckets: [
+            // 10:00: 2 cores busy of 4 for the hour; 4000 MiB average; 1 GB read; 50 °C, 60 at most.
+            bucket(h10, { cpu: 2 * 3600e6, mu: 4000 * 3600, mx: 4500, dr: 1e9, dw: 2e8, ta: 50 * 3600, tm: 60, rx: 3e8, tx: 1e8, gpu: 900e9, pc: 360, hs: 600,
+                a: { ed: [3600e6, 3600e6, 0, 600e9, 1000 * 3600, 1200, 8e8, 1e8], bg: [1800e6, 0, 0, 0, 3000 * 3600, 3000, 0, 0], '@system': [1800e6, 0, 0, 0, 0, 0, 0, 0] } }),
+            // 11:00: half a core; 2000 MiB average; 70 °C.
+            bucket(h10 + H, { cpu: 1800e6, mu: 2000 * 3600, mx: 2500, dr: 0, dw: 4e8, ta: 70 * 3600, tm: 72, rx: 1e8, tx: 0, is: 1800, ir: 5e7, it: 0,
+                a: { ed: [1800e6, 1800e6, 0, 0, 500 * 3600, 600, 0, 4e8] } }),
+        ] }));
+        const view = c => componentView(c, led, { from: h10, now, cores: 4 });
+        eq(COMPONENTS, ['battery', 'cpu', 'memory', 'disk', 'network', 'gpu', 'thermal'], 'components: the order offered');
+
+        const cpu = view('cpu');
+        eq([cpu.has, cpu.tiles.load, cpu.tiles.waiting, cpu.tiles.hot], [true, 0.3125, 0.05, 600], 'components cpu: load of the whole machine, waiting share, hot time');
+        eq(cpu.points.map(p => p.load), [0.5, 0.125, 0], 'components cpu: a bar per hour, the current hour empty');
+        eq(cpu.apps.map(a => a.app.id), ['ed', 'bg', '@system'], 'components cpu: apps by processor time, system services included');
+        const mem = view('memory');
+        eq([mem.tiles.average, mem.tiles.highest, mem.tiles.total], [3000, 4500, 8000], 'components memory: average and highest in use, of the total');
+        eq(mem.points.slice(0, 2).map(p => [p.highest, p.average]), [[4500, 4000], [2500, 2000]], 'components memory: highest and average per hour');
+        eq(mem.apps.map(a => [a.app.id, a.value]), [['bg', 1500], ['ed', 750]], 'components memory: apps by average memory over the period');
+        const disk = view('disk');
+        eq([disk.tiles.read, disk.tiles.written, disk.apps.map(a => [a.app.id, a.value])], [1e9, 6e8, [['ed', 1.3e9]]], 'components disk: machine bytes, apps by bytes read and written');
+        const net = view('network');
+        eq([net.tiles.received, net.tiles.sent, net.tiles.away, net.apps], [4e8, 1e8, 5e7, null], 'components network: machine bytes, away, no per-app list');
+        const gpu = view('gpu');
+        eq([gpu.tiles.busy, gpu.apps.map(a => a.app.id), gpu.points[0].busy], [900, ['ed'], 900], 'components graphics: busy seconds, apps by GPU time');
+        const hot = view('thermal');
+        eq([hot.tiles.average, hot.tiles.highest, hot.points.slice(0, 2).map(p => p.highest), hot.apps], [60, 72, [60, 72], null], 'components temperature: average, highest, per hour');
+
+        // Per day beyond two days: the two hours fall in one bar.
+        const week = componentView('cpu', led, { from: now - 7 * 24 * H, now, cores: 4 });
+        eq([week.points.length, week.points.filter(p => p.cpu > 0).length, week.points.at(-1).load], [8, 1, 0.3125], 'components: a bar per day over a week');
+        const empty = componentView('disk', new BatteryLedger(), { from: h10, now, cores: 4 });
+        eq([empty.has, empty.tiles.read, empty.apps.length], [false, null, 0], 'components: no figures, nothing to show');
+        const old = BatteryLedger.fromJSON(JSON.stringify({ version: 1, buckets: [{ t: h10, b: false, s: 3600, bw: 0, pw: 0, iw: 0, gw: 0, cpu: 1e6, energy: false, a: {} }] }));
+        eq(['memory', 'disk', 'network', 'thermal'].map(c => componentView(c, old, { from: h10, now }).has), [false, false, false, false],
+            'components: hours from before a component was recorded do not count as figures');
+        eq(bars(led, h10, now, false, () => ({ n: 0 }), (p, b) => { p.n += b.cpu; }).length, 3, 'components: bars from the period start to now');
     }
 
     // Machine-wide counters for tracking: memory, swap, stall times.
