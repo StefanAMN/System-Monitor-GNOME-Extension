@@ -668,9 +668,15 @@ async function batteryPages(styleWindow) {
     let profile = 'performance';
     const fake = fakeAgentBin();
     const confirmAnswers = [];
+    // A real process stands in for the running "chat" app, for its finding's Pause and Lower priority.
+    const chatProc = Gio.Subprocess.new(['sleep', '600'], Gio.SubprocessFlags.NONE);
+    const chatPid = Number(chatProc.get_identifier());
+    const { processIdentity } = await import(`file://${root}/lib/collectors/process.js`);
+    const chatMembers = [{ pid: chatPid, start: processIdentity(chatPid).start }];
     const diagnostics = buildDiagnosticsPage(history, {
         settings,
         iconFor: key => metricIcon(key, root),
+        appProcesses: async () => new Map([['chat', chatMembers]]),
         agent: {
             dir: fake.agentDir,
             which: fake.which,
@@ -813,6 +819,15 @@ async function batteryPages(styleWindow) {
     ok(/^≈[\d.]+ W · \+\d+ min per charge$/.test(chat.subtitle), `diagnostics: the saving is the subtitle ('${chat.subtitle}')`);
     ok(chat instanceof Adw.ExpanderRow && !chat.expanded && /without focus/.test(chat.detailLabel.label),
         `diagnostics: the detail and evidence open beneath ('${chat.detailLabel.label.split('\n').pop()}')`);
+    // The app is running: pause it, resume it, lower its priority from its finding.
+    ok(chat.pauseButton?.label === 'Pause' && chat.lowerButton?.visible, `diagnostics: chat's finding offers '${chat.pauseButton?.label}' and Lower priority (${chat.lowerButton?.visible})`);
+    ok(!found().find(row => row.findingId === 'swapping').pauseButton, 'diagnostics: a finding about no app offers no process action');
+    chat.pauseButton.emit('clicked');
+    ok(await until(() => processIdentity(chatPid)?.state === 'T' && chat.pauseButton.label === 'Resume'), `diagnostics: Pause stopped chat (${processIdentity(chatPid)?.state}), the button reads '${chat.pauseButton.label}'`);
+    chat.pauseButton.emit('clicked');
+    ok(await until(() => processIdentity(chatPid)?.state !== 'T' && chat.pauseButton.label === 'Pause'), `diagnostics: Resume continued chat (${processIdentity(chatPid)?.state})`);
+    chat.lowerButton.emit('clicked');
+    ok(await until(() => processIdentity(chatPid)?.nice === 10 && !chat.lowerButton.visible), `diagnostics: Lower priority set niceness ${processIdentity(chatPid)?.nice}, and is not offered again`);
     found().find(row => row.findingId === 'charge-limit').actionButton.emit('clicked');
     await sleep(300);
     ok(launched.join() === 'gnome-control-center power', `diagnostics: the charge-limit action opens Power settings (${launched.join()})`);
@@ -866,6 +881,7 @@ async function batteryPages(styleWindow) {
             tracking.dispose();
             diagnostics.dispose();
             history.dispose();
+            chatProc.force_exit();
             fake.remove();
             GLib.unlink(path);
             GLib.rmdir(dir);
@@ -1434,6 +1450,18 @@ async function findingClicks(window, diagnostics) {
     // Its header: the title's middle, left of any button.
     await act(`PREFS-CHECK CLICK finding ${at(first, 0.4, 0.5 * 56 / Math.max(56, first.get_height()))}`);
     ok(await until(() => first.expanded) && first.detailLabel.get_mapped(), `findings (pointer): clicking it opened its detail (expanded ${first.expanded})`);
+    // An app's finding: Pause and Resume with the real pointer.
+    const { processIdentity } = await import(`file://${root}/lib/collectors/process.js`);
+    const chat = diagnostics.rows.find(r => r.findingId === 'background:chat');
+    const chatPid = diagnostics.state.apps.get('chat')?.[0]?.pid;
+    if (chat?.pauseButton && chatPid) {
+        await act(`PREFS-CHECK CLICK finding-pause ${at(chat.pauseButton, 0.5, 0.5)}`);
+        ok(await until(() => processIdentity(chatPid)?.state === 'T'), `findings (pointer): Pause stopped the app (${processIdentity(chatPid)?.state})`);
+        await act(`PREFS-CHECK CLICK finding-resume ${at(chat.pauseButton, 0.5, 0.5)}`);
+        ok(await until(() => processIdentity(chatPid)?.state !== 'T'), 'findings (pointer): Resume continued the app');
+    } else {
+        ok(false, `findings (pointer): no Pause on chat's finding (${chat ? 'row' : 'no row'}, pid ${chatPid})`);
+    }
     await act(`PREFS-CHECK CLICK copy-report ${at(diagnostics.copy, 0.5, 0.5)}`);
     ok(await until(() => diagnostics.copy.icon_name === 'object-select-symbolic'), `findings (pointer): Copy report shows ${diagnostics.copy.icon_name}`);
     first.expanded = false;

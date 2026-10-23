@@ -14,6 +14,8 @@ import { buildAgentGroup } from './agent.js';
 import { NetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { appInfo } from '../../lib/common/appnames.js';
 import { readSystemState, setPowerProfile, readMachineInfo } from '../../lib/collectors/systemstate.js';
+import { AppUsageSampler } from '../../lib/collectors/appusage.js';
+import { groupState, processIdentity, reniceProcesses, signalProcesses, LOWER_NICE } from '../../lib/collectors/process.js';
 import { _, fill, ngettext, N_ } from '../../lib/common/i18n.js';
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
@@ -93,6 +95,27 @@ export function reportText(findings, system, now = new Date()) {
 }
 
 /**
+ * Each running app's processes, by the app id the tracking uses: from the
+ * session's units (one scope per app), with start times so a pid reused
+ * later is never acted on.
+ * @returns {Promise<Map<string, Array<{pid: number, start: number}>>>}
+ */
+export async function runningApps() {
+    const reading = await new AppUsageSampler().sample({ withPids: true });
+    const out = new Map();
+    for (const unit of reading.units) {
+        if (unit.kind !== 'app' && unit.kind !== 'snap') continue;
+        const members = out.get(unit.id) ?? [];
+        for (const pid of unit.pids ?? []) {
+            const id = processIdentity(pid);
+            if (id) members.push({ pid, start: id.start });
+        }
+        if (members.length) out.set(unit.id, members);
+    }
+    return out;
+}
+
+/**
  * The daily network totals the extension keeps, read only: a damaged or
  * half-written file is the extension's to deal with, so it is reported here
  * and never moved.
@@ -118,6 +141,8 @@ export function readNetDays(path = netUsagePath()) {
  * @param {function(string): Promise} [opts.switchProfile] for tests
  * @param {function(Array<string>)} [opts.launch] for tests
  * @param {?function(string): Gio.Icon} [opts.iconFor] an area's icon (the Settings page's metric icons)
+ * @param {function(): Promise<Map<string, Array<{pid: number, start: number}>>>} [opts.appProcesses]
+ *   each running app's processes, by app id; for tests
  */
 export function buildDiagnosticsPage(history, {
     readState = () => readSystemState(),
@@ -128,6 +153,7 @@ export function buildDiagnosticsPage(history, {
     agent: agentOpts = {},
     readMachine = () => readMachineInfo(),
     iconFor = null,
+    appProcesses = () => runningApps(),
 } = {}) {
     const page = new Adw.PreferencesPage({ title: _('Diagnostics'), name: 'diagnostics', icon_name: 'dialog-information-symbolic' });
 
@@ -142,7 +168,8 @@ export function buildDiagnosticsPage(history, {
     strip.update_property([Gtk.AccessibleProperty.DESCRIPTION], [basis]);
     overview.add(strip);
     const tiles = {};
-    const state = { findings: [], system: null, running: false, gen: 0, filter: null };
+    const state = { findings: [], system: null, running: false, gen: 0, filter: null, apps: new Map() };
+    const uid = Gio.Credentials.new().get_unix_user();
     let filtering = false;
     for (const area of TILE_AREAS) {
         const name = _(AREA_TITLES[area]);
@@ -255,6 +282,31 @@ export function buildDiagnosticsPage(history, {
             r.add_suffix(button);
             r.actionButton = button;
         }
+        // An app working in the background, running now: pause it or lower its priority here.
+        const members = finding.app ? state.apps.get(finding.app) : null;
+        if (members?.length) {
+            const { paused, nice } = groupState(members, uid);
+            const act = async work => {
+                for (const b of [r.pauseButton, r.lowerButton]) if (b) b.sensitive = false;
+                const { mine } = groupState(members, uid);
+                const done = mine.length ? await work(mine) : { ok: false, error: _('it is no longer running') };
+                if (!done.ok) r.subtitle = fill(_('Could not do it: {error}'), { error: done.error });
+                // The buttons follow what the processes are now.
+                const now = groupState(members, uid);
+                r.pauseButton.label = now.paused ? _('Resume') : _('Pause');
+                r.pauseButton.sensitive = now.mine.length > 0;
+                if (r.lowerButton) {
+                    r.lowerButton.visible = now.nice < LOWER_NICE;
+                    r.lowerButton.sensitive = now.mine.length > 0;
+                }
+            };
+            r.pauseButton = new Gtk.Button({ label: paused ? _('Resume') : _('Pause'), valign: Gtk.Align.CENTER });
+            r.pauseButton.connect('clicked', () => act(pids => signalProcesses(pids, groupState(members, uid).paused ? 'CONT' : 'STOP')));
+            r.add_suffix(r.pauseButton);
+            r.lowerButton = new Gtk.Button({ label: _('Lower priority'), valign: Gtk.Align.CENTER, visible: nice < LOWER_NICE });
+            r.lowerButton.connect('clicked', () => act(pids => reniceProcesses(pids)));
+            r.add_suffix(r.lowerButton);
+        }
         return r;
     };
 
@@ -300,6 +352,9 @@ export function buildDiagnosticsPage(history, {
             const net = netDays();
             if (net.problem) console.warn(`ResourcePulse: diagnostics cannot read the network totals: ${net.problem}`);
             state.system = system;
+            // The running processes of each app, for the findings that name one.
+            state.apps = await appProcesses();
+            if (gen !== state.gen) return;
             state.findings = diagnose({
                 battery: history.ledger.summarize({ from, batteryOnly: true }),
                 all: history.ledger.summarize({ from }),
