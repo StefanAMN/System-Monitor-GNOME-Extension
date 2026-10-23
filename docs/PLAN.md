@@ -1111,3 +1111,22 @@ CI soak RSS, before and after this change (8 runs on GitHub, GNOME 50, 20 minute
 | after (7d4e81d, a0e899c, b3c59a7 twice) | +29 / 0.996, +43 / 0.474, +46 / -0.050, +30 / -0.020 |
 
 No steady leak: two of the four runs after the change are as flat as every run before it, and the JS heap census is flat in all eight. The second-half slope varies between runs of the same code on GitHub's machines (b3c59a7: -0.050 and -0.020; a0e899c, the same code bar a test file: 0.474). The total growth after the change is a little higher on average (37 MB against 29 MB), within one-off growth (more modules and readings loaded), not a slope. Locally the GNOME 50 container soak stays flat (0.029 MB/min). A soak slope near the 0.5 MB/min limit on CI can therefore fail without a leak; not changed here.
+
+# Every component in the Tracking tab (branch `tracking-components`) — approved by the owner 2026-10-23
+
+The Tracking tab gets a Component choice beside Period: Battery (as today), Processor, Memory, Disk, Network, Graphics, Temperature. Each has summary tiles, one bar chart (per hour for 24 h and today, per day for 7 and 14 days) and the apps ranked by its figure where the system attributes it per app. Owner's standing decision (2026-10-23): "Don't ask for proceeding from now on": merged and pushed once proven.
+
+## Readable without privileges (checked 2026-10-23)
+
+- Disk per app: the cgroup `io` controller is not delegated to the user session (`cgroup.controllers`: cpu memory pids), so `io.stat` is absent. `/proc/<pid>/io` (`read_bytes`, `write_bytes`) of the user's own processes is readable (Yama ptrace_scope 1 restricts attach, not this); other users' processes are not (228 of 420 here). A process that starts and ends between two samples is missed; the page says the per-app figure is an estimate.
+- Disk for the machine: `/proc/diskstats`, whole physical disks (`parseDiskstats`), 512-byte sectors.
+- Temperature: the tracker already reads the package temperature each sample.
+
+## Milestones
+
+| # | Work | Layer | Proof |
+|---|---|---|---|
+| T1 | `appio.js`: per-process disk bytes summed per unit, deltas per pid (a pid first seen after the first reading counts from zero; a counter lower than before is a new process); the ledger (still version 2, new fields optional): per app read / written bytes, per hour machine read / written bytes and temperature (max, time-weighted average) | HAL / Engine | unit: fixture /proc (process exits between listing and reading, unreadable io, pid reuse); ledger by hand; an old file reads as no disk or temperature data; live reading here; `test-overhead`: menu closed with tracking under 1 % |
+| T2 | `trackingview.js`: per component the tiles' figures, the bar points and the ranked apps, pure | Engine | unit: answers by hand per component, per hour and per day |
+| T3 | The Component choice, tiles, one chart drawing for every component, app lists, empty states (Network: no per-app figures; Temperature: no app list) | UI | prefs-check on a fixture history, every component in light and dark by rendered pixels under the user's theme, the dropdown list's colours; real pointer clicks on the choice in `test-ui` |
+| T4 | Translation template, accessibility labels, `test-i18n`, CI on GNOME 46-50, 20-minute soak | All | as earlier work |
