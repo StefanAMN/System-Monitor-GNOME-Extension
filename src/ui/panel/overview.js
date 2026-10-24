@@ -681,29 +681,6 @@ export class OverviewMethods {
         this._addCardInteractions(this._hwCard);
         this._overviewPage.add_child(this._hwCard);
 
-        // The foot: About Resource Pulse, in the window's About tab.
-        const aboutBtn = new St.Button({
-            style_class: 'resource-pulse-about-button',
-            reactive: true,
-            can_focus: true,
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER
-        });
-        const aboutBox = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
-        aboutBox.add_child(new St.Icon({ gicon: this._bundledIcon('rp-cpu'), style_class: 'resource-pulse-about-mark', style: 'icon-size: 18px;', y_align: Clutter.ActorAlign.CENTER }));
-        const aboutText = new St.BoxLayout({ vertical: true, x_expand: true, y_align: Clutter.ActorAlign.CENTER });
-        const aboutTitle = new St.Label({ text: _('About Resource Pulse'), style_class: 'resource-pulse-about-title' });
-        aboutText.add_child(aboutTitle);
-        aboutText.add_child(new St.Label({ text: _('What it tracks, what it finds, links and credits'), style_class: 'resource-pulse-about-sub' }));
-        aboutBox.add_child(aboutText);
-        aboutBox.add_child(new St.Icon({ icon_name: 'go-next-symbolic', style_class: 'resource-pulse-about-arrow', style: 'icon-size: 14px;', y_align: Clutter.ActorAlign.CENTER }));
-        aboutBtn.add_child(aboutBox);
-        aboutBtn.accessible_name = aboutTitle.text;
-        aboutBtn.connect('clicked', () => this._openDetailsWindow('about'));
-        this._addClickAnimations(aboutBtn);
-        this._aboutBtn = aboutBtn;
-        this._overviewPage.add_child(aboutBtn);
-
         this._menuContainer.add_child(this._overviewPage);
     }
 }

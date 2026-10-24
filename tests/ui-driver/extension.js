@@ -517,8 +517,9 @@ async function screenReader(rp) {
             check(nodes.some(n => n.showing && A11Y_BUTTON.test(n.role) && n.name.startsWith(start) && n.name.endsWith(`opens ${card.title} details`)),
                 `a11y: no card button '${start} ..., opens ${card.title} details'`);
         }
-        for (const name of ['Refresh now', 'Settings', 'About Resource Pulse'])
+        for (const name of ['Refresh now', 'Settings'])
             check(nodes.some(n => n.showing && A11Y_BUTTON.test(n.role) && n.name === name), `a11y: no '${name}' button on the overview`);
+        check(!nodes.some(n => n.showing && /System Monitor|About Resource Pulse/.test(n.name) && A11Y_BUTTON.test(n.role)), 'a11y: the overview still offers a System Monitor or About button');
         release();
 
         // The CPU page: range toggles, process rows (Enter opens System
@@ -741,24 +742,9 @@ async function prefsWindow(rp) {
     titled().delete(global.get_current_time());
     for (let i = 0; i < 20 && titled(); i++) await sleep(150);
 
-    // The overview's foot opens the window on About.
-    rp._indicator.menu.open();
-    rp._activeTab = 'overview';
-    rp._updateTabVisibility();
-    await sleep(1200);
-    check(!rp._overviewPage.get_children?.().some?.(c => c.style_class === 'resource-pulse-sysmon-button'), 'prefs: the overview still has Open System Monitor');
-    await scrollIntoView(rp, rp._aboutBtn);
-    await shot('overview-about-button');
-    await clickActor(rp._aboutBtn);
-    for (let i = 0; i < 40 && !titled(); i++) await sleep(250);
-    check(titled(), 'prefs: About Resource Pulse did not open the window');
-    check(!rp._indicator.menu.isOpen, 'prefs: the menu stayed open over the About window');
-    for (let i = 0; i < 20 && rp._settings.get_string('prefs-page') !== ''; i++) await sleep(150);
-    check(rp._settings.get_string('prefs-page') === '', `prefs: the window did not take the About page ('${rp._settings.get_string('prefs-page')}')`);
-    await sleep(1500);
-    await shot('prefs-window-about');
-    titled().delete(global.get_current_time());
-    for (let i = 0; i < 20 && titled(); i++) await sleep(150);
+    // The overview ends with the hardware card: no System Monitor or About button.
+    const footButtons = rp._overviewPage.get_children().filter(c => c instanceof St.Button);
+    check(footButtons.length === 0 && !rp._aboutBtn, `prefs: the overview has ${footButtons.length} buttons at its foot`);
 
     // The battery page's line opens the window on the Tracking page.
     rp._indicator.menu.open();
