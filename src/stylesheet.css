@@ -670,7 +670,10 @@
 }
 .rp-end-confirm:hover, .rp-end-confirm:focus { background-color: #e01b24; }
 .rp-end-cancel, .rp-proc-action { border-radius: 20px; padding: 4px 12px; font-size: 0.8em; }
-.rp-end-cancel:focus, .rp-proc-action:focus, .rp-proc-action:hover { background-color: rgba(53, 132, 228, 0.3); }
+.rp-end-cancel:focus, .rp-proc-action:focus { background-color: rgba(53, 132, 228, 0.22); }
+.rp-end-cancel:hover, .rp-proc-action:hover { background-color: rgba(53, 132, 228, 0.5); }
+.rp-proc-bar { padding: 6px 8px; border-radius: 8px; background-color: rgba(255, 255, 255, 0.04); spacing: 6px; }
+.rp-light .rp-proc-bar { background-color: rgba(0, 0, 0, 0.04); }
 .rp-light .rp-end-button:hover, .rp-light .rp-end-button:focus { background-color: rgba(53, 132, 228, 0.18); }
 
 /* ── Chart range (detail header) ──────────────────────────────────────────── */

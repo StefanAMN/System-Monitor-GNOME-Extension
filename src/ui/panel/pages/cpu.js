@@ -100,7 +100,7 @@ export class CpuPage {
         procCard.add_child(this._procList);
         procCard.add_child(cpuSearch.noMatch);
         this._procEnd = this._buildEndBar();
-        procCard.add_child(this._procEnd.box);
+        this._procList.add_child(this._procEnd.box);
         box.add_child(procCard);
 
         return box;

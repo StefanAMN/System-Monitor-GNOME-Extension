@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-30 14:38+0200\n"
+"POT-Creation-Date: 2026-10-30 18:57+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1716,132 +1716,119 @@ msgstr ""
 msgid "{chart} over time"
 msgstr ""
 
-#: src/ui/panel/processes.js:19
-msgid "{process}, {value} CPU, opens System Monitor"
+#: src/ui/panel/processes.js:21
+msgid "{process}, {value} CPU"
 msgstr ""
 
-#: src/ui/panel/processes.js:19
-msgid "{process}, {value} disk, opens System Monitor"
+#: src/ui/panel/processes.js:21
+msgid "{process}, {value} disk"
 msgstr ""
 
-#: src/ui/panel/processes.js:19
-msgid "{process}, {value} memory, opens System Monitor"
+#: src/ui/panel/processes.js:21
+msgid "{process}, {value} memory"
 msgstr ""
 
-#: src/ui/panel/processes.js:46
+#: src/ui/panel/processes.js:48
 msgid "Filter by name"
 msgstr ""
 
-#: src/ui/panel/processes.js:47
+#: src/ui/panel/processes.js:49
 msgid "Filter the processes by name"
 msgstr ""
 
-#: src/ui/panel/processes.js:80 src/ui/panel/processes.js:140
+#: src/ui/panel/processes.js:98 src/ui/panel/processes.js:196
 #: src/ui/prefs/diagnostics.js:296 src/ui/prefs/diagnostics.js:303
 msgid "Pause"
 msgstr ""
 
-#: src/ui/panel/processes.js:81 src/ui/panel/processes.js:142
+#: src/ui/panel/processes.js:99 src/ui/panel/processes.js:198
 #: src/ui/prefs/diagnostics.js:306
 msgid "Lower priority"
 msgstr ""
 
-#: src/ui/panel/processes.js:82 src/ui/panel/processes.js:212
+#: src/ui/panel/processes.js:100 src/ui/panel/processes.js:263
 msgid "End"
 msgstr ""
 
-#: src/ui/panel/processes.js:83 src/ui/panel/processes.js:212
-#: src/ui/panel/processes.js:241 src/ui/prefs/agent.js:213
+#: src/ui/panel/processes.js:101 src/ui/panel/processes.js:263
+#: src/ui/panel/processes.js:292 src/ui/prefs/agent.js:213
 #: src/ui/prefs/backup.js:141 src/ui/prefs/tracking.js:772
 msgid "Cancel"
 msgstr ""
 
-#: src/ui/panel/processes.js:140 src/ui/prefs/diagnostics.js:296
+#: src/ui/panel/processes.js:196 src/ui/prefs/diagnostics.js:296
 #: src/ui/prefs/diagnostics.js:303
 msgid "Resume"
 msgstr ""
 
-#: src/ui/panel/processes.js:143
+#: src/ui/panel/processes.js:199
 msgid "End…"
 msgstr ""
 
-#: src/ui/panel/processes.js:144 src/ui/panel/processes.js:156
-#: src/ui/panel/processes.js:245
-msgid "Close"
-msgstr ""
-
-#: src/ui/panel/processes.js:155
+#: src/ui/panel/processes.js:218
 msgid "{process} belongs to another user and cannot be ended from here."
 msgstr ""
 
-#: src/ui/panel/processes.js:156
+#: src/ui/panel/processes.js:219 src/ui/panel/processes.js:296
+msgid "Close"
+msgstr ""
+
+#: src/ui/panel/processes.js:219
 msgid "{process} has already exited."
 msgstr ""
 
-#: src/ui/panel/processes.js:183
-msgid "{process} paused"
-msgstr ""
-
-#: src/ui/panel/processes.js:183
-msgid "{process} resumed"
-msgstr ""
-
-#: src/ui/panel/processes.js:184 src/ui/panel/processes.js:201
+#: src/ui/panel/processes.js:237 src/ui/panel/processes.js:252
 msgid "{process} could not be changed{error}"
 msgstr ""
 
-#: src/ui/panel/processes.js:200
-msgid "{process}: lower priority"
-msgstr ""
-
-#: src/ui/panel/processes.js:210
+#: src/ui/panel/processes.js:261
 msgid "End all {n} {process} processes? Unsaved work in them may be lost."
 msgstr ""
 
-#: src/ui/panel/processes.js:211
+#: src/ui/panel/processes.js:262
 msgid "End {process}? Unsaved work in it may be lost."
 msgstr ""
 
-#: src/ui/panel/processes.js:227
+#: src/ui/panel/processes.js:278
 msgid "Asking {process} to quit…"
 msgstr ""
 
-#: src/ui/panel/processes.js:227
+#: src/ui/panel/processes.js:278
 msgid "Forcing {process} to quit…"
 msgstr ""
 
-#: src/ui/panel/processes.js:235
+#: src/ui/panel/processes.js:286
 msgid "{process} ended."
 msgstr ""
 
-#: src/ui/panel/processes.js:239
+#: src/ui/panel/processes.js:290
 msgid ""
 "{left} of {all} {process} did not quit{error}. Force quit loses unsaved work."
 msgstr ""
 
-#: src/ui/panel/processes.js:241
+#: src/ui/panel/processes.js:292
 msgid "Force quit"
 msgstr ""
 
-#: src/ui/panel/processes.js:245
+#: src/ui/panel/processes.js:296
 msgid "{left} {process} could not be ended{error}."
 msgstr ""
 
-#: src/ui/panel/processes.js:293
+#: src/ui/panel/processes.js:351
 msgid "Process actions"
 msgstr ""
 
-#: src/ui/panel/processes.js:353
+#: src/ui/panel/processes.js:391
 msgid "{process}, {n} process"
 msgid_plural "{process}, {n} processes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/panel/processes.js:354
+#: src/ui/panel/processes.js:392
 msgid "{process}, paused"
 msgstr ""
 
-#: src/ui/panel/processes.js:361
+#: src/ui/panel/processes.js:399
 msgid "Actions for {process}"
 msgstr ""
 

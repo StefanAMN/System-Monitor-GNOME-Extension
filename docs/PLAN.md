@@ -1453,3 +1453,10 @@ Owner: "build all 5": (1) pause / lower priority for processes, (2) those action
 
 ### State of the five features (2026-10-30)
 All built and committed. test-i18n passed; `test-overhead 0`: menu closed +0.40 %, with tracking +0.42 % (budget 1 %), tracking 4.8 ms CPU per sample, overview +3.40 % (budget 5 %). Not run here: real thermal throttling, an AMD processor, a real months-long health history (see each feature).
+
+## Process lists: the owner's corrections (2026-10-30)
+- A row no longer opens System Monitor: it takes neither clicks nor focus (Show All still opens it). A real click on a row's name launches nothing and leaves the panel open.
+- The action line lives in the list, right under its row (`_placeEndBar`), on every list. ⋮ opens it, ⋮ again closes it, another row's ⋮ moves it; Pause, Resume and Lower priority act and stay open, the buttons following the state. Cancel on the End confirmation goes back to the actions. The panel closing, or a new search, closes it.
+- Found on the way: while a line is open the rows keep their order (values still update), or the CPU list's re-sorting would move the buttons under the pointer at every reading. The list scrolls the line into view when it opens: the screenshot showed a row at the panel's bottom edge opening its line out of sight, which no check had caught.
+- Hover: Pause had the keyboard focus from the moment the line opened, and focus used hover's colour, so it looked lit all the time and hovering changed nothing. Opening with the pointer now leaves the focus on ⋮ (Tab still reaches Pause next), and focus is a fainter shade than hover. test-ui checks each button's theme colour at rest and under the real pointer.
+- Proof: test-ui under Orchis-Pink with real clicks and hover: line under its row on the CPU and Memory lists, stays open past readings, moves, closes, in view; prefs-check 310 of 310.
