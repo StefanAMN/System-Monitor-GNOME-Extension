@@ -1213,3 +1213,11 @@ Same keys, same model (`settingsmodel.js`); only the presentation changes, so ba
 ## State (2026-10-24)
 
 Built as designed. Proof: unit 532 passed; prefs-check on the user's desktop (Orchis-Pink) and in the nested shell (stand-in hostile theme): every model row follows and writes its setting through the new widgets (sliders keep `value` and `adjustment`, segmented buttons keep `selected` and `model`, chips keep `active` and `subtitle`); the preview follows the pins, the battery and network formats, °F and compact mode (icons only), and says when nothing is pinned; chip badges show the position. Rendered pixels in light and dark: the preview bar dark, a pinned chip in its metric's tint and an unpinned one on the card, the checked segment and the slider's filled part in the accent, the knob white (Orchis paints its own pink knob image on a 32 px area: overridden), a switch row's card, switch and text; the dropdown check now runs on Tracking's Period. `test-ui` passed, with the GPU chip and the °F segment clicked through the compositor (the clicks first landed in the Tracking window, also titled Resource Pulse: it is hidden while the Settings window is clicked). `test-i18n` passed. Looked at: the whole page in both variants under Orchis and under the stand-in theme.
+
+# Drag and drop in the top-bar preview (branch `topbar-drag`, 2026-10-24)
+
+Owner's request: drag a metric (the network icon, say) towards the front of the top-bar selection to make it appear first.
+- The Settings page's top-bar preview takes drags: each pinned metric can be dragged along the bar and dropped before another one or at the end; a line marks where it will land. An unpinned chip dropped on the bar pins that metric at that place. The order goes to `pinned-metrics`, which the top bar already follows.
+- Keyboard and screen readers: a focused metric in the preview moves with Ctrl+Left / Ctrl+Right; its accessible name says its place.
+- `movePinned(pinned, key, index)` in the settings model (pure): the list with `key` (pinned or not) at `index`.
+- Proof: unit tests of `movePinned`; prefs-check: drops and keys reorder the setting and the preview, a drop outside changes nothing; test-ui: a metric dragged to the front with the real pointer through the compositor, and a chip dragged onto the bar.
