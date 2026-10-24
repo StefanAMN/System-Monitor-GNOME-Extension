@@ -19,7 +19,9 @@ export const METRICS = [
     { key: 'disk', name: N_('Disk'), icon: 'drive-harddisk-symbolic' },
     { key: 'network', name: N_('Network'), icon: 'network-transmit-receive-symbolic' },
     { key: 'thermal', name: N_('Thermal'), icon: null, bundled: 'rp-thermal' },
-    { key: 'gpu', name: N_('GPU'), icon: 'video-display-symbolic' },
+    // Some icon themes (Tela) ship this name as a colour-scheme SVG GTK
+    // cannot recolour: the bundled card is used first.
+    { key: 'gpu', name: N_('GPU'), icon: 'video-display-symbolic', bundled: 'rp-gpu', bundledFirst: true },
 ];
 
 /**

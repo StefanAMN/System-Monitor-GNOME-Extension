@@ -122,7 +122,7 @@
     <key name="prefs-page" type="s">
       <default>''</default>
       <summary>Page the preferences window opens on</summary>
-      <description>Set by the panel before it opens the window (settings, tracking or diagnostics); the window clears it. A window opened without it (from the Extensions app) shows the settings only.</description>
+      <description>Set by the panel before it opens the window (settings, tracking, diagnostics or about); the window clears it. A window opened without it (from the Extensions app) shows the settings and About only.</description>
     </key>
     <key name="action-flush-history" type="b">
       <default>false</default>

@@ -193,7 +193,7 @@ async function main() {
         battery.window.set_default_size(720, 680);
         // Each tab from top to bottom, in both variants.
         const manager = Adw.StyleManager.get_default();
-        const pages = [[shown.window, 'settings'], [battery.window, 'tracking'], [battery.window, 'diagnostics']];
+        const pages = [[shown.window, 'settings'], [battery.window, 'tracking'], [battery.window, 'diagnostics'], [battery.window, 'about']];
         for (const [variant, scheme] of [['light', Adw.ColorScheme.FORCE_LIGHT], ['dark', Adw.ColorScheme.FORCE_DARK]]) {
             manager.color_scheme = scheme;
             for (const [window, name] of pages) {
@@ -284,28 +284,27 @@ async function entryPoints() {
             switchProfile: () => Promise.resolve(),
             launch: () => {},
         },
+        about: { openUri: () => {}, readMachine: () => Promise.resolve(null) },
     };
     const open = settings => {
         const window = new Adw.PreferencesWindow({ title: 'Resource Pulse' });
         const filled = fillWindow(window, { settings, path: root, ...stubs });
         return { window, filled };
     };
-    const tabs = window => ['settings', 'tracking', 'diagnostics'].filter(name => {
-        window.set_visible_page_name(name);
-        return window.visible_page_name === name;
-    }).join();
+    // The tabs in the order shown.
+    const tabs = window => findAll(window, w => w instanceof Adw.PreferencesPage && w.name).map(page => page.name).join();
 
     // The Extensions app: settings only.
     const settings = newSettings();
     const app = open(settings);
     await sleep(200);
-    ok(!app.filled.panelPages() && tabs(app.window) === 'settings', `entry: from the Extensions app the window has ${tabs(app.window)}`);
+    ok(!app.filled.panelPages() && tabs(app.window) === 'settings,about', `entry: from the Extensions app (or Extension Manager) the window has ${tabs(app.window)}`);
     // The panel asks while it is open: its tabs are added and the page shown.
     settings.set_string('prefs-page', 'diagnostics');
     await sleep(200);
     ok(app.filled.panelPages() && app.window.visible_page_name === 'diagnostics', `entry: a panel request on an open window shows ${app.window.visible_page_name}`);
     ok(settings.get_string('prefs-page') === '', 'entry: the request is cleared once taken');
-    ok(tabs(app.window) === 'settings,tracking,diagnostics', `entry: then the window has ${tabs(app.window)}`);
+    ok(tabs(app.window) === 'settings,tracking,diagnostics,about', `entry: then the window has ${tabs(app.window)}, About last`);
     app.filled.dispose();
     app.window.destroy();
 
@@ -315,9 +314,19 @@ async function entryPoints() {
     const panel = open(fromPanel);
     await sleep(200);
     ok(panel.filled.panelPages() && panel.window.visible_page_name === 'tracking', `entry: from the panel the window opens on ${panel.window.visible_page_name}`);
-    ok(fromPanel.get_string('prefs-page') === '' && tabs(panel.window) === 'settings,tracking,diagnostics', `entry: from the panel the window has ${tabs(panel.window)}`);
+    ok(fromPanel.get_string('prefs-page') === '' && tabs(panel.window) === 'settings,tracking,diagnostics,about', `entry: from the panel the window has ${tabs(panel.window)}`);
     panel.filled.dispose();
     panel.window.destroy();
+
+    // The overview's About button: the window opens on About.
+    const fromAbout = newSettings();
+    fromAbout.set_string('prefs-page', 'about');
+    const about = open(fromAbout);
+    await sleep(200);
+    ok(about.window.visible_page_name === 'about' && fromAbout.get_string('prefs-page') === '', `entry: About from the panel opens on ${about.window.visible_page_name}`);
+    about.filled.dispose();
+    ok(about.filled.about.state.tickId === 0, 'entry: closing the window stops the pulse line');
+    about.window.destroy();
     GLib.rmdir(dir);
 }
 
@@ -683,6 +692,7 @@ async function batteryPages(styleWindow) {
     ok(r.appRows.length === 4, `tracking: did not pick up the restored file within 10 s (${r.appRows.length} rows)`);
 
     await agentSection(window, settings, diagnostics, fake, confirmAnswers);
+    const about = await aboutPage(window);
 
     return {
         window,
@@ -693,6 +703,7 @@ async function batteryPages(styleWindow) {
         dispose: () => {
             tracking.dispose();
             diagnostics.dispose();
+            about.stopPulse();
             history.dispose();
             fake.remove();
             GLib.unlink(path);
@@ -702,6 +713,95 @@ async function batteryPages(styleWindow) {
 }
 
 const driven = Number(ARGV[1] ?? 0) > 0;
+
+/**
+ * The About page: its banner, figures, metric tiles, links (opened through a
+ * stub), copied details, the pulse line that runs only while shown, and its
+ * colours as rendered.
+ */
+async function aboutPage(window) {
+    const { buildAboutPage, pulseAt, AUTHOR } = await import(`file://${root}/ui/prefs/about.js`);
+    const { TINTS } = await import(`file://${root}/ui/prefs/style.js`);
+    const metadata = JSON.parse(new TextDecoder().decode(GLib.file_get_contents(`${root}/metadata.json`)[1]));
+    const opened = [];
+    const a = buildAboutPage({
+        path: root, metadata,
+        openUri: uri => opened.push(uri),
+        readMachine: () => Promise.resolve({ os: 'Test OS 1', kernel: '7.0.0', cpu: 'Test CPU', threads: 8, desktop: 'GNOME' }),
+    });
+    window.add(a.page);
+    const chips = [];
+    for (let c = a.chips.get_first_child(); c; c = c.get_next_sibling()) chips.push(c.label);
+    ok(a.name.label === 'Resource Pulse' && chips.join('|') === `Development build|GNOME ${metadata['shell-version'][0]}–${metadata['shell-version'].at(-1)}|MIT licence`,
+        `about: banner '${a.name.label}' with ${chips.join(' / ')}`);
+    ok(a.figures.map(f => f.value).join() === '8,< 1 %,14 days,0', `about: figures ${a.figures.map(f => f.value).join(', ')}`);
+    ok(a.tiles.map(t => t.metric).join() === 'cpu,memory,battery,disk,network,thermal,power,gpu', 'about: the eight metrics, in the panel\'s order');
+    ok(Math.abs(pulseAt(0) - pulseAt(180)) < 1e-9 && pulseAt(0.36 * 180) > 0.9 && Math.abs(pulseAt(0.9 * 180)) < 0.05, 'about: the pulse line beats once a period and is flat between beats');
+    a.rows.source.activate();
+    a.rows.issues.activate();
+    ok(opened.join(' ') === `${metadata.url} ${metadata.url}/issues`, `about: the links open ${opened.join(', ')}`);
+    a.rows.copy.activate();
+    ok(await until(() => a.rows.copied), 'about: Copy details copies');
+    const copied = await new Promise(resolve => a.rows.copy.get_clipboard().read_text_async(null, (cb, res) => {
+        try {
+            resolve(cb.read_text_finish(res));
+        } catch (e) {
+            resolve(`(clipboard: ${e.message})`);
+        }
+    }));
+    ok(copied.startsWith(`Resource Pulse development build (${metadata.uuid})`) && copied.includes('System: Test OS 1') && copied.includes('Processor: Test CPU, 8 threads'),
+        `about: the copied details read '${copied.split('\n').join(' / ')}'`);
+    ok(!copied.includes(GLib.get_home_dir()) && !copied.includes(GLib.get_host_name()), 'about: no home directory or host name in the details');
+
+    if (Gdk.Display.get_default()) {
+        // The pulse runs only while the page is on screen.
+        window.present();
+        window.set_visible_page_name('about');
+        const before = a.state.frames;
+        await sleep(600);
+        const animates = Gtk.Settings.get_default().gtk_enable_animations;
+        ok(!animates || a.state.frames > before, `about: the pulse line moves while shown (${a.state.frames - before} frames in 0.6 s)`);
+        window.set_visible_page_name('tracking');
+        await sleep(300);
+        const still = a.state.frames;
+        await sleep(400);
+        ok(a.state.tickId === 0 && a.state.frames === still, 'about: the pulse line stops when the page is not shown');
+
+        // As rendered: the banner deep blue in both variants, each tile in its tint.
+        const { palette } = await import(`file://${root}/ui/prefs/style.js`);
+        const manager = Adw.StyleManager.get_default();
+        const scrolled = findScrolled(a.page);
+        window.set_visible_page_name('about');
+        for (const [variant, scheme] of [['dark', Adw.ColorScheme.FORCE_DARK], ['light', Adw.ColorScheme.FORCE_LIGHT]]) {
+            manager.color_scheme = scheme;
+            scrolled.get_vadjustment().value = 0;
+            ok(await painted(window), `about (${variant}): the window did not paint within 3 s`);
+            let shot = render(window);
+            const [okHero, heroAt] = a.art.compute_point(window, new Graphene.Point().init(40, a.art.get_height() * 0.45));
+            const hero = okHero && shot ? shot.at(heroAt.x, heroAt.y) : [0, 0, 0, 0];
+            ok(hero[2] > hero[0] + 20 && hero[2] > hero[1] && (hero[0] + hero[1] + hero[2]) / 3 < 110, `about (${variant}): the banner is ${show(hero)}, not deep blue`);
+            const [okTitle] = a.name.compute_point(window, new Graphene.Point().init(0, 0));
+            ok(okTitle, `about (${variant}): the name is on the banner`);
+            for (const tile of [a.tiles[1], a.tiles[6]]) {
+                const adj = scrolled.get_vadjustment();
+                const [, top] = tile.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0));
+                adj.value = Math.min(Math.max(0, adj.value + top.y - 40), adj.upper - adj.page_size);
+                ok(await painted(window), `about (${variant}): the window did not paint within 3 s`);
+                shot = render(window);
+                // Widget coordinates start at the content box: -7 is in the padding.
+                const [okTile, at] = tile.compute_point(window, new Graphene.Point().init(-7, tile.get_height() / 2));
+                const bg = okTile && shot ? shot.at(at.x, at.y) : [0, 0, 0, 0];
+                const want = TINTS[tile.metric][variant === 'dark' ? 0 : 1][0];
+                ok(near(bg, want), `about (${variant}): the ${tile.metric} tile is ${show(bg)}, not ${want}`);
+            }
+            ok(palette(variant === 'dark').card, 'about: palette');
+        }
+        manager.color_scheme = Adw.ColorScheme.DEFAULT;
+        scrolled.get_vadjustment().value = 0;
+    }
+    ok(AUTHOR === 'Stefan Stancu', 'about: the author');
+    return a;
+}
 
 /**
  * The Tracking tab per component on the fixture (two hours: 0.4 + 0.3 + 0.1
