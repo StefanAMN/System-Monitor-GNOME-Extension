@@ -23,6 +23,12 @@ export function ledgerPath() {
     return `${GLib.get_user_data_dir()}/resource-pulse/battery-history.json`;
 }
 
+/** Local date of a wall-clock time, 'YYYY-MM-DD'. */
+export function localDay(wallMs) {
+    const d = new Date(wallMs);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function hourOf(wallMs) {
     const d = new Date(wallMs);
     d.setMinutes(0, 0, 0);
@@ -164,6 +170,10 @@ export class BatteryTracker {
                 appIo,
                 temp: Number.isFinite(thermal?.packageTemp) ? thermal.packageTemp : null,
             });
+            // The trend of the battery's wear. Without a design capacity the
+            // health is a fallback, not a measurement: not recorded.
+            if (battery?.present && battery.energyFullDesign > 0)
+                this.ledger.noteHealth(localDay(wall), { health: battery.health, cycles: battery.cycleCount, fullWh: battery.energyFull });
             this.lastSample = { wall, attributed, appsAvailable: this._usage.available, energyAvailable: !!power?.raplSupported };
             if (this._savedHour !== hourOf(wall)) await this.save();
             return attributed;

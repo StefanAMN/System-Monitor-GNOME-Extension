@@ -17,7 +17,7 @@ import { parseDiskstats, parseMounts, ioUtilization } from '../../src/lib/collec
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../../src/lib/collectors/thermal.js';
 import { raplWatts, PowerSampler } from '../../src/lib/collectors/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler, IDLE_MEMORY_EVERY } from '../../src/lib/collectors/appusage.js';
-import { BatteryTracker } from '../../src/lib/engine/batterytracker.js';
+import { BatteryTracker, localDay } from '../../src/lib/engine/batterytracker.js';
 import { parseDrmFdinfo, GpuUsageSampler } from '../../src/lib/collectors/gpuusage.js';
 import { diagnose, minutesGained, AREAS } from '../../src/lib/engine/diagnostics.js';
 import { agentReport, codeSpan } from '../../src/lib/engine/agentreport.js';
@@ -29,11 +29,11 @@ import { ThrottleSampler } from '../../src/lib/collectors/throttle.js';
 import { parsePressure, PressureSampler } from '../../src/lib/collectors/pressure.js';
 import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler } from '../../src/lib/collectors/machineusage.js';
 import { parseProcIo, AppIoSampler } from '../../src/lib/collectors/appio.js';
-import { componentView, bars, COMPONENTS, stepFor, zoomAbout, clampRange, MIN_SPAN_MS } from '../../src/lib/engine/trackingview.js';
+import { componentView, healthView, bars, COMPONENTS, stepFor, zoomAbout, clampRange, MIN_SPAN_MS } from '../../src/lib/engine/trackingview.js';
 import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
 import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
-import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES, FINE_MS, FINE_KEPT_MS, MAX_FINE } from '../../src/lib/engine/batteryledger.js';
+import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES, FINE_MS, FINE_KEPT_MS, MAX_FINE, HEALTH_DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth, combineBatteries, BatterySampler } from '../../src/lib/collectors/battery.js';
 import { backupText, checkBackup, BackupError, NOT_BACKED_UP } from '../../src/lib/common/backup.js';
 import { _, N_, ngettext, fill, translated, setTranslations, resetTranslations } from '../../src/lib/common/i18n.js';
@@ -1309,6 +1309,7 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         let focusCb = null;
         let focused = 'org.gnome.Nautilus';
         const problems = [];
+        let batteryHealthFields = { health: 100, cycleCount: 0, energyFull: 0, energyFullDesign: 0 };
         const tracker = new BatteryTracker({
             path,
             usage: {
@@ -1323,7 +1324,8 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
             power: { sample: () => Promise.resolve({ raplSupported: true, packagePower: 6 }) },
             thermal: { sample: fast => Promise.resolve({ packageTemp: fast === false ? 91 : null }) },
             hotAbove: () => 85,
-            battery: { sample: () => Promise.resolve({ present: true, state: 'discharging', energy: 40 - cpu / 1e7 }) },
+            // Without a design capacity: health would be a fallback, and is not recorded.
+            battery: { sample: () => Promise.resolve({ present: true, state: 'discharging', energy: 40 - cpu / 1e7, ...batteryHealthFields }) },
             focus: { current: () => focused, connect: cb => { focusCb = cb; return 7; }, disconnect: id => { if (id === 7) focusCb = null; } },
             onProblem: message => problems.push(message),
         });
@@ -1334,6 +1336,10 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         focusCb();
         await sleep(100);
         eq(await tracker.tick(), true, 'tracker: the second sample is attributed');
+        eq(tracker.ledger.health, [], 'battery health: nothing recorded without a design capacity (100 would be made up)');
+        batteryHealthFields = { health: 86.64, cycleCount: 216, energyFull: 39.04, energyFullDesign: 45 };
+        await tracker.tick();
+        eq(tracker.ledger.health, [{ d: localDay(Date.now()), h: 86.6, c: 216, f: 39 }], 'battery health: the tracker records today\'s reading');
         const sum = tracker.ledger.summarize();
         const nautilus = sum.apps.find(a => a.id === 'org.gnome.Nautilus');
         ok(nautilus && nautilus.fg > 0 && nautilus.fg < nautilus.cpu, `tracker: focus time split the CPU time (${nautilus?.fg} of ${nautilus?.cpu})`);
@@ -1347,6 +1353,41 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         eq(JSON.parse(GLib.file_get_contents(path)[1].toString()).last.batteryWh, null, 'tracker: switching off forgets the last sample');
         GLib.unlink(path);
         GLib.rmdir(dir);
+    }
+
+    // Battery health: one entry a day, bounded, kept by the file, cleared with the history.
+    {
+        const led = new BatteryLedger();
+        led.noteHealth('2026-10-01', { health: 90, cycles: 100, fullWh: 41 });
+        led.noteHealth('2026-10-01', { health: 89.96, cycles: 101, fullWh: 40.96 });
+        led.noteHealth('2026-10-02', { health: NaN, cycles: 1, fullWh: 1 });
+        eq(led.health, [{ d: '2026-10-01', h: 90, c: 101, f: 41 }], 'battery health: one entry a day, the latest; a non-number is not recorded');
+        led.noteHealth('2026-10-02', { health: 89.5, cycles: 102, fullWh: 40.7 });
+        const back = BatteryLedger.fromJSON(JSON.stringify(led));
+        eq(back.health, led.health, 'battery health: survives the file');
+        const dirty = JSON.parse(JSON.stringify(led));
+        dirty.health = [{ d: 'nonsense', h: 1 }, { d: '2026-10-03', h: 'x' }, { d: '2026-10-04', h: 88, c: 1, f: 1 }];
+        eq(BatteryLedger.fromJSON(JSON.stringify(dirty)).health.map(e => e.d), ['2026-10-04'], 'battery health: a bad entry costs that entry, not the history');
+        delete dirty.health;
+        eq(BatteryLedger.fromJSON(JSON.stringify(dirty)).health, [], 'battery health: a file from before it loads');
+        const many = new BatteryLedger();
+        for (let i = 0; i < HEALTH_DAYS_KEPT + 5; i++) many.noteHealth(new Date(2024, 0, 1 + i).toISOString().slice(0, 10), { health: 90, cycles: i, fullWh: 40 });
+        eq([many.health.length, many.health[0].c], [HEALTH_DAYS_KEPT, 5], 'battery health: bounded, the oldest go first');
+        back.clear();
+        eq(back.health, [], 'battery health: cleared with the history');
+
+        eq(healthView(new BatteryLedger()), null, 'battery health view: nothing without entries');
+        const one = new BatteryLedger();
+        one.noteHealth('2026-10-01', { health: 86.6, cycles: 216, fullWh: 39 });
+        const oneView = healthView(one);
+        eq([oneView.health, oneView.change, oneView.cycles, oneView.fullWh, oneView.points.length], [86.6, null, 216, 39, 1], 'battery health view: one day has no change');
+        const year = new BatteryLedger();
+        for (let i = 0; i < 100; i++) year.noteHealth(localDay(new Date(2026, 0, 1 + i).getTime()), { health: 90 - i * 0.05, cycles: i, fullWh: 40 });
+        const yearView = healthView(year);
+        eq([yearView.since, yearView.change], ['2026-01-01', -4.9], 'battery health view: the change since the first entry');
+        ok(yearView.points.length === 15 && yearView.points.at(-1).health === 85.1 && yearView.points[0].step === 7 * 24 * 3600e3, `battery health view: weekly past 8 weeks, ending on the newest (${yearView.points.length}, ${yearView.points.at(-1).health})`);
+        eq(yearView.floor, 80, 'battery health view: the bars start under the lowest figure, on a round number');
+        eq(healthView(new BatteryLedger({ health: [{ d: '2026-01-01', h: 4, c: 0, f: 0 }] })).floor, 0, 'battery health view: never below 0');
     }
 
     // Diagnostics: each rule fires on its evidence and is silent without it.

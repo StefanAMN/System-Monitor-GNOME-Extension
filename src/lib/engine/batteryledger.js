@@ -38,6 +38,9 @@ const HOUR_MS = 3600 * 1000;
 
 // Five-minute totals for the charts' finer bars: machine figures only (no
 // apps), for the last 48 hours, AC and battery apart like the hourly ones.
+// One battery-health entry per day, for the trend: wear shows over months,
+// so these outlive the 14 days of usage figures. About 30 KB when full.
+export const HEALTH_DAYS_KEPT = 730;
 export const FINE_MS = 5 * 60 * 1000;
 export const FINE_KEPT_MS = 48 * HOUR_MS;
 export const MAX_FINE = (FINE_KEPT_MS / FINE_MS) * 2;
@@ -116,6 +119,8 @@ export class BatteryLedger {
     constructor(state = null) {
         this.buckets = state?.buckets ?? [];
         this.fine = Array.isArray(state?.fine) ? state.fine : [];
+        // [{ d: 'YYYY-MM-DD', h: health %, c: charge cycles, f: full capacity Wh }], oldest first
+        this.health = Array.isArray(state?.health) ? state.health : [];
         this.baselineW = state?.baselineW ?? null;
         this.uncoreBaselineW = state?.uncoreBaselineW ?? null;
         this._prevGpu = null;
@@ -150,6 +155,10 @@ export class BatteryLedger {
             throw new LedgerFormatError('buckets are malformed');
         // Five-minute totals are optional (newer files); bad ones are dropped, not fatal.
         if (obj.fine !== undefined && !(Array.isArray(obj.fine) && obj.fine.every(b => Number.isFinite(b?.t)))) obj.fine = [];
+        // Optional like `fine`: a bad entry costs that entry, not the history.
+        obj.health = Array.isArray(obj.health)
+            ? obj.health.filter(e => /^\d{4}-\d{2}-\d{2}$/.test(e?.d) && Number.isFinite(e.h)).slice(-HEALTH_DAYS_KEPT)
+            : [];
         const ledger = new BatteryLedger(obj);
         ledger.loadedVersion = obj.version;
         return ledger;
@@ -163,12 +172,31 @@ export class BatteryLedger {
             last: { wall: this._prevWall || this._lastSeenWall, batteryWh: this._prevBatteryWh },
             buckets: this.buckets,
             fine: this.fine,
+            health: this.health,
         };
     }
 
     clear() {
         this.buckets = [];
         this.fine = [];
+        this.health = [];
+    }
+
+    /**
+     * Today's battery health: one entry per day, the latest reading of it.
+     * @param {string} day local date, 'YYYY-MM-DD'
+     * @param {{health: number, cycles: number, fullWh: number}} reading
+     */
+    noteHealth(day, { health, cycles, fullWh }) {
+        if (!Number.isFinite(health)) return;
+        const entry = { d: day, h: Math.round(health * 10) / 10, c: cycles || 0, f: Math.round((fullWh || 0) * 10) / 10 };
+        const last = this.health[this.health.length - 1];
+        if (last?.d === day) {
+            this.health[this.health.length - 1] = entry;
+            return;
+        }
+        this.health.push(entry);
+        if (this.health.length > HEALTH_DAYS_KEPT) this.health.splice(0, this.health.length - HEALTH_DAYS_KEPT);
     }
 
     /** The five-minute bucket for `wallMs` (created, older ones pruned). */

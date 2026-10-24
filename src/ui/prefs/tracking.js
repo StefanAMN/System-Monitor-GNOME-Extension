@@ -10,9 +10,9 @@ import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 import PangoCairo from 'gi://PangoCairo';
 
-import { BatteryLedger, LedgerFormatError, DAYS_KEPT } from '../../lib/engine/batteryledger.js';
+import { BatteryLedger, LedgerFormatError, DAYS_KEPT, HEALTH_DAYS_KEPT } from '../../lib/engine/batteryledger.js';
 import { ledgerPath, TRACK_INTERVAL_S } from '../../lib/engine/batterytracker.js';
-import { COMPONENTS, componentView, bars, stepFor, fineFrom, zoomAbout, clampRange } from '../../lib/engine/trackingview.js';
+import { COMPONENTS, componentView, healthView, bars, stepFor, fineFrom, zoomAbout, clampRange } from '../../lib/engine/trackingview.js';
 import { appInfo } from '../../lib/common/appnames.js';
 import { formatDuration, formatBytes, formatTemp } from '../../lib/common/format.js';
 import { _, fill, ngettext } from '../../lib/common/i18n.js';
@@ -479,9 +479,10 @@ function hexColour(hex, alpha) {
  * inside it (`nested`: a part or an average of the first) or beside it.
  */
 function drawBars(area, cr, width, height, chart, hover = null) {
-    const { points, series, axis, colour, nested } = chart;
+    const { points, series, axis, colour, nested, floor = 0 } = chart;
     const fg = area.get_color();
-    const max = Math.max(1e-9, ...points.flatMap(p => series.map(key => p[key] ?? 0)));
+    // floor: where the bars start, for figures that move little (battery health).
+    const max = Math.max(floor + 1e-9, ...points.flatMap(p => series.map(key => p[key] ?? 0)));
     const left = CHART_LEFT.bars;
     const bottom = 18;
     const plotH = height - bottom - 6;
@@ -495,14 +496,14 @@ function drawBars(area, cr, width, height, chart, hover = null) {
     };
     cr.setSourceRGBA(fg.red, fg.green, fg.blue, 1);
     text(axis(max), 0, 16);
-    text('0', 0, plotH + 10);
+    text(floor ? axis(floor) : '0', 0, plotH + 10);
     cr.setSourceRGBA(fg.red, fg.green, fg.blue, 0.25);
     cr.rectangle(left, plotH + 6, width - left, 1);
     cr.fill();
     points.forEach((p, i) => {
         const x = left + i * slot + (slot - barW) / 2;
         series.forEach((key, j) => {
-            const h = plotH * Math.max(0, p[key] ?? 0) / max;
+            const h = plotH * Math.max(0, (p[key] ?? 0) - floor) / (max - floor);
             const [bx, bw] = nested ? [x + barW * 0.25 * j, barW * (1 - 0.5 * j)] : [x + (barW / series.length) * j, barW / series.length];
             cr.setSourceRGBA(...hexColour(colour, j === 0 ? (nested ? 0.45 : 0.95) : (nested ? 0.95 : 0.5)));
             cr.rectangle(bx, plotH + 6 - h, Math.max(1, bw), h);
@@ -521,6 +522,7 @@ function drawBars(area, cr, width, height, chart, hover = null) {
 }
 
 const dash = '—';
+const healthPct = x => `${x.toFixed(1)} %`;
 // Small shares keep a decimal: an idle machine is not "0 %" busy.
 const pct = x => (x === null || x === undefined ? dash : `${x > 0 && x < 0.1 ? (x * 100).toFixed(1) : Math.round(x * 100)} %`);
 const hotFor = s => (s === null || s === undefined ? dash : s > 0 ? formatDuration(s) : _('never'));
@@ -748,8 +750,8 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     const control = new Adw.PreferencesGroup();
     page.add(control);
     rows.status = new Adw.ActionRow({ title: _('Usage tracking') });
-    const recorded = fill(_('Records which apps use the processor, memory, disk and graphics, and how much the network moves and how warm the processor runs, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
-        { seconds: TRACK_INTERVAL_S, days: DAYS_KEPT });
+    const recorded = fill(_('Records which apps use the processor, memory, disk and graphics, and how much the network moves and how warm the processor runs, every {seconds} seconds while you are logged in. Kept for {days} days, and the battery\'s health for {years} years, on this computer only.'),
+        { seconds: TRACK_INTERVAL_S, days: DAYS_KEPT, years: Math.round(HEALTH_DAYS_KEPT / 365) });
     rows.about = new Gtk.Image({ icon_name: 'dialog-information-symbolic', tooltip_text: recorded, css_classes: ['dim-label'], valign: Gtk.Align.CENTER });
     rows.about.update_property([Gtk.AccessibleProperty.LABEL], [recorded]);
     rows.status.add_suffix(rows.about);
@@ -904,6 +906,45 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     rows.list = list;
     rows.appRows = [];
 
+    // The battery's wear over time: not tied to the period above.
+    const healthGroup = new Adw.PreferencesGroup({ title: _('Battery health') });
+    page.add(healthGroup);
+    rows.healthGroup = healthGroup;
+    const healthBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12 });
+    for (const [key, title] of [['healthNow', _('Health')], ['healthChange', _('Change')], ['healthFull', _('Full charge holds')], ['healthCycles', _('Charge cycles')]])
+        rows[key] = tile(title, 'battery');
+    healthBox.append(tileGrid([rows.healthNow, rows.healthChange, rows.healthFull, rows.healthCycles]));
+    const healthChartBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-chart'] });
+    const healthArea = new Gtk.DrawingArea({ content_height: 110, hexpand: true, css_classes: ['rp-chart-area'] });
+    healthArea.update_property([Gtk.AccessibleProperty.LABEL], [_('Battery health over time; Left and Right step through the bars')]);
+    rows.health = { area: healthArea, box: healthChartBox, chart: null };
+    rows.health.hover = hoverable(healthArea, CHART_LEFT.bars, () => rows.health.chart?.points.length ?? 0, i => {
+        const { points } = rows.health.chart;
+        return { title: barPeriod(points, i), lines: [[METRIC_COLORS.battery, _('health'), healthPct(points[i].health)]] };
+    });
+    healthArea.set_draw_func((a, cr, width, height) => {
+        if (rows.health.chart) drawBars(a, cr, width, height, rows.health.chart, rows.health.hover);
+    });
+    healthChartBox.append(healthArea);
+    healthBox.append(healthChartBox);
+    healthGroup.add(healthBox);
+
+    const renderHealth = shown => {
+        const view = shown ? healthView(history.ledger) : null;
+        healthGroup.visible = !!view;
+        if (!view) return;
+        rows.healthNow.value.label = healthPct(view.health);
+        rows.healthChange.value.label = view.change === null ? dash : `${view.change > 0 ? '+' : ''}${view.change.toFixed(1)} %`;
+        rows.healthChange.detail.label = view.change === null ? '' : fill(_('since {date}'), { date: view.since });
+        rows.healthFull.value.label = view.fullWh > 0 ? `${view.fullWh.toFixed(1)} Wh` : dash;
+        rows.healthCycles.value.label = view.cycles > 0 ? String(view.cycles) : dash;
+        rows.health.hover.set(-1);
+        rows.health.chart = { points: view.points, series: ['health'], axis: healthPct, colour: METRIC_COLORS.battery, nested: false, floor: view.floor };
+        // One day is a figure, not a trend.
+        healthChartBox.visible = view.points.length > 1;
+        healthArea.queue_draw();
+    };
+
     const render = () => {
         const tracking = settings.get_boolean('battery-tracking');
         const now = Date.now();
@@ -921,6 +962,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         rows.clearButton.sensitive = history.ledger.buckets.length > 0;
 
         const component = COMPONENTS[rows.component.selected] ?? 'battery';
+        renderHealth(component === 'battery');
         rows.batteryOnly.visible = component === 'battery';
         componentGroup.visible = component !== 'battery';
         if (component !== 'battery') {
