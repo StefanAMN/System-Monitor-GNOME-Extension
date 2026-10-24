@@ -63,10 +63,11 @@ Installed 2026-10-24: `pipx install shexli==0.2.1` (PyPI; AGPL-3.0; no author or
 
 Run: `shexli "$PWD/resource-pulse@stefanamn.github.io.shell-extension.zip"` (or `"$PWD/src"`, same findings).
 
-Result on 2026-10-24 (master 0f78091): 0 errors, 3 warnings, none a defect:
+Result on 2026-10-24 after `fix(shell)` (the three signal disconnects written out, the boot id and `/proc/self/stat` read asynchronously at enable): 0 errors, 2 warnings, both kept on purpose:
 
 | Rule | Where | Why it stays |
 |---|---|---|
-| EGO-X-004 synchronous file IO in shell code | `appio.js` 65, `process.js` 186, 199, 352 (per-process `/proc/<pid>/stat` and `io` in idle batches), `netusage.js` 99 (`/proc/sys/kernel/random/boot_id`, once per enable), `sessiontotals.js` 23 (`/proc/self/stat`, once per enable) | All `/proc`, in memory, never a disk. The batches replaced asynchronous reads that cost about 20 ms of shell CPU per round with 1.5 ms. Not a rule of the published guidelines. |
-| EGO-L-002 objects assigned in `enable()` without `.destroy()` | `extension.js` 155-223: `_indicatorBox`, `_menuSection`, `_popupStack`, `_scrollView`, `_menuContainer`, `_menuViewport` | Children of `_indicator`; `disable()` destroys `_indicator` (and with it its children and menu), then nulls each reference. |
-| EGO-L-003 signals without disconnect | `extension.js` 317, 318, 323: `_trackingId`, `_flushHistoryId`, `_clearHistoryId` | Disconnected in `disable()` by `for (const id of [this._trackingId, this._flushHistoryId, this._clearHistoryId]) if (id) this._settings.disconnect(id);`, which the analyser does not follow. |
+| EGO-X-004 synchronous file IO in shell code | `appio.js` 65, `process.js` 186, 199, 352: per-process `/proc/<pid>/stat` and `io` in batches of 32 per idle callback | All `/proc`, in memory, never a disk. The batches replaced asynchronous reads that cost about 20 ms of shell CPU per round with 1.5 ms. Not a rule of the published guidelines. |
+| EGO-L-002 objects assigned in `enable()` without `.destroy()` | `extension.js`: `_indicatorBox`, `_menuSection`, `_popupStack`, `_scrollView`, `_menuContainer`, `_menuViewport` | Children of `_indicator`; `disable()` destroys `_indicator` (and with it its children and menu), then nulls each reference. |
+
+Before that change (master 0f78091) it also reported EGO-L-003 for the three settings signals disconnected in a loop, and EGO-X-004 for the two one-off reads at enable.

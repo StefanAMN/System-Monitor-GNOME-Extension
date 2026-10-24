@@ -1517,6 +1517,9 @@ async function run() {
     const back = { rx: ext.stateObj._net.sessionTotals().rx, peak: ext.stateObj._pwrStats.peak, count: ext.stateObj._pwrStats.count };
     check(back.peak === 123 && back.count >= kept.count && back.rx >= kept.rx,
         `session figures through disable/enable: ${JSON.stringify(kept)} -> ${JSON.stringify(back)}`);
+    // Read without blocking at enable: the boot id gates the day's network count.
+    check(typeof ext.stateObj._bootId === 'string' && ext.stateObj._bootId.length > 0 && /\/\d+\/\d+$/.test(ext.stateObj._session ?? ''),
+        `boot id '${ext.stateObj._bootId}' and session '${ext.stateObj._session}' after enable`);
 
     await cycleTabs(ext.stateObj, 2);
     await clickThrough(ext.stateObj, 'after re-enable');

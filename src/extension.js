@@ -90,16 +90,26 @@ export default class ResourcePulseExtension extends Extension {
         this._netUsage = null;
         this._netUsageDirty = false;
         this._netUsageSavedAt = GLib.get_monotonic_time();
-        this._bootId = readBootId();
+        // The boot id and this shell's identity are read without blocking;
+        // until the boot id is known (null) the day's network traffic is not
+        // counted, so a first sample cannot pass for a new boot.
+        this._bootId = null;
+        this._session = null;
         {
             // Session figures from before the screen lock (sessiontotals.js).
-            this._session = currentSessionIdentity(this._bootId);
             const token = this._sessionToken = {};
-            loadSessionState(sessionStatePath(), this._session).then(saved => {
+            (async () => {
+                const bootId = await readBootId();
+                if (this._sessionToken !== token) return;
+                this._bootId = bootId;
+                const session = await currentSessionIdentity(bootId);
+                if (this._sessionToken !== token) return;
+                this._session = session;
+                const saved = await loadSessionState(sessionStatePath(), session);
                 if (!saved || this._sessionToken !== token) return;
                 this._net.restoreSession(saved.net);
                 this._pwrStats.restore(saved.power);
-            });
+            })().catch(e => console.warn(`ResourcePulse: cannot restore the session's figures: ${e.message}`));
         }
         {
             // A token, not _gen: _gen is bumped further down in enable().
@@ -364,8 +374,9 @@ export default class ResourcePulseExtension extends Extension {
         if (this._sizeHId) this._settings.disconnect(this._sizeHId);
         if (this._sizeIdleId) GLib.source_remove(this._sizeIdleId);
         if (this._openMenuId) this._settings.disconnect(this._openMenuId);
-        for (const id of [this._trackingId, this._flushHistoryId, this._clearHistoryId])
-            if (id) this._settings.disconnect(id);
+        if (this._trackingId) this._settings.disconnect(this._trackingId);
+        if (this._flushHistoryId) this._settings.disconnect(this._flushHistoryId);
+        if (this._clearHistoryId) this._settings.disconnect(this._clearHistoryId);
         // Saved with the time of the save: battery used until the next
         // enable (screen lock) is reported as a gap, not attributed.
         this._tracker?.stop();
