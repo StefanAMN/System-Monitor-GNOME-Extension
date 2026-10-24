@@ -217,7 +217,13 @@ window.rp-window .rp-preview-bar {
     padding: 7px 14px;
     min-height: 22px;
 }
-window.rp-window .rp-preview-item { padding: 0 10px; }
+window.rp-window .rp-preview-item { padding: 2px 10px; border-radius: 99px; }
+window.rp-window .rp-preview-item:hover { background-color: rgba(255, 255, 255, 0.08); }
+window.rp-window .rp-preview-item:focus-visible { outline: 2px solid ${ACCENT}; outline-offset: -2px; }
+window.rp-window .rp-preview-item.rp-dragging { opacity: 0.35; }
+/* Where a dragged metric will land. */
+window.rp-window .rp-preview-item.rp-drop-before { box-shadow: inset 3px 0 ${ACCENT}; }
+window.rp-window .rp-preview-item.rp-drop-after { box-shadow: inset -3px 0 ${ACCENT}; }
 window.rp-window .rp-preview-value { color: #eef1f5; font-weight: 700; font-size: 0.95em; }
 window.rp-window .rp-preview-divider { background-color: rgba(255, 255, 255, 0.18); min-width: 1px; margin: 3px 0; }
 window.rp-window .rp-preview-caption { color: ${p.dim}; font-size: 0.8em; }

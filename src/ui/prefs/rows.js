@@ -5,12 +5,14 @@
 // Clutter or shell modules itself).
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
 import Adw from 'gi://Adw';
 import Pango from 'gi://Pango';
+import Graphene from 'gi://Graphene';
 
-import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned, formatSettingValue } from '../../lib/common/settingsmodel.js';
+import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned, movePinned, formatSettingValue } from '../../lib/common/settingsmodel.js';
 import { formatTemp } from '../../lib/common/format.js';
 import { sanitizeMetricList } from '../../lib/common/present.js';
 import { RAPL_FIX_COMMANDS, raplFixWarning } from '../../lib/common/raplfix.js';
@@ -51,41 +53,132 @@ const PREVIEW_VALUES = {
     thermal: s => formatTemp(52, s.get_string('unit-temp') || 'C'),
 };
 
+/** A metric key carried by a drag: from the preview (a move) or a chip (a pin). */
+function dragSource(widget, key, onBegin = () => {}, onEnd = () => {}) {
+    const source = new Gtk.DragSource({ actions: Gdk.DragAction.MOVE });
+    source.connect('prepare', () => Gdk.ContentProvider.new_for_value(key));
+    source.connect('drag-begin', (src) => {
+        src.set_icon(new Gtk.WidgetPaintable({ widget }), widget.get_width() / 2, widget.get_height() / 2);
+        onBegin();
+    });
+    source.connect('drag-end', () => onEnd());
+    widget.add_controller(source);
+    return source;
+}
+
 /**
  * The top bar as the pinned metrics, the compact switch, the formats and the
- * temperature unit make it, with example values: dark, as GNOME's is.
- * @returns {Gtk.Widget & {update: function(), text: function(): string}}
+ * temperature unit make it, with example values: dark, as GNOME's is. Its
+ * metrics can be dragged along it to change their order, or moved with
+ * Ctrl+Left / Ctrl+Right; a chip dropped on it pins that metric there.
+ * @returns {Gtk.Widget & {update: function(), text: function(): string, items: Array, dropAt: function(string, number): boolean}}
  */
 function topBarPreview(settings, iconFor) {
     const frame = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-preview'] });
-    const bar = new Gtk.Box({ spacing: 0, halign: Gtk.Align.CENTER, css_classes: ['rp-preview-bar'] });
-    const caption = new Gtk.Label({ label: _('Preview with example values'), css_classes: ['rp-preview-caption'], halign: Gtk.Align.CENTER });
+    const bar = new Gtk.Box({ spacing: 0, halign: Gtk.Align.CENTER, css_classes: ['rp-preview-bar'], accessible_role: Gtk.AccessibleRole.LIST });
+    const caption = new Gtk.Label({ label: _('Example values · drag a metric to move it'), css_classes: ['rp-preview-caption'], halign: Gtk.Align.CENTER });
     frame.append(bar);
     frame.append(caption);
     let spoken = '';
+    let focusKey = null;
+    frame.items = [];
+    const pinnedNow = () => sanitizeMetricList(settings.get_strv('pinned-metrics'));
+    const place = (key, index) => {
+        const next = movePinned(pinnedNow(), key, index);
+        if (next.join() !== pinnedNow().join()) settings.set_strv('pinned-metrics', next);
+    };
+
+    // Where a drop at x (in the bar) lands: before the first metric whose
+    // middle is right of x, the dragged one not counted.
+    const indexAt = (x, key) => {
+        let index = 0;
+        for (const item of frame.items) {
+            if (item.key === key) continue;
+            const [, middle] = item.widget.compute_point(bar, new Graphene.Point().init(item.widget.get_width() / 2, 0));
+            if (middle.x < x) index++;
+        }
+        return index;
+    };
+    // The line where it will land: before a metric, or after the last.
+    const mark = (index, key) => {
+        const others = frame.items.filter(item => item.key !== key);
+        for (const item of frame.items) {
+            item.widget.remove_css_class('rp-drop-before');
+            item.widget.remove_css_class('rp-drop-after');
+        }
+        if (index < 0 || others.length === 0) return;
+        if (index < others.length) others[index].widget.add_css_class('rp-drop-before');
+        else others[others.length - 1].widget.add_css_class('rp-drop-after');
+    };
+    const target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE);
+    target.set_preload(true);
+    target.connect('motion', (t, x) => {
+        // Preloaded: the dragged metric's key, so it is not counted where it was.
+        const value = t.get_value();
+        const key = typeof value === 'string' ? value : null;
+        mark(indexAt(x, key), key);
+        return Gdk.DragAction.MOVE;
+    });
+    target.connect('leave', () => mark(-1));
+    target.connect('drop', (t, value, x) => {
+        mark(-1);
+        return frame.dropAt(String(value), indexAt(x, String(value)));
+    });
+    bar.add_controller(target);
+    // Also what a test or an assistive tool does: put `key` at `index`.
+    frame.dropAt = (key, index) => {
+        if (!METRICS.some(m => m.key === key)) return false;
+        place(key, index);
+        return true;
+    };
+
     frame.update = () => {
         for (let child = bar.get_first_child(); child;) {
             const next = child.get_next_sibling();
             bar.remove(child);
             child = next;
         }
-        const pinned = sanitizeMetricList(settings.get_strv('pinned-metrics'));
+        frame.items = [];
+        const pinned = pinnedNow();
         const compact = settings.get_boolean('compact-label');
         const parts = [];
         pinned.forEach((key, i) => {
             if (i > 0) bar.append(new Gtk.Separator({ orientation: Gtk.Orientation.VERTICAL, css_classes: ['rp-preview-divider'] }));
-            const item = new Gtk.Box({ spacing: 6, css_classes: ['rp-preview-item'] });
+            const name = _(METRICS.find(m => m.key === key).name);
+            const item = new Gtk.Box({ spacing: 6, css_classes: ['rp-preview-item'], focusable: true, accessible_role: Gtk.AccessibleRole.LIST_ITEM });
+            item.set_cursor_from_name('grab');
             const gicon = iconFor?.(key);
             if (gicon) item.append(new Gtk.Image({ gicon, pixel_size: 16, css_classes: [`rp-c-${key}`] }));
             const value = PREVIEW_VALUES[key](settings);
             if (!compact) item.append(new Gtk.Label({ label: value, css_classes: ['rp-preview-value'] }));
+            item.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+                [fill(_('{metric}, {n} of {count} in the top bar'), { metric: name, n: i + 1, count: pinned.length }),
+                    _('Drag, or press Ctrl+Left or Ctrl+Right, to move it')]);
+            dragSource(item, key, () => item.add_css_class('rp-dragging'), () => item.remove_css_class('rp-dragging'));
+            const keys = new Gtk.EventControllerKey();
+            keys.connect('key-pressed', (_c, keyval, _code, state) => {
+                if (!(state & Gdk.ModifierType.CONTROL_MASK)) return false;
+                const step = keyval === Gdk.KEY_Left ? -1 : keyval === Gdk.KEY_Right ? 1 : 0;
+                if (!step) return false;
+                focusKey = key;
+                place(key, i + step);
+                return true;
+            });
+            item.add_controller(keys);
+            item.moveKeys = keys;
             bar.append(item);
-            parts.push(`${_(METRICS.find(m => m.key === key).name)} ${value}`);
+            frame.items.push({ key, widget: item });
+            parts.push(`${name} ${value}`);
         });
         if (pinned.length === 0)
             bar.append(new Gtk.Label({ label: _('Nothing pinned: only the Resource Pulse icon'), css_classes: ['rp-preview-value'] }));
         spoken = pinned.length > 0 ? fill(_('Top bar preview: {items}'), { items: parts.join(', ') }) : _('Top bar preview: nothing pinned');
         frame.update_property([Gtk.AccessibleProperty.LABEL], [spoken]);
+        // A metric moved from the keyboard keeps the focus in its new place.
+        if (focusKey) {
+            frame.items.find(item => item.key === focusKey)?.widget.grab_focus();
+            focusKey = null;
+        }
     };
     frame.text = () => spoken;
     return frame;
@@ -200,6 +293,8 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
             chips.append(chip);
             chip.get_parent().can_focus = false;
             chip.badge = badge;
+            // Dragged onto the preview, a chip pins its metric at that place.
+            dragSource(chip, key);
             pinRows[key] = chip;
         }
         group.add(chips);
