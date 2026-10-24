@@ -1450,3 +1450,6 @@ Owner: "build all 5": (1) pause / lower priority for processes, (2) those action
 - `panel-shortcut`, empty by default so it clashes with nothing; registered with `Main.wm.addKeybinding`, removed in disable(). A Shortcut row under Panel: click it, press the keys (Esc cancels, Backspace clears; a modifier alone or a plain letter is no shortcut, function keys may go alone).
 - The real keys found a bug a call to the handler would not have: registered for the normal and overview modes only, the keys opened the panel but could not close it, as an open panel holds the shell in popup mode. POPUP added.
 - Proof: prefs-check (the capture rules; 310 of 310 under Orchis-Pink); a real click on the row and real keys through the compositor store '<Control><Alt>k'; in the shell the real keys open and close the panel, and do nothing once cleared.
+
+### State of the five features (2026-10-30)
+All built and committed. test-i18n passed; `test-overhead 0`: menu closed +0.40 %, with tracking +0.42 % (budget 1 %), tracking 4.8 ms CPU per sample, overview +3.40 % (budget 5 %). Not run here: real thermal throttling, an AMD processor, a real months-long health history (see each feature).
