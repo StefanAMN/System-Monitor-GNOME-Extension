@@ -90,7 +90,9 @@ export function windowCss(dark, variables) {
 
     const tints = Object.entries(TINTS).map(([key, variants]) => {
         const [bg, border] = variants[dark ? 0 : 1];
-        return `window.rp-window .rp-tint-${key} { background-color: ${bg}; border-color: ${border}; }
+        return `window.rp-window .rp-tint-${key},
+window.rp-window button.rp-pin-chip.rp-tint-${key},
+window.rp-window button.rp-pin-chip.rp-tint-${key}:hover { background-color: ${bg}; border-color: ${border}; }
 window.rp-window .rp-c-${key} { color: ${METRIC_COLORS[key]}; }
 window.rp-window levelbar.rp-bar-${key} block.filled { background-color: ${METRIC_COLORS[key]}; }`;
     }).join('\n');
@@ -201,6 +203,62 @@ window.rp-window .rp-chart {
 window.rp-window .rp-chart-area { color: ${p.dim}; font-size: 0.8em; }
 window.rp-window levelbar block.empty { background-color: ${p.track}; border: none; }
 window.rp-window levelbar block.filled { background-color: ${ACCENT}; border: none; }
+/* The Settings page. The top-bar preview is dark in both variants, as
+   GNOME's top bar is, so its text keeps its own off-white. */
+window.rp-window .rp-preview {
+    padding: 18px 12px 12px;
+    border-radius: 14px;
+    border: 1px solid ${p.border};
+    background-color: ${p.card};
+}
+window.rp-window .rp-preview-bar {
+    background-color: #0b0c0f;
+    border-radius: 99px;
+    padding: 7px 14px;
+    min-height: 22px;
+}
+window.rp-window .rp-preview-item { padding: 0 10px; }
+window.rp-window .rp-preview-value { color: #eef1f5; font-weight: 700; font-size: 0.95em; }
+window.rp-window .rp-preview-divider { background-color: rgba(255, 255, 255, 0.18); min-width: 1px; margin: 3px 0; }
+window.rp-window .rp-preview-caption { color: ${p.dim}; font-size: 0.8em; }
+window.rp-window button.rp-pin-chip {
+    background-color: ${p.card};
+    border: 1px solid ${p.border};
+    border-radius: 12px;
+    padding: 8px 10px;
+    font-weight: 600;
+}
+window.rp-window button.rp-pin-chip:hover { background-color: ${p.hover}; }
+window.rp-window button.rp-pin-chip:checked { border-width: 1px; }
+window.rp-window .rp-pin-badge {
+    background-color: ${ACCENT};
+    color: #ffffff;
+    border-radius: 99px;
+    min-width: 18px;
+    min-height: 18px;
+    font-size: 0.75em;
+    font-weight: 800;
+}
+window.rp-window .rp-segmented button { padding: 4px 12px; font-weight: 600; }
+window.rp-window .rp-segmented button:checked { background-color: ${ACCENT}; color: #ffffff; }
+window.rp-window scale.rp-slider trough { background-color: ${p.track}; }
+window.rp-window scale.rp-slider highlight { background-color: ${ACCENT}; }
+/* The knob: themes draw their own (Orchis: a pink image on a 32 px area). */
+window.rp-window scale.rp-slider > trough > slider,
+window.rp-window scale.rp-slider > trough > slider:hover,
+window.rp-window scale.rp-slider > trough > slider:focus,
+window.rp-window scale.rp-slider > trough > slider:active {
+    background-image: none;
+    background-color: #ffffff;
+    border: 2px solid ${ACCENT};
+    border-radius: 50%;
+    min-width: 16px;
+    min-height: 16px;
+    margin: -8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    outline: none;
+}
+window.rp-window .rp-slider-value { font-weight: 700; }
 window.rp-window .rp-finding-warning { color: #ff7800; }
 window.rp-window .rp-finding-suggestion { color: ${ACCENT}; }
 window.rp-window .rp-finding-info { color: ${p.dim}; }
