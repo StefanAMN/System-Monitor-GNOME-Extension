@@ -450,6 +450,38 @@ async function pressKey(keyval, settle = 600) {
     await sleep(settle);
 }
 
+// Keys held together, as a person does: pressed in order, released in reverse.
+async function pressChord(keyvals) {
+    keyboard ??= seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+    for (const keyval of keyvals) {
+        keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.PRESSED);
+        await sleep(60);
+    }
+    for (const keyval of [...keyvals].reverse()) {
+        keyboard.notify_keyval(GLib.get_monotonic_time(), keyval, Clutter.KeyState.RELEASED);
+        await sleep(60);
+    }
+    await sleep(500);
+}
+
+// The panel's shortcut, pressed for real: it opens and closes the panel, and
+// does nothing once cleared.
+async function panelShortcut(rp) {
+    const chord = [Clutter.KEY_Control_L, Clutter.KEY_Alt_L, Clutter.KEY_m];
+    check(!rp._indicator.menu.isOpen, 'shortcut: the panel is open before the test');
+    rp._settings.set_strv('panel-shortcut', ['<Control><Alt>m']);
+    await sleep(500);
+    await pressChord(chord);
+    check(rp._indicator.menu.isOpen, 'shortcut: the keys did not open the panel');
+    await pressChord(chord);
+    check(!rp._indicator.menu.isOpen, 'shortcut: the keys did not close the panel');
+    rp._settings.reset('panel-shortcut');
+    await sleep(500);
+    await pressChord(chord);
+    check(!rp._indicator.menu.isOpen, 'shortcut: cleared, the keys still open the panel');
+    console.log('RP-UITEST shortcut: opens, closes, and is gone when cleared, with real keys');
+}
+
 // The keyboard in the panel: Down and Tab from the top-bar button get in,
 // Backspace goes back from a page with the focus kept inside, Escape closes.
 async function panelKeyboard(rp) {
@@ -771,7 +803,13 @@ async function prefsWindow(rp) {
         const drag = /^PREFS-CHECK DRAG ([\w-]+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)/.exec(line);
         const wheel = /^PREFS-CHECK SCROLL ([\w-]+) (-?\d+) (-?\d+) (up|down)( ctrl)?/.exec(line);
         const hoverAt = /^PREFS-CHECK HOVER ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
-        if (hoverAt) {
+        const keysAt = /^PREFS-CHECK KEY ([\w-]+) ([\w,]+)/.exec(line);
+        if (keysAt) {
+            check(titled(), `prefs: no window for the keys ${keysAt[1]}`);
+            await bringForward(titled());
+            await pressChord(keysAt[2].split(',').map(name => Clutter[`KEY_${name}`]));
+            acknowledge(line);
+        } else if (hoverAt) {
             check(titled(), `prefs: no window to hover ${hoverAt[1]} in`);
             await bringForward(titled());
             await hoverInWindow(titled(), Number(hoverAt[2]), Number(hoverAt[3]));
@@ -1725,6 +1763,7 @@ async function run() {
     await stuckCollector(ext.stateObj);
     await alertsRaise(ext.stateObj);
     await alertsRecover(ext.stateObj);
+    await panelShortcut(ext.stateObj);
     await endProcesses(ext.stateObj);
     await processSearch(ext.stateObj);
     await historyAndUsage(ext.stateObj);

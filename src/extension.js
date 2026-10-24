@@ -2,6 +2,8 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
+import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -365,6 +367,13 @@ export default class ResourcePulseExtension extends Extension {
             }
         });
 
+        // The owner's own key combination, if any; the shell follows the setting.
+        Main.wm.addKeybinding('panel-shortcut', this._settings, Meta.KeyBindingFlags.NONE,
+            // POPUP: an open panel holds the shell in that mode, and the keys must close it.
+            Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP, () => {
+                if (!this._indicatorGone) this._indicator?.menu.toggle();
+            });
+
         // The panel gives its right side only the room the centre leaves.
         // Re-fit whenever any of the three changes size.
         this._topBarCollapsed = 0;
@@ -389,6 +398,7 @@ export default class ResourcePulseExtension extends Extension {
         if (this._sizeHId) this._settings.disconnect(this._sizeHId);
         if (this._sizeIdleId) GLib.source_remove(this._sizeIdleId);
         if (this._openMenuId) this._settings.disconnect(this._openMenuId);
+        Main.wm.removeKeybinding('panel-shortcut');
         if (this._trackingId) this._settings.disconnect(this._trackingId);
         if (this._flushHistoryId) this._settings.disconnect(this._flushHistoryId);
         if (this._clearHistoryId) this._settings.disconnect(this._clearHistoryId);

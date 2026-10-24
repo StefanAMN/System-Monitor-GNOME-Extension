@@ -115,6 +115,11 @@
       <summary>Custom Menu Height</summary>
       <description>User-resized height of the dropdown panel in pixels (0 for default).</description>
     </key>
+    <key name="panel-shortcut" type="as">
+      <default>[]</default>
+      <summary>Panel Shortcut</summary>
+      <description>Key combination that opens and closes the panel. Empty: none.</description>
+    </key>
     <key name="action-open-menu" type="b">
       <default>false</default>
       <summary>Trigger for opening the menu</summary>
