@@ -1142,3 +1142,30 @@ The Tracking tab gets a Component choice beside Period: Battery (as today), Proc
 | T4 | — | `pot` (621 messages); `test-i18n` passed; prefs-check 220 of 220 (tile colours read from the tile's padding after a paint: GTK 4 widget coordinates start at the content box, and x = 6 had landed on text); `test-ui` passed, with the Component dropdown and one of its options clicked with the real pointer; 20-minute soak: RSS 315.0 -> 301.2 MB (slope -0.045 MB/min), fds 75 -> 78 (within +3), actors and sparklines flat, JS heap flat |
 
 On a live desktop prefs-check's rendered checks can fail with "did not paint" when another window covers the test window (the compositor stops painting it); the nested shell of `test-ui` is the reference.
+
+# An About page instead of "Open System Monitor" (branch `about-page`, 2026-10-24)
+
+Owner's request: delete the unused branches (done: 18 local and 7 remote branches, all merged into master); remove "Open System Monitor"; make Extension Manager's "See details" show information about the extension, with a design that catches the eye. Owner's answer (2026-10-24): the button meant is Extension Manager's details button.
+
+What can and cannot be done: Extension Manager's details button shows the extension's page on extensions.gnome.org, looked up by UUID. Resource Pulse is not published there, so the page is empty, and nothing in the extension's code changes it: it needs the submission (the owner's account; area 4 prepared it). What the code can do:
+- an About page in the extension's own window, which Extension Manager's and the Extensions app's settings button open, and which replaces "Open System Monitor" at the foot of the panel's overview;
+- a fuller description in metadata.json, which Extension Manager and the Extensions app show for an installed extension.
+
+The CPU and Memory pages' "Show All" buttons and a click on a process row still open GNOME System Monitor; not changed without the owner's word.
+
+## The About page
+
+- A hero banner: the name, what it is in one line, chips for the version, the GNOME versions and the licence, over a deep blue gradient with a live pulse line in the eight metric colours (drawn with Cairo; animated only while on screen, still when the desktop asks for less motion).
+- Four figures: 8 metrics live, under 1 % CPU with the panel closed, 14 days of history, nothing sent anywhere.
+- The eight metrics as tiles in their own colours, one line each.
+- What else is inside: tracking, diagnostics, the agent hand-off, alerts, screen-reader names, translations.
+- Links: the source, reporting a problem, copying details about the extension and the system (for a bug report).
+- The author and the licence.
+
+## Milestones
+
+| # | Work | Proof |
+|---|---|---|
+| A1 | About page; in every window (Settings and About from the Extensions app or Extension Manager; Tracking and Diagnostics too from the panel); `prefs-page` 'about' | prefs-check: pages and their order in both entries, the figures and links (launcher stubbed), copied details, the animation stops when the page is not shown; hero and tiles by rendered pixels, light and dark, under the user's theme; screenshots |
+| A2 | The overview's footer: "About Resource Pulse" opens the window on About; "Open System Monitor" gone | test-ui: the footer clicked with the real pointer opens the window; a11y names; screenshots |
+| A3 | metadata.json description; translation template; CI | test-i18n (the About page included), test-zip, CI on GNOME 46-50 |
