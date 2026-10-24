@@ -3,6 +3,7 @@
 // disk, network, graphics, temperature) the figures over a period, a chart
 // and the apps that used it most. GTK side (preferences process); never
 // imported by the shell.
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
@@ -168,10 +169,117 @@ export function drainPoints(ledger, from, now, batteryOnly) {
     return points;
 }
 
-function drawDrain(area, cr, width, height, points) {
+// Charts the pointer can read: the bar under it is highlighted and a box
+// beside it gives its period and values. The box is drawn in the chart (no
+// tooltip delay); from the keyboard Left / Right step through the bars.
+const CHART_LEFT = { drain: 44, bars: 52 };
+
+/** The bar under x in a chart `width` wide whose bars start at `left`; -1 outside. */
+export function barAt(x, width, left, count) {
+    if (count <= 0 || x < left || x >= width) return -1;
+    return Math.min(count - 1, Math.floor((x - left) / ((width - left) / count)));
+}
+
+/** The period a bar covers: "14:00–15:00", or the day for a chart of days. */
+export function barPeriod(points, i) {
+    const t = points[i]?.t;
+    if (t === undefined) return '';
+    const perDay = points.length > 1 && points[1].t - points[0].t > HOUR_MS;
+    const start = GLib.DateTime.new_from_unix_local(Math.floor(t / 1000));
+    return perDay ? start.format('%a %e %b').replace(/\s+/g, ' ') : `${start.format('%H:00')}–${start.add_hours(1).format('%H:00')}`;
+}
+
+/**
+ * Make a chart area hoverable and focusable.
+ * @param {Gtk.DrawingArea} area
+ * @param {number} left where its bars start
+ * @param {function(): number} count how many bars it has now
+ * @param {function(number): {title: string, lines: Array<[string, string, string]>}} details
+ *   a bar's period and its lines: [colour, label, value]
+ * @returns {{index: number, set: function(number), text: function(): string}}
+ */
+function hoverable(area, left, count, details) {
+    const hover = { index: -1 };
+    hover.text = () => {
+        if (hover.index < 0 || hover.index >= count()) return '';
+        const d = details(hover.index);
+        return [d.title, ...d.lines.map(([, label, value]) => `${label} ${value}`)].join(', ');
+    };
+    hover.set = index => {
+        const next = index >= 0 && index < count() ? index : -1;
+        if (next === hover.index) return;
+        hover.index = next;
+        area.update_property([Gtk.AccessibleProperty.DESCRIPTION], [hover.text()]);
+        area.queue_draw();
+    };
+    const motion = new Gtk.EventControllerMotion();
+    motion.connect('motion', (_c, x) => hover.set(barAt(x, area.get_width(), left, count())));
+    motion.connect('leave', () => hover.set(-1));
+    area.add_controller(motion);
+    area.focusable = true;
+    const keys = new Gtk.EventControllerKey();
+    keys.connect('key-pressed', (_c, keyval) => {
+        const n = count();
+        if (keyval === Gdk.KEY_Left || keyval === Gdk.KEY_Right) {
+            if (n === 0) return false;
+            const step = keyval === Gdk.KEY_Left ? -1 : 1;
+            hover.set(hover.index < 0 ? n - 1 : Math.max(0, Math.min(n - 1, hover.index + step)));
+            return true;
+        }
+        if (keyval === Gdk.KEY_Escape && hover.index >= 0) {
+            hover.set(-1);
+            return true;
+        }
+        return false;
+    });
+    area.add_controller(keys);
+    hover.motion = motion;
+    hover.keys = keys;
+    hover.details = details;
+    return hover;
+}
+
+/** The hovered bar's highlight and details box, drawn over the chart. */
+function paintHover(area, cr, width, height, left, count, hover) {
+    if (hover.index < 0 || hover.index >= count) return;
+    const fg = area.get_color();
+    const slot = (width - left) / count;
+    const x0 = left + hover.index * slot;
+    cr.setSourceRGBA(fg.red, fg.green, fg.blue, 0.10);
+    cr.rectangle(x0, 0, slot, height - 18);
+    cr.fill();
+    const { title, lines } = hover.details(hover.index);
+    const esc = str => GLib.markup_escape_text(str, -1);
+    const markup = [`<b>${esc(title)}</b>`, ...lines.map(([colour, label, value]) => `<span foreground="${colour}">■</span> ${esc(label)}  <b>${esc(value)}</b>`)].join('\n');
+    const layout = area.create_pango_layout(null);
+    layout.set_markup(markup, -1);
+    const [, logical] = layout.get_pixel_extents();
+    const pad = 8;
+    const w = logical.width + 2 * pad;
+    const h = logical.height + 2 * pad;
+    // Beside the bar, on whichever side has room; clamped inside the chart.
+    const middle = x0 + slot / 2;
+    let x = middle + 10 + w <= width ? middle + 10 : middle - 10 - w;
+    x = Math.max(0, Math.min(width - w, x));
+    const y = 4;
+    const r = 7;
+    cr.newPath();
+    cr.arc(x + w - r, y + r, r, -Math.PI / 2, 0);
+    cr.arc(x + w - r, y + h - r, r, 0, Math.PI / 2);
+    cr.arc(x + r, y + h - r, r, Math.PI / 2, Math.PI);
+    cr.arc(x + r, y + r, r, Math.PI, 1.5 * Math.PI);
+    cr.closePath();
+    cr.setSourceRGBA(0.043, 0.047, 0.059, 0.94);
+    cr.fill();
+    cr.setSourceRGBA(0.933, 0.945, 0.961, 1);
+    cr.moveTo(x + pad, y + pad);
+    PangoCairo.show_layout(cr, layout);
+}
+
+function drawDrain(area, cr, width, height, points, hover = null) {
     const fg = area.get_color();
     const max = Math.max(0.001, ...points.map(p => Math.max(p.battery, p.processor)));
-    const left = 44;
+    const left = CHART_LEFT.drain;
     const bottom = 18;
     const plotH = height - bottom - 6;
     const slot = (width - left) / Math.max(1, points.length);
@@ -210,6 +318,7 @@ function drawDrain(area, cr, width, height, points) {
         text(fmt(points[0].t), left, height);
         text(fmt(points[points.length - 1].t), width, height, true);
     }
+    if (hover) paintHover(area, cr, width, height, left, points.length, hover);
     cr.$dispose();
 }
 
@@ -222,11 +331,11 @@ function hexColour(hex, alpha) {
  * Bars of one component: the first series full width; a second one drawn
  * inside it (`nested`: a part or an average of the first) or beside it.
  */
-function drawBars(area, cr, width, height, chart) {
+function drawBars(area, cr, width, height, chart, hover = null) {
     const { points, series, axis, colour, nested } = chart;
     const fg = area.get_color();
     const max = Math.max(1e-9, ...points.flatMap(p => series.map(key => p[key] ?? 0)));
-    const left = 52;
+    const left = CHART_LEFT.bars;
     const bottom = 18;
     const plotH = height - bottom - 6;
     const slot = (width - left) / Math.max(1, points.length);
@@ -262,6 +371,7 @@ function drawBars(area, cr, width, height, chart) {
         text(fmt(points[0].t), left, height);
         text(fmt(points[points.length - 1].t), width, height, true);
     }
+    if (hover) paintHover(area, cr, width, height, left, points.length, hover);
     cr.$dispose();
 }
 
@@ -529,7 +639,12 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     chartBox.append(chartHead);
     const area = new Gtk.DrawingArea({ content_height: 140, hexpand: true, css_classes: ['rp-chart-area'] });
     rows.chart = { area, box: chartBox, points: [] };
-    area.set_draw_func((a, cr, width, height) => drawDrain(a, cr, width, height, rows.chart.points));
+    area.update_property([Gtk.AccessibleProperty.LABEL], [_('Battery use, one bar per hour or day; Left and Right step through the bars')]);
+    rows.chart.hover = hoverable(area, CHART_LEFT.drain, () => rows.chart.points.length, i => {
+        const p = rows.chart.points[i];
+        return { title: barPeriod(rows.chart.points, i), lines: [['#2ec27e', _('battery'), formatWh(p.battery)], ['#3584e4', _('processor'), formatWh(p.processor)]] };
+    });
+    area.set_draw_func((a, cr, width, height) => drawDrain(a, cr, width, height, rows.chart.points, rows.chart.hover));
     chartBox.append(area);
     batteryBox.append(chartBox);
 
@@ -564,8 +679,17 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     barsBox.append(barsHead);
     const barsArea = new Gtk.DrawingArea({ content_height: 140, hexpand: true, css_classes: ['rp-chart-area'] });
     rows.bars = { area: barsArea, box: barsBox, chart: null, title: barsTitle };
+    barsArea.update_property([Gtk.AccessibleProperty.LABEL], [_('One bar per hour or day; Left and Right step through the bars')]);
+    rows.bars.hover = hoverable(barsArea, CHART_LEFT.bars, () => rows.bars.chart?.points.length ?? 0, i => {
+        const chart = rows.bars.chart;
+        const p = chart.points[i];
+        return {
+            title: barPeriod(chart.points, i),
+            lines: chart.series.map((key, j) => [chart.colour, chart.labels[j], chart.axis(p[key] ?? 0)]),
+        };
+    });
     barsArea.set_draw_func((a, cr, width, height) => {
-        if (rows.bars.chart) drawBars(a, cr, width, height, rows.bars.chart);
+        if (rows.bars.chart) drawBars(a, cr, width, height, rows.bars.chart, rows.bars.hover);
     });
     barsBox.append(barsArea);
     componentBox.append(barsBox);
@@ -681,7 +805,9 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
             t.detail.label = detail;
             t.set_css_classes(['rp-tile', `rp-tint-${component}`]);
         });
-        rows.bars.chart = { points: view.points, series: view.series, axis: spec.axis, colour: METRIC_COLORS[component], nested: !!spec.nested };
+        rows.bars.chart = { points: view.points, series: view.series, labels: spec.series.map(([label]) => label), axis: spec.axis, colour: METRIC_COLORS[component], nested: !!spec.nested };
+        // A new view: no bar of the old one stays highlighted.
+        rows.bars.hover.set(-1);
         rows.bars.title.label = spec.chart;
         legend.forEach((key, i) => {
             key.visible = i < spec.series.length;

@@ -104,6 +104,17 @@ async function clickInWindow(metaWindow, x, y) {
     await sleep(300);
 }
 
+// The pointer moved over a point inside a client's window, nothing pressed.
+async function hoverInWindow(metaWindow, x, y) {
+    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    const rect = metaWindow.get_buffer_rect();
+    const now = () => GLib.get_monotonic_time();
+    pointer.notify_absolute_motion(now(), rect.x + x - 6, rect.y + y);
+    await sleep(150);
+    pointer.notify_absolute_motion(now(), rect.x + x, rect.y + y);
+    await sleep(400);
+}
+
 // Wheel clicks over a point inside a client's window (as clickInWindow).
 async function scrollInWindow(metaWindow, x, y, direction) {
     pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
@@ -733,7 +744,13 @@ async function prefsWindow(rp) {
         const click = /^PREFS-CHECK CLICK ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
         const drag = /^PREFS-CHECK DRAG ([\w-]+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)/.exec(line);
         const wheel = /^PREFS-CHECK SCROLL ([\w-]+) (-?\d+) (-?\d+) (up|down)/.exec(line);
-        if (wheel) {
+        const hoverAt = /^PREFS-CHECK HOVER ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
+        if (hoverAt) {
+            check(titled(), `prefs: no window to hover ${hoverAt[1]} in`);
+            await bringForward(titled());
+            await hoverInWindow(titled(), Number(hoverAt[2]), Number(hoverAt[3]));
+            acknowledge(line);
+        } else if (wheel) {
             check(titled(), `prefs: no window to scroll ${wheel[1]} in`);
             await bringForward(titled());
             await scrollInWindow(titled(), Number(wheel[2]), Number(wheel[3]), wheel[4]);
