@@ -218,6 +218,50 @@ function segmentedRow(row, settings, isFollowing) {
     return widget;
 }
 
+/** The first descendant of `widget` with the CSS name `name`. */
+function descendant(widget, name) {
+    for (let child = widget.get_first_child(); child; child = child.get_next_sibling()) {
+        if (child.get_css_name() === name) return child;
+        const found = descendant(child, name);
+        if (found) return found;
+    }
+    return null;
+}
+
+/**
+ * A slider moves only when its knob is dragged (or from the keyboard): the
+ * wheel over it scrolls the page, as anywhere else on it, and a click on
+ * its track does not make the knob jump. Both controllers run in the
+ * capture phase, before the slider's own.
+ */
+function knobOnly(scale) {
+    const wheel = new Gtk.EventControllerScroll({ flags: Gtk.EventControllerScrollFlags.BOTH_AXES });
+    wheel.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+    wheel.connect('scroll', (controller, _dx, dy) => {
+        const adj = scale.get_ancestor(Gtk.ScrolledWindow.$gtype)?.get_vadjustment();
+        if (adj && dy) {
+            // A wheel click scrolls as GtkScrolledWindow does; a touchpad gives pixels.
+            const step = controller.get_unit?.() === Gdk.ScrollUnit.SURFACE ? 1 : Math.pow(adj.page_size, 2 / 3);
+            adj.value = Math.max(adj.lower, Math.min(adj.upper - adj.page_size, adj.value + dy * step));
+        }
+        return true;
+    });
+    scale.add_controller(wheel);
+    const press = new Gtk.GestureClick({ button: 0 });
+    press.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
+    press.connect('pressed', (gesture, _n, x, y) => {
+        const knob = descendant(scale, 'slider');
+        if (!knob) return;
+        const [ok, at] = scale.compute_point(knob, new Graphene.Point().init(x, y));
+        const grace = 4;
+        const onKnob = ok && at.x >= -grace && at.y >= -grace && at.x <= knob.get_width() + grace && at.y <= knob.get_height() + grace;
+        // Off the knob: the press is taken here, so the slider never sees it.
+        if (!onKnob) gesture.set_state(Gtk.EventSequenceState.CLAIMED);
+    });
+    scale.add_controller(press);
+    return { wheel, press };
+}
+
 /**
  * A slider for a `number` row, with its value beside it. The row keeps
  * `value`, as a spin row has it.
@@ -229,6 +273,7 @@ function sliderRow(row, settings, iconFor) {
     const adjustment = new Gtk.Adjustment({ lower: row.min, upper: row.max, step_increment: row.step, page_increment: row.step });
     const scale = new Gtk.Scale({ adjustment, draw_value: false, digits: 0, round_digits: 0, width_request: 180, valign: Gtk.Align.CENTER, css_classes: ['rp-slider'] });
     scale.update_property([Gtk.AccessibleProperty.LABEL], [_(row.title)]);
+    widget.knobOnly = knobOnly(scale);
     const label = new Gtk.Label({ width_chars: 6, xalign: 1, css_classes: ['rp-slider-value', 'numeric'] });
     widget.add_suffix(scale);
     widget.add_suffix(label);

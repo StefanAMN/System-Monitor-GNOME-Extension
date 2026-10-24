@@ -104,6 +104,22 @@ async function clickInWindow(metaWindow, x, y) {
     await sleep(300);
 }
 
+// Wheel clicks over a point inside a client's window (as clickInWindow).
+async function scrollInWindow(metaWindow, x, y, direction) {
+    pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    const rect = metaWindow.get_buffer_rect();
+    const now = () => GLib.get_monotonic_time();
+    pointer.notify_absolute_motion(now(), rect.x + x + 2, rect.y + y + 2);
+    await sleep(150);
+    pointer.notify_absolute_motion(now(), rect.x + x, rect.y + y);
+    await sleep(200);
+    for (let i = 0; i < 3; i++) {
+        pointer.notify_discrete_scroll(now(), direction === 'down' ? Clutter.ScrollDirection.DOWN : Clutter.ScrollDirection.UP, Clutter.ScrollSource.WHEEL);
+        await sleep(80);
+    }
+    await sleep(400);
+}
+
 // A drag inside a client's window: press at (x1, y1), move there in small
 // steps (past GTK's drag threshold, slowly enough for the client to follow),
 // release. Points are in the window's surface, as for clickInWindow.
@@ -693,6 +709,13 @@ async function prefsWindow(rp) {
     const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE });
     launcher.setenv('WAYLAND_DISPLAY', socket, true);
     launcher.setenv('GDK_BACKEND', 'wayland', true);
+    // Where the driver acknowledges each pointer action it has finished.
+    const ackDir = GLib.dir_make_tmp('rp-ack-XXXXXX');
+    launcher.setenv('RP_ACK_DIR', ackDir, true);
+    const acknowledge = line => {
+        const id = / ack=(\d+)$/.exec(line)?.[1];
+        if (id) GLib.file_set_contents(`${ackDir}/${id}`, '');
+    };
     const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, '1200']);
     const lines = new Gio.DataInputStream({ base_stream: proc.get_stdout_pipe() });
     const readLine = () => new Promise((resolve, reject) => lines.read_line_async(GLib.PRIORITY_DEFAULT, null, (obj, res) => {
@@ -709,14 +732,22 @@ async function prefsWindow(rp) {
         const show = /^PREFS-CHECK SHOW ([\w-]+)/.exec(line);
         const click = /^PREFS-CHECK CLICK ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
         const drag = /^PREFS-CHECK DRAG ([\w-]+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)/.exec(line);
-        if (drag) {
+        const wheel = /^PREFS-CHECK SCROLL ([\w-]+) (-?\d+) (-?\d+) (up|down)/.exec(line);
+        if (wheel) {
+            check(titled(), `prefs: no window to scroll ${wheel[1]} in`);
+            await bringForward(titled());
+            await scrollInWindow(titled(), Number(wheel[2]), Number(wheel[3]), wheel[4]);
+            acknowledge(line);
+        } else if (drag) {
             check(titled(), `prefs: no window to drag ${drag[1]} in`);
             await bringForward(titled());
             await dragInWindow(titled(), ...drag.slice(2, 6).map(Number));
+            acknowledge(line);
         } else if (click) {
             check(titled(), `prefs: no window to click ${click[1]} in`);
             await bringForward(titled());
             await clickInWindow(titled(), Number(click[2]), Number(click[3]));
+            acknowledge(line);
         } else if (show) {
             await sleep(700);
             check(titled(), `prefs: no window on screen for the ${show[1]} page`);
