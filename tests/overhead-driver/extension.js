@@ -30,8 +30,11 @@ const SOAK_ONLY = GLib.getenv('RP_SOAK_ONLY') === '1';
 const SOAK_LEAK = GLib.getenv('RP_SOAK_LEAK') === '1';
 // Which of the tracker's readings the soak runs with (to find what grows):
 // all, no-tracking, no-appio (per-app disk), no-memory (per-app memory),
-// no-machine (memory, swap, stall and disk counters), no-network.
+// no-machine (memory, swap, stall and disk counters), no-network; or
+// no-extension: the extension disabled, the same loop on the bare shell, to
+// tell the shell's own RSS growth from the extension's.
 const SOAK_VARIANT = GLib.getenv('RP_SOAK_VARIANT') || 'all';
+const SOAK_BARE = SOAK_VARIANT === 'no-extension';
 // A JavaScript cell kind (Object, Array, Function, ...) leaks when it grows
 // by more than this many cells per 100 polls in both halves of the steady
 // phase; a cache that fills once grows in one half only.
@@ -284,6 +287,7 @@ async function churn() {
 
 async function soak() {
     // Worst realistic case: 1 s interval, menu open, every tab visited.
+    if (SOAK_BARE) return bareSoak();
     const ext = rp();
     if (SOAK_ONLY) {
         ext._settings.set_strv('pinned-metrics', ALL_METRICS);
@@ -382,6 +386,55 @@ async function soak() {
     check(last.fds <= first.fds + 3, `fd count grew from ${first.fds} to ${last.fds}`);
     check(leaking.length === 0, `JavaScript heap keeps growing: ${leaking.map(k => `${k} +${g1[k].toFixed(0)} then +${g2[k].toFixed(0)} cells per 100 polls`).join(', ')}`);
     check(rssSlope <= RSS_SLOPE_LIMIT, `shell RSS keeps growing at ${rssSlope.toFixed(2)} MB/min after the first half`);
+}
+
+/**
+ * The soak's loop on the shell alone: the extension disabled, the same 15 s
+ * steps, collections, RSS / fd samples and heap censuses, nothing polling.
+ * The same RSS and heap rules apply, so its figures compare with the soak's.
+ */
+async function bareSoak() {
+    Main.extensionManager.disableExtension(TARGET);
+    await sleep(5000);
+    // The extension object outlives disable(); its indicator does not.
+    check(!rp()?._indicator, 'no-extension: the target is still enabled');
+    const t0 = GLib.get_monotonic_time();
+    const c0 = cpuTicks();
+    const steps = Math.ceil(SOAK_S / 15);
+    const samples = { n: 0, t: new Float64Array(steps), rss: new Float64Array(steps), fds: new Int32Array(steps) };
+    const censusAt = [SOAK_S / 4, SOAK_S * 5 / 8, SOAK_S];
+    const censuses = [];
+    for (let elapsed = 0; elapsed < SOAK_S; elapsed += 15) {
+        await sleep(15000);
+        System.gc();
+        await sleep(200);
+        const t = (GLib.get_monotonic_time() - t0) / 1e6;
+        const i = samples.n++;
+        samples.t[i] = t / 60;
+        samples.rss[i] = rssMb();
+        samples.fds[i] = fdCount();
+        if (censuses.length < censusAt.length && elapsed + 15 >= censusAt[censuses.length])
+            censuses.push({ t, cells: await heapCensus() });
+    }
+    const cpu = ((cpuTicks() - c0) / CLK_TCK / ((GLib.get_monotonic_time() - t0) / 1e6)) * 100;
+    const all = Array.from({ length: samples.n }, (_x, i) => ({ t: samples.t[i], rss: samples.rss[i], fds: samples.fds[i] }));
+    const steady = all.filter(s => s.t * 60 >= SOAK_S / 2);
+    const first = steady[0];
+    const last = steady[steady.length - 1];
+    const rssSlope = medianSlope(steady.map(s => ({ t: s.t, v: s.rss })));
+    report(`soak ${SOAK_S}s, extension disabled: shell CPU ${cpu.toFixed(2)}% (idle shell)`);
+    report('soak variant no-extension: extension off, 0 tracker samples during the soak');
+    report(`soak RSS ${all[0].rss.toFixed(1)} -> ${last.rss.toFixed(1)} MB, slope after the first half ${rssSlope.toFixed(3)} MB/min (median of pairs)`);
+    report(`soak fds ${first.fds} -> ${last.fds}`);
+    check(censuses.length === 3, `heap census: ${censuses.length} of 3 taken`);
+    const [c1, c2, c3] = censuses;
+    const g1 = growth(c1.cells, c2.cells, c2.t - c1.t);
+    const g2 = growth(c2.cells, c3.cells, c3.t - c2.t);
+    const kinds = Object.keys(g2).sort((a, b) => Math.max(g2[b], g1[b]) - Math.max(g2[a], g1[a]));
+    report(`soak heap: ${c1.cells.Object} -> ${c2.cells.Object} -> ${c3.cells.Object} objects; growth per 100 s (first half / second half): ` +
+        kinds.slice(0, 6).map(k => `${k} ${g1[k] >= 0 ? '+' : ''}${g1[k].toFixed(0)} / ${g2[k] >= 0 ? '+' : ''}${g2[k].toFixed(0)}`).join(', '));
+    check(last.fds <= first.fds + 3, `fd count grew from ${first.fds} to ${last.fds}`);
+    check(rssSlope <= RSS_SLOPE_LIMIT, `shell RSS keeps growing at ${rssSlope.toFixed(2)} MB/min after the first half (extension disabled)`);
 }
 
 async function run() {
