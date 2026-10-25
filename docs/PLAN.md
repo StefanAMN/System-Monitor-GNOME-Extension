@@ -1281,3 +1281,18 @@ Owner's request: hover any bar, not only hour-long ones, and zoom in and out on 
 - **Result: the shell alone does not grow.** Three of three bare runs are flat to the thousandth (heap 3,170 -> 3,174 objects); the soak grows in two of three, by up to 1.9 MB/min, with the JS heap flat (3,796 -> 3,808).
 - So the growth needs the extension's work, but not the tracker (the `no-tracking` runs grew as much): it is native memory spent by the menu being open and repainted every second (graphs, process rows, Pango layouts, St textures) or by the 1 s collectors (the process sampler's subprocesses). The bare loop exercises none of these, so it bounds the shell, not the cause.
 - Next, to split the remaining cause: the soak with the menu closed (collectors and the top bar only) against the menu open with polling paused.
+
+## Menu closed against polling paused (2026-10-25)
+
+Variants (5c5724c): `menu-closed` (1 s polls, all 8 metrics in the top bar, no menu) and `no-polling` (the menu open, its tabs cycling, `_poll` a no-op after one visit to every tab; the report counts the polls that ran). CI run 40176525149 (temporary branch `soak-split`, GNOME 50, 20 minutes, three runs each):
+
+| Variant | Polls | Shell CPU | RSS slope after the first half (MB/min), runs 1-3 |
+| --- | --- | --- | --- |
+| all (menu open, 1 s polls, tabs cycling) | ~1,685 | 5.5-7.0 % | **0.858**, 0.000, -0.169 |
+| menu-closed | ~1,217 | 0.83-0.90 % | 0.015, 0.009, 0.028 |
+| no-polling (menu open, paused) | 0 | 1.4-1.7 % | -0.040, **0.442**, -0.224 |
+
+- **The collectors and the top bar do not grow:** three of three flat at 1 s polls.
+- **The growth needs the menu on screen,** with or without polling (one paused run at 0.44, near the limit).
+- **It is not a per-poll leak:** the same code with the same number of polls gives -0.17 to +0.86 MB/min; a leak that a poll or a repaint causes would repeat in every run. The JS heap is flat in all nine.
+- The pattern fits allocator retention while the shell paints a large menu in software (llvmpipe renders on several threads; glibc gives each thread an arena). Being tested: the plain soak against `MALLOC_ARENA_MAX=2` and against `LP_NUM_THREADS=0` (`RP_SHELL_ENV`, 749f530), three runs each (temporary branch `soak-alloc`).
