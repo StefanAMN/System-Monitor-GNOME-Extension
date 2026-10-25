@@ -873,6 +873,64 @@ async function chartHover(r, window) {
 }
 const COMPONENTS_FOR_HOVER = ['battery', 'cpu', 'memory', 'disk', 'network', 'gpu', 'thermal'];
 
+/**
+ * Zoom on the Tracking charts: into the fixture's last two hours (five-minute
+ * bars, each one hoverable), out again, from the keyboard, and back to the
+ * period on Reset or a new period.
+ */
+async function chartZoom(r) {
+    const { barPeriod } = await import(`file://${root}/ui/prefs/tracking.js`);
+    const chart = r.chart;
+    const periodBefore = r.period.selected;
+    r.period.selected = 0;
+    const [lo, hi] = chart.bounds;
+    ok(!chart.view && chart.points.length >= 24 && chart.points[1].t - chart.points[0].t === 3600e3 && !chart.zoomLine.reset.visible,
+        `zoom: the day starts unzoomed in ${chart.points.length} hourly bars, no Reset`);
+    ok(/^Hourly bars · drag across/.test(chart.zoomLine.label.label), `zoom: the line reads '${chart.zoomLine.label.label}'`);
+    chart.zoomTo(hi - 2 * 3600e3, hi);
+    ok(chart.view && chart.points.length >= 24 && chart.points.every(p => p.step === 300e3), `zoom: two hours in ${chart.points.length} five-minute bars`);
+    const filled = chart.points.filter(p => p.battery > 0).length;
+    ok(filled >= 20, `zoom: ${filled} of the five-minute bars carry battery figures`);
+    const i = chart.points.findIndex(p => p.battery > 0) + 3;
+    chart.hover.set(i);
+    const t0 = GLib.DateTime.new_from_unix_local(Math.floor(chart.points[i].t / 1000));
+    const period = `${t0.format('%H:%M')}–${t0.add_minutes(5).format('%H:%M')}`;
+    ok(barPeriod(chart.points, i) === period && chart.hover.text().startsWith(period) && /battery \d/.test(chart.hover.text()),
+        `zoom: any five-minute bar reads its own period ('${chart.hover.text()}', wanted ${period})`);
+    chart.hover.set(-1);
+    ok(chart.zoomLine.reset.visible && /^Zoomed: .* · 5-minute bars$/.test(chart.zoomLine.label.label), `zoom: the line reads '${chart.zoomLine.label.label}', Reset shown`);
+    // Not past the period, and not narrower than half an hour.
+    chart.zoomTo(hi - 60e3, hi + 60e3);
+    // Each render takes a new "now": the period ends a few ms after `hi`.
+    ok(chart.view && chart.view.to <= chart.bounds[1] && chart.view.to - chart.view.from === 30 * 60e3,`zoom: clamped to [${(chart.view?.from - lo) / 60e3}, ${(chart.view?.to - lo) / 60e3}] min of the period`);
+    const keys = chart.zoomControllers.keys;
+    keys.emit('key-pressed', Gdk.KEY_minus, 0, 0);
+    ok(chart.view && Math.abs(chart.view.to - chart.view.from - 3600e3) < 1000, `zoom: '-' doubles the span (${(chart.view?.to - chart.view?.from) / 60e3} min)`);
+    keys.emit('key-pressed', Gdk.KEY_plus, 0, 0);
+    ok(chart.view && Math.abs(chart.view.to - chart.view.from - 1800e3) < 1000, `zoom: '+' halves it (${(chart.view?.to - chart.view?.from) / 60e3} min)`);
+    keys.emit('key-pressed', Gdk.KEY_0, 0, 0);
+    ok(!chart.view && chart.points[1].t - chart.points[0].t === 3600e3, 'zoom: 0 goes back to the whole period');
+    chart.zoomBy(0.5);
+    chart.zoomLine.reset.emit('clicked');
+    ok(!chart.view && !chart.zoomLine.reset.visible, 'zoom: Reset zoom goes back to the whole period');
+    for (let k = 0; k < 6; k++) chart.zoomBy(2);
+    ok(!chart.view, 'zoom: zooming out stops at the period');
+
+    // A component's chart zooms on its own; tiles keep the whole period.
+    r.component.selected = COMPONENTS_FOR_HOVER.indexOf('memory');
+    const tilesBefore = r.componentTiles?.map(t => t.value.label).join('|');
+    r.bars.zoomTo(r.bars.bounds[1] - 3600e3, r.bars.bounds[1]);
+    const shown = r.bars.chart.points;
+    ok(r.bars.view && (shown.length === 12 || shown.length === 13),`zoom memory: the last hour in ${shown.length} five-minute bars`);
+    ok(shown.some(p => p.highest > 0) && r.bars.zoomLine.reset.visible, 'zoom memory: the bars have figures, Reset shown');
+    ok(r.componentTiles?.map(t => t.value.label).join('|') === tilesBefore, 'zoom memory: the tiles still cover the whole period');
+    ok(!chart.view, 'zoom: the battery chart was left as it was');
+    r.period.selected = 2;
+    ok(!r.bars.view && !chart.view, 'zoom: a new period drops the zoom');
+    r.period.selected = periodBefore;
+    r.component.selected = 0;
+}
+
 
 /**
  * The Tracking tab per component on the fixture (two hours: 0.4 + 0.3 + 0.1
@@ -885,6 +943,7 @@ async function componentChecks(r, window) {
     ok(names.join() === 'Battery,Processor,Memory,Disk,Network,Graphics,Temperature', `components: offered ${names.join()}`);
     ok(r.component.selected === 0 && r.summary.visible && !r.componentGroup.visible, 'components: the battery view first');
     await chartHover(r, window);
+    await chartZoom(r);
     const expect = {
         cpu: { tile: 'Average load', apps: 'chat,editor,@system,@other' },
         memory: { tile: 'Average in use', apps: 'chat,editor' },
@@ -1208,6 +1267,8 @@ async function componentClicks(window, r) {
     const adj = findScrolled(window.get_visible_page())?.get_vadjustment();
     if (adj) adj.value = 0;
     r.component.selected = 0;
+    // The last 24 hours: hourly bars, the fixture's two hours in the last ones.
+    r.period.selected = 0;
     await sleep(600);
     // The battery chart under the real pointer: the bar under it is chosen.
     const area = r.chart.area;
@@ -1224,6 +1285,25 @@ async function componentClicks(window, r) {
     await act(`PREFS-CHECK HOVER chart-bar ${Math.round(hp.x + hsx)} ${Math.round(hp.y + hsy)}`);
     ok(r.chart.hover.index === want && r.chart.hover.text().includes('battery'),
         `hover (pointer): the bar under the pointer is chosen (${r.chart.hover.index}, wanted ${want}): '${r.chart.hover.text()}'`);
+    // Dragged across the last two hours: those, in five-minute bars.
+    const at = (x, y) => {
+        const [, q] = area.compute_point(window, new Graphene.Point().init(x, y));
+        return `${Math.round(q.x + hsx)} ${Math.round(q.y + hsy)}`;
+    };
+    const y = area.get_height() / 2;
+    await act(`PREFS-CHECK DRAG chart-zoom ${at(44 + slotW * (n - 2) + 1, y)} ${at(area.get_width() - 2, y)}`);
+    ok(await until(() => r.chart.view) && r.chart.points.every(p => p.step === 300e3) && r.chart.points.length >= 12,
+        `zoom (pointer): dragging across the last two hours zoomed into ${r.chart.points.length} bars of ${r.chart.points[0]?.step / 60e3} min`);
+    const span = () => (r.chart.view ? r.chart.view.to - r.chart.view.from : r.chart.bounds[1] - r.chart.bounds[0]);
+    // The plain wheel scrolls the page; with Ctrl it zooms about the pointer.
+    const zoomed = span();
+    await act(`PREFS-CHECK SCROLL chart-wheel ${at(area.get_width() * 0.6, y)} down ctrl`);
+    ok(await until(() => span() > zoomed * 1.5), `zoom (pointer): Ctrl+wheel down zoomed out (${zoomed / 60e3} -> ${span() / 60e3} min)`);
+    const wider = span();
+    const page = sAdj.value;
+    await act(`PREFS-CHECK SCROLL chart-wheel ${at(area.get_width() * 0.6, y)} down`);
+    ok(span() === wider && sAdj.value !== page, `zoom (pointer): the plain wheel scrolled the page (${page} -> ${sAdj.value}) and left the zoom`);
+    r.chart.reset();
     sAdj.value = 0;
     await sleep(300);
     const tab = r.component.buttons[2];

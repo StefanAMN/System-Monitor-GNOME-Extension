@@ -115,18 +115,28 @@ async function hoverInWindow(metaWindow, x, y) {
     await sleep(400);
 }
 
-// Wheel clicks over a point inside a client's window (as clickInWindow).
-async function scrollInWindow(metaWindow, x, y, direction) {
+// Wheel clicks over a point inside a client's window (as clickInWindow),
+// with Ctrl held down when `ctrl`.
+async function scrollInWindow(metaWindow, x, y, direction, ctrl = false) {
     pointer ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    keyboard ??= Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
     const rect = metaWindow.get_buffer_rect();
     const now = () => GLib.get_monotonic_time();
     pointer.notify_absolute_motion(now(), rect.x + x + 2, rect.y + y + 2);
     await sleep(150);
     pointer.notify_absolute_motion(now(), rect.x + x, rect.y + y);
     await sleep(200);
+    if (ctrl) {
+        keyboard.notify_keyval(now(), Clutter.KEY_Control_L, Clutter.KeyState.PRESSED);
+        await sleep(100);
+    }
     for (let i = 0; i < 3; i++) {
         pointer.notify_discrete_scroll(now(), direction === 'down' ? Clutter.ScrollDirection.DOWN : Clutter.ScrollDirection.UP, Clutter.ScrollSource.WHEEL);
         await sleep(80);
+    }
+    if (ctrl) {
+        await sleep(100);
+        keyboard.notify_keyval(now(), Clutter.KEY_Control_L, Clutter.KeyState.RELEASED);
     }
     await sleep(400);
 }
@@ -743,7 +753,7 @@ async function prefsWindow(rp) {
         const show = /^PREFS-CHECK SHOW ([\w-]+)/.exec(line);
         const click = /^PREFS-CHECK CLICK ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
         const drag = /^PREFS-CHECK DRAG ([\w-]+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)/.exec(line);
-        const wheel = /^PREFS-CHECK SCROLL ([\w-]+) (-?\d+) (-?\d+) (up|down)/.exec(line);
+        const wheel = /^PREFS-CHECK SCROLL ([\w-]+) (-?\d+) (-?\d+) (up|down)( ctrl)?/.exec(line);
         const hoverAt = /^PREFS-CHECK HOVER ([\w-]+) (-?\d+) (-?\d+)/.exec(line);
         if (hoverAt) {
             check(titled(), `prefs: no window to hover ${hoverAt[1]} in`);
@@ -753,7 +763,7 @@ async function prefsWindow(rp) {
         } else if (wheel) {
             check(titled(), `prefs: no window to scroll ${wheel[1]} in`);
             await bringForward(titled());
-            await scrollInWindow(titled(), Number(wheel[2]), Number(wheel[3]), wheel[4]);
+            await scrollInWindow(titled(), Number(wheel[2]), Number(wheel[3]), wheel[4], !!wheel[5]);
             acknowledge(line);
         } else if (drag) {
             check(titled(), `prefs: no window to drag ${drag[1]} in`);

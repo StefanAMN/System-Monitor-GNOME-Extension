@@ -14,28 +14,85 @@ function startOfHour(ms) {
     return new Date(new Date(ms).setMinutes(0, 0, 0)).getTime();
 }
 
+const DAY = 'day';
+const FINE_STEP_MS = 5 * 60 * 1000;
+// The narrowest span a chart zooms to.
+export const MIN_SPAN_MS = 30 * 60 * 1000;
+
+function startOfDay(ms) {
+    return new Date(new Date(ms).setHours(0, 0, 0, 0)).getTime();
+}
+
+function nextDay(ms) {
+    const d = new Date(ms);
+    return new Date(d.setDate(d.getDate() + 1)).getTime();
+}
+
 /**
- * Bars over a period: one per hour up to two days, one per day beyond.
+ * The bar length for a span: 5 minutes up to 4 h, 15 minutes up to 16 h
+ * (both only where five-minute totals cover the start), an hour up to two
+ * days, a day beyond.
+ * @param {number} from wall ms
+ * @param {number} to wall ms
+ * @param {number} fineStart the oldest five-minute total (Infinity: none)
+ * @returns {number|string} ms, or 'day'
+ */
+export function stepFor(from, to, fineStart = Infinity) {
+    const span = to - from;
+    if (from >= fineStart && span <= 4 * HOUR_MS) return FINE_STEP_MS;
+    if (from >= fineStart && span <= 16 * HOUR_MS) return 3 * FINE_STEP_MS;
+    return span <= 48 * HOUR_MS ? HOUR_MS : DAY;
+}
+
+/** The oldest five-minute total the ledger holds, or Infinity. */
+export function fineFrom(ledger) {
+    return ledger.fine?.length ? ledger.fine[0].t : Infinity;
+}
+
+/**
+ * Bars over [from, to): one per `step` (ms, or 'day'); steps under an hour
+ * read the five-minute totals, longer ones the hourly buckets.
  * @param {object} ledger BatteryLedger
  * @param {number} from wall ms
- * @param {number} now wall ms
+ * @param {number} to wall ms (usually now)
  * @param {boolean} batteryOnly
  * @param {function(object): object} start a bar's empty accumulator
  * @param {function(object, object)} add adds a bucket into a bar
- * @returns {Array<object>} the bars, each with t (its start) and its accumulator's fields
+ * @param {number|string} [step] by default an hour up to two days, a day beyond
+ * @returns {Array<object>} the bars, each with t (its start), step and its accumulator's fields
  */
-export function bars(ledger, from, now, batteryOnly, start, add) {
-    const perDay = now - from > 48 * HOUR_MS;
-    const first = perDay ? new Date(new Date(from).setHours(0, 0, 0, 0)).getTime() : startOfHour(from);
+export function bars(ledger, from, to, batteryOnly, start, add, step = to - from > 48 * HOUR_MS ? DAY : HOUR_MS) {
+    const perDay = step === DAY;
+    const first = perDay ? startOfDay(from) : Math.floor(from / step) * step;
+    // Hours start on the hour in local time (zones with a half-hour offset too).
+    const aligned = step === HOUR_MS ? startOfHour(from) : first;
     const points = [];
-    for (let t = first; t <= now; t = perDay ? new Date(new Date(t).setDate(new Date(t).getDate() + 1)).getTime() : t + HOUR_MS)
-        points.push({ t, ...start() });
-    for (const b of ledger.buckets) {
-        if (b.t < first || (batteryOnly && !b.b)) continue;
-        const i = perDay ? points.findLastIndex(p => p.t <= b.t) : Math.floor((b.t - first) / HOUR_MS);
+    for (let t = aligned; t < to || points.length === 0; t = perDay ? nextDay(t) : t + step)
+        points.push({ t, step, ...start() });
+    const source = !perDay && step < HOUR_MS ? (ledger.fine ?? []) : ledger.buckets;
+    for (const b of source) {
+        if (b.t < aligned || b.t >= to || (batteryOnly && !b.b)) continue;
+        const i = perDay ? points.findLastIndex(p => p.t <= b.t) : Math.floor((b.t - aligned) / step);
         if (i >= 0 && i < points.length) add(points[i], b);
     }
     return points;
+}
+
+/** [from, to] moved and resized to stay inside [lo, hi], at least MIN_SPAN_MS wide. */
+export function clampRange(from, to, lo, hi) {
+    const span = Math.min(hi - lo, Math.max(MIN_SPAN_MS, to - from));
+    let start = Math.max(lo, Math.min(from, hi - span));
+    if (start + span > hi) start = hi - span;
+    return [start, start + span];
+}
+
+/**
+ * Zoom [from, to] about the time `centre` by `factor` (< 1 in, > 1 out),
+ * kept inside [lo, hi]: the time under the pointer stays under it.
+ */
+export function zoomAbout(from, to, centre, factor, lo, hi) {
+    const at = Math.max(from, Math.min(to, centre));
+    return clampRange(at - (at - from) * factor, at + (to - at) * factor, lo, hi);
 }
 
 /** Apps (not the '@' pseudo apps unless asked) with a figure above 0, largest first. */
@@ -53,15 +110,19 @@ function ranked(apps, value, { withSystem = false } = {}) {
  * @param {number} opts.from wall ms
  * @param {number} opts.now wall ms
  * @param {number} opts.cores logical processors, for the processor's share of the machine
+ * @param {number} [opts.viewFrom] start of the part of the period the chart shows (zoomed)
+ * @param {number} [opts.viewTo] its end
  * @returns {{has: boolean, tiles: Object<string, ?number>, series: string[], points: Array<object>,
  *   apps: ?Array<{app: object, value: number, share: number}>}}
  *   has: the period holds figures for this component; tiles: named figures
  *   (null: not measured); points: bars with one value per series; apps: null
  *   where no per-app figure exists
  */
-export function componentView(component, ledger, { from, now, cores = 1 }) {
+export function componentView(component, ledger, { from, now, cores = 1, viewFrom = from, viewTo = now }) {
     const sum = ledger.summarize({ from });
-    const barsOf = (start, add) => bars(ledger, from, now, false, start, add);
+    // The chart may show a zoomed part of the period; the figures cover all of it.
+    const step = stepFor(viewFrom, viewTo, fineFrom(ledger));
+    const barsOf = (start, add) => bars(ledger, viewFrom, viewTo, false, start, add, step);
     const share = (part, whole) => (whole > 0 ? part / whole : null);
     switch (component) {
     case 'cpu': {
