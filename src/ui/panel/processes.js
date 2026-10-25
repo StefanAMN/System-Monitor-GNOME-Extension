@@ -12,6 +12,7 @@ import { formatBytes, formatSpeed } from '../../lib/common/format.js';
 import { PROCESS_ROWS } from './constants.js';
 import { spokenValue } from '../../lib/common/present.js';
 import { _, fill, ngettext, N_, translated } from '../../lib/common/i18n.js';
+import { VERTICAL } from './compat.js';
 
 // How a row's value is read out, by list: "firefox, 12% CPU".
 const SPOKEN_MODE = translated({ cpu: N_('{process}, {value} CPU, opens System Monitor'), memory: N_('{process}, {value} memory, opens System Monitor'), disk: N_('{process}, {value} disk, opens System Monitor') });
@@ -70,7 +71,7 @@ export class ProcessesMethods {
     /** The confirmation line under a process list. */
     _buildEndBar() {
         // The message on its own (wrapping) line, the buttons under it.
-        const box = new St.BoxLayout({ visible: false, vertical: true, style: 'spacing: 6px; padding-top: 8px;' });
+        const box = new St.BoxLayout({ visible: false, ...VERTICAL, style: 'spacing: 6px; padding-top: 8px;' });
         const label = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em;', x_expand: true });
         label.clutter_text.line_wrap = true;
         label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
@@ -182,7 +183,7 @@ export class ProcessesMethods {
                 iconBox.add_child(icon);
                 item.add_child(iconBox);
 
-                const detailsCol = new St.BoxLayout({ vertical: true, x_expand: true });
+                const detailsCol = new St.BoxLayout({ ...VERTICAL, x_expand: true });
                 const nameLbl = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em; font-weight: 500;', text: '' });
                 detailsCol.add_child(nameLbl);
 

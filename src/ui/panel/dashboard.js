@@ -9,6 +9,7 @@ import { powerReadout, thermalUnavailable, visibleInterfaces, gpuReadings, na } 
 import { _, fill, ngettext } from '../../lib/common/i18n.js';
 import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../../lib/common/format.js';
+import { VERTICAL } from './compat.js';
 
 export class DashboardMethods {
     _updateDashboardUI(data, frame = false) {
@@ -221,7 +222,7 @@ export class DashboardMethods {
                     this._dskMountsBox.destroy_all_children();
                     this._dskMountRows = [];
                     dsk.mounts.forEach(m => {
-                        const row = new St.BoxLayout({ vertical: true, style: 'spacing: 2px;' });
+                        const row = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 2px;' });
                         const headRow = new St.BoxLayout();
                         const mountLbl = new St.Label({ text: m.mount, style_class: 'rp-fg', style: 'font-size: 0.8em; font-weight: 500;', x_expand: true });
                         const statLbl = new St.Label({ text: '', style_class: 'rp-fg-dim', style: 'font-size: 0.8em;' });

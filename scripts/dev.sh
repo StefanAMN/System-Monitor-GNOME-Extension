@@ -610,7 +610,7 @@ cmd_test_unit() {
 # ------------------------------------------------------------------------------
 compat_fedora() {
     case "$1" in
-        45) echo 39 ;; 46) echo 40 ;; 47) echo 41 ;; 48) echo 42 ;; 49) echo 43 ;; 50) echo 44 ;;
+        45) echo 39 ;; 46) echo 40 ;; 47) echo 41 ;; 48) echo 42 ;; 49) echo 43 ;; 50) echo 44 ;; 51) echo 45 ;;
         *) return 1 ;;
     esac
 }
@@ -635,7 +635,7 @@ cmd_test_compat() {
     local VERSIONS=("$@")
     # 45 can be asked for by name; it is known not to work (the menu body
     # stays empty there) and is not listed in metadata.json.
-    [ "${#VERSIONS[@]}" -gt 0 ] || VERSIONS=(46 47 48 49)
+    [ "${#VERSIONS[@]}" -gt 0 ] || VERSIONS=(46 47 48 49 50 51)
     log_title "Compatibility tests: GNOME Shell ${VERSIONS[*]}"
     if ! command -v docker >/dev/null 2>&1; then
         log_error "docker not found: other GNOME Shell versions were NOT tested."
@@ -831,7 +831,7 @@ cmd_help() {
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Enable in an isolated headless shell for [sec] (default 5) and scan its log"
     echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
-    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless, test-ui, test-i18n and test-zip on other GNOME Shell versions in containers (default 46-49; needs docker)"
+    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless, test-ui, test-i18n and test-zip on other GNOME Shell versions in containers (default 46-51; needs docker)"
     echo -e "  ${GREEN}lint${RESET}               Run ESLint (needs 'npm ci' once)"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
     echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 1200) for leaks"

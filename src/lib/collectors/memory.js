@@ -1,5 +1,5 @@
 import GLib from 'gi://GLib';
-import { readFileAsync, getSysconf, noteReadError, logOnce } from '../common/utils.js';
+import { readProcFile, getSysconf, noteReadError, logOnce } from '../common/utils.js';
 
 export class MemorySampler {
     constructor() {
@@ -13,7 +13,7 @@ export class MemorySampler {
      */
     async sample(detailed = true) {
         try {
-            const content = await readFileAsync('/proc/meminfo');
+            const content = readProcFile('/proc/meminfo');
             const lines = content.split('\n');
 
             let memTotal = 0;
@@ -64,7 +64,7 @@ export class MemorySampler {
                 this._prevTime = 0;
             } else try {
                 const { pageSize } = await getSysconf();
-                const vmstat = await readFileAsync('/proc/vmstat');
+                const vmstat = readProcFile('/proc/vmstat');
                 let pswpin = 0;
                 let pswpout = 0;
                 for (const vline of vmstat.split('\n')) {

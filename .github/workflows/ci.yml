@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gnome: [46, 47, 48, 49, 50]
+        gnome: [46, 47, 48, 49, 50, 51]
     steps:
       - uses: actions/checkout@v7
 
@@ -67,7 +67,7 @@ jobs:
           path: ${{ runner.temp }}/compat
           retention-days: 14
 
-  # The memory soak on GNOME 50: the heap census by kind, RSS, fds and
+  # The memory soak on GNOME 51: the heap census by kind, RSS, fds and
   # actors over 20 minutes with the menu open (./scripts/dev.sh test-soak).
   # Too long for every push: master and manual runs only.
   soak:
@@ -87,7 +87,7 @@ jobs:
         env:
           RP_COMPAT_OUT: ${{ runner.temp }}/compat
           RP_COMPAT_TESTS: test-soak 1200
-        run: ./scripts/dev.sh test-compat 50
+        run: ./scripts/dev.sh test-compat 51
 
       - name: Keep the logs
         if: failure()

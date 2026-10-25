@@ -1026,6 +1026,21 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const missing = await new AppUsageSampler({ mount: `${mount}/nowhere`, session: `${mount}/nowhere/user` }).sample();
         eq([missing.units.length, missing.total], [0, null], 'app usage: no cgroup tree gives no units and no total');
 
+        // Stopped mid-reading (tracking switched off): the call resolves
+        // empty and no idle callback is left behind.
+        const stopped = new AppUsageSampler({ mount, session });
+        const pendingRead = stopped.sample({ withPids: true });
+        // A higher-priority callback runs before the reading's first batch.
+        await new Promise(r => GLib.idle_add(GLib.PRIORITY_HIGH, () => {
+            r();
+            return GLib.SOURCE_REMOVE;
+        }));
+        const idleBefore = stopped._idleId;
+        stopped.cancel();
+        const cut = await pendingRead;
+        eq([idleBefore > 0, stopped._idleId, cut.units.length, cut.total], [true, 0, 0, null], 'app usage: cancel() resolves a reading in progress with nothing and removes its idle callback');
+        eq((await stopped.sample()).units.length, reading.units.length, 'app usage: the next reading after a cancel is whole');
+
         Gio.File.new_for_path(`${session}/session.slice/locked.service/cpu.stat`)
             .set_attribute_uint32('unix::mode', 0o644, Gio.FileQueryInfoFlags.NONE, null);
         for (const path of made.reverse()) {
@@ -1769,6 +1784,10 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         GLib.file_set_contents(`${proc}/100/fdinfo/3`, client(7, 5e9));
         got = await gs.sample(units);
         eq(got.get('app-a.scope'), 6e9, 'gpu: later samples read the cached GPU fds');
+        const gpuPending = gs.sample(units);
+        const gpuIdle = gs._idleId;
+        gs.cancel();
+        eq([gpuIdle > 0, gs._idleId, (await gpuPending).size], [true, 0, 0], 'gpu: cancel() resolves a reading in progress with nothing and removes its idle callback');
         for (const path of made.reverse()) GLib.unlink(`${proc}/${path}`);
         for (const pid of [100, 101, 200, 300]) {
             GLib.rmdir(`${proc}/${pid}/fd`);

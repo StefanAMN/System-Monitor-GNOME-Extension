@@ -3,19 +3,23 @@
 // user's own processes are readable without privileges. Supported by i915,
 // xe and amdgpu among others; the NVIDIA driver does not publish it.
 //
-// Cost control: a process's fd table is listed once (one asynchronous
-// enumeration with link targets) and then again only every RESCAN_US; in
-// between only the fdinfo files of its GPU fds are read. A GPU client open
-// in several fds or processes (dup, fork) is counted once.
+// Cost control: a process's fd table is listed once and then again only
+// every RESCAN_US; in between only the fdinfo files of its GPU fds are read.
+// A GPU client open in several fds or processes (dup, fork) is counted once.
+// The files are read synchronously, a batch of processes per idle callback,
+// as appusage.js reads cgroups: /proc lives in memory, and an asynchronous
+// GIO read per file cost several times the CPU (tests/bench/tracker_cost.js).
 //
 // HAL layer: reads and sums counters; deltas are the ledger's job.
-import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import { readFileAsync, noteReadError } from '../common/utils.js';
+import { noteReadError } from '../common/utils.js';
 
 const RESCAN_US = 10 * 60 * 1e6;
 // Bounded cache: one entry per live process that was looked at.
 const MAX_PIDS = 4096;
+// Processes looked at per idle callback.
+const BATCH = 32;
+const decoder = new TextDecoder('utf-8', { fatal: false });
 
 /**
  * Busy time and identity of a GPU client from its fdinfo text.
@@ -32,29 +36,31 @@ export function parseDrmFdinfo(text) {
     return { key: `${driver}/${pdev}/${client[1]}`, ns };
 }
 
-function listLinks(dir) {
-    return new Promise(resolve => {
-        Gio.File.new_for_path(dir).enumerate_children_async('standard::name,standard::symlink-target',
-            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, GLib.PRIORITY_LOW, null, (obj, res) => {
-                const links = [];
-                try {
-                    const en = obj.enumerate_children_finish(res);
-                    try {
-                        // Entries without a target (an fd closed while listing) are skipped.
-                        for (let info = en.next_file(null); info; info = en.next_file(null)) {
-                            if (info.has_attribute('standard::symlink-target'))
-                                links.push([info.get_name(), info.get_symlink_target()]);
-                        }
-                    } finally {
-                        en.close(null);
-                    }
-                } catch (e) {
-                    // A process that exited meanwhile, or another user's: normal.
-                    noteReadError(e);
-                }
-                resolve(links);
-            });
-    });
+/** The fds of `dir` (a /proc/<pid>/fd) that are open on a GPU device. */
+function gpuLinks(dir) {
+    const fds = [];
+    let handle;
+    try {
+        handle = GLib.Dir.open(dir, 0);
+    } catch (e) {
+        // A process that exited meanwhile, or another user's: normal.
+        noteReadError(e);
+        return fds;
+    }
+    try {
+        for (let fd = handle.read_name(); fd !== null; fd = handle.read_name()) {
+            try {
+                if (GLib.file_read_link(`${dir}/${fd}`).startsWith('/dev/dri/')) fds.push(fd);
+            } catch {
+                // Closed while listing: skipped.
+            }
+        }
+    } finally {
+        handle.close();
+    }
+    // In fd order, whatever the directory's: a client open in several fds
+    // is then always read from the lowest one.
+    return fds.sort((a, b) => Number(a) - Number(b));
 }
 
 export class GpuUsageSampler {
@@ -63,17 +69,47 @@ export class GpuUsageSampler {
         this._proc = proc;
         // pid -> { fds: string[], scanned: µs }
         this._pids = new Map();
+        this._idleId = 0;
+        this._finish = null;
     }
 
-    async _gpuFds(pid, now) {
+    /** Stop a reading in progress (tracking stopped); its call resolves with nothing. */
+    cancel() {
+        if (this._idleId) GLib.source_remove(this._idleId);
+        this._idleId = 0;
+        this._finish?.(new Map());
+        this._finish = null;
+    }
+
+    _gpuFds(pid, now) {
         let entry = this._pids.get(pid);
         if (!entry || now - entry.scanned > RESCAN_US) {
-            const links = await listLinks(`${this._proc}/${pid}/fd`);
-            entry = { fds: links.filter(([, target]) => target?.startsWith('/dev/dri/')).map(([fd]) => fd), scanned: now };
+            entry = { fds: gpuLinks(`${this._proc}/${pid}/fd`), scanned: now };
             if (this._pids.size >= MAX_PIDS) this._pids.clear();
             this._pids.set(pid, entry);
         }
         return entry.fds;
+    }
+
+    /** A process's GPU busy time, each client counted once across the reading (`seen`). */
+    _readPid(pid, now, seen) {
+        let ns = 0;
+        for (const fd of this._gpuFds(pid, now)) {
+            let text;
+            try {
+                text = decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/fdinfo/${fd}`)[1]);
+            } catch (e) {
+                // Closed since the scan, or the process exited: rescan next time.
+                noteReadError(e);
+                this._pids.delete(pid);
+                continue;
+            }
+            const client = parseDrmFdinfo(text);
+            if (!client || seen.has(client.key)) continue;
+            seen.add(client.key);
+            ns += client.ns;
+        }
+        return ns;
     }
 
     /**
@@ -81,34 +117,32 @@ export class GpuUsageSampler {
      * @param {Map<string, number[]>} unitPids unit name -> pids (from cgroup.procs)
      * @returns {Promise<Map<string, number>>} unit -> cumulative ns of the GPU clients its processes hold
      */
-    async sample(unitPids) {
+    sample(unitPids) {
+        this.cancel();
         const now = GLib.get_monotonic_time();
         const seen = new Set();
         const live = new Set();
         const out = new Map();
-        for (const [unit, pids] of unitPids) {
-            let ns = 0;
-            for (const pid of pids) {
-                live.add(pid);
-                for (const fd of await this._gpuFds(pid, now)) {
-                    let text;
-                    try {
-                        text = await readFileAsync(`${this._proc}/${pid}/fdinfo/${fd}`);
-                    } catch (e) {
-                        // Closed since the scan, or the process exited: rescan next time.
-                        noteReadError(e);
-                        this._pids.delete(pid);
-                        continue;
-                    }
-                    const client = parseDrmFdinfo(text);
-                    if (!client || seen.has(client.key)) continue;
-                    seen.add(client.key);
-                    ns += client.ns;
+        const todo = [];
+        for (const [unit, pids] of unitPids) for (const pid of pids) todo.push([unit, pid]);
+        return new Promise(resolve => {
+            this._finish = resolve;
+            let i = 0;
+            const step = () => {
+                for (const end = Math.min(i + BATCH, todo.length); i < end; i++) {
+                    const [unit, pid] = todo[i];
+                    live.add(pid);
+                    const ns = this._readPid(pid, now, seen);
+                    if (ns > 0) out.set(unit, (out.get(unit) ?? 0) + ns);
                 }
-            }
-            if (ns > 0) out.set(unit, ns);
-        }
-        for (const pid of this._pids.keys()) if (!live.has(pid)) this._pids.delete(pid);
-        return out;
+                if (i < todo.length) return GLib.SOURCE_CONTINUE;
+                this._idleId = 0;
+                this._finish = null;
+                for (const pid of this._pids.keys()) if (!live.has(pid)) this._pids.delete(pid);
+                resolve(out);
+                return GLib.SOURCE_REMOVE;
+            };
+            this._idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, step);
+        });
     }
 }

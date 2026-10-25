@@ -5,13 +5,14 @@ import St from 'gi://St';
 
 import { ProgressBar } from '../widgets.js';
 import { _, fill } from '../../../lib/common/i18n.js';
+import { VERTICAL } from '../compat.js';
 
 export class CpuPage {
     _buildCpuDetails() {
-        const box = new St.BoxLayout({ vertical: true, style: 'spacing: 10px;' });
+        const box = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 10px;' });
 
         // CPU Usage Card
-        const usageCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const usageCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         const usageHead = new St.BoxLayout({ style: 'margin-bottom: 4px;' });
         usageHead.add_child(new St.Label({ text: _('CPU Usage'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
         this._cpuDetailsVal = new St.Label({ text: '--%', style_class: 'rp-c-cpu', style: 'font-size: 1.0em; font-weight: bold;' });
@@ -34,13 +35,13 @@ export class CpuPage {
         box.add_child(usageCard);
 
         // Per-Core Usage Card
-        const coreCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const coreCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         coreCard.add_child(new St.Label({ text: _('Per-Core Usage · GHz'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 8px;' }));
 
         // Two-column layout for cores
         const colsBox = new St.BoxLayout({ style: 'spacing: 16px;' });
-        this._cpuCoreCol1 = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing: 4px;' });
-        this._cpuCoreCol2 = new St.BoxLayout({ vertical: true, x_expand: true, style: 'spacing: 4px;' });
+        this._cpuCoreCol1 = new St.BoxLayout({ ...VERTICAL, x_expand: true, style: 'spacing: 4px;' });
+        this._cpuCoreCol2 = new St.BoxLayout({ ...VERTICAL, x_expand: true, style: 'spacing: 4px;' });
         colsBox.add_child(this._cpuCoreCol1);
         colsBox.add_child(this._cpuCoreCol2);
         coreCard.add_child(colsBox);
@@ -49,19 +50,19 @@ export class CpuPage {
         // Details Stats row (3 columns)
         const statsRow = new St.BoxLayout({ style: 'spacing: 8px;', x_expand: true });
 
-        const loadBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
+        const loadBox = new St.BoxLayout({ ...VERTICAL, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
         loadBox.add_child(new St.Icon({ icon_name: 'system-run-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
         loadBox.add_child(new St.Label({ text: _('Load Average'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsLoad = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         loadBox.add_child(this._cpuDetailsLoad);
 
-        const freqBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
+        const freqBox = new St.BoxLayout({ ...VERTICAL, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
         freqBox.add_child(new St.Icon({ icon_name: 'power-profile-performance-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
         freqBox.add_child(new St.Label({ text: _('Frequency'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsFreq = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
         freqBox.add_child(this._cpuDetailsFreq);
 
-        const uptimeBox = new St.BoxLayout({ vertical: true, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
+        const uptimeBox = new St.BoxLayout({ ...VERTICAL, x_expand: true, style_class: 'rp-surface', style: 'border-radius: 10px; padding: 10px;' });
         uptimeBox.add_child(new St.Icon({ icon_name: 'preferences-system-time-symbolic', style_class: 'rp-fg-dim', style: 'icon-size: 14px; margin-bottom: 4px;' }));
         uptimeBox.add_child(new St.Label({ text: _('Uptime'), style_class: 'rp-fg-dim', style: 'font-size: 0.75em;' }));
         this._cpuDetailsUptime = new St.Label({ text: '--', style_class: 'rp-fg', style: 'font-size: 0.95em; font-weight: bold;' });
@@ -72,13 +73,13 @@ export class CpuPage {
         statsRow.add_child(uptimeBox);
         box.add_child(statsRow);
 
-        const waitCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const waitCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         this._cpuWait = this._detailRow(_('Waiting for CPU'));
         waitCard.add_child(this._cpuWait.row);
         box.add_child(waitCard);
 
         // Top CPU Usage Card
-        const procCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', vertical: true });
+        const procCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
         const procHead = new St.BoxLayout({ style: 'margin-bottom: 8px;', y_align: Clutter.ActorAlign.CENTER });
         procHead.add_child(new St.Label({ text: _('Top CPU Usage'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600;', x_expand: true }));
 
@@ -95,7 +96,7 @@ export class CpuPage {
         const cpuSearch = this._buildProcFilter('cpu');
         procCard.add_child(cpuSearch.entry);
 
-        this._procList = new St.BoxLayout({ vertical: true, style: 'spacing: 6px;' });
+        this._procList = new St.BoxLayout({ ...VERTICAL, style: 'spacing: 6px;' });
         procCard.add_child(this._procList);
         procCard.add_child(cpuSearch.noMatch);
         this._procEnd = this._buildEndBar();

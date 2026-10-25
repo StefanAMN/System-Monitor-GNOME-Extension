@@ -6,10 +6,58 @@
 // lost between samples and no process list has to be walked. The files
 // belong to the user: no privileges are needed.
 //
+// The files are read synchronously in batches, one batch of units per idle
+// callback, as appio.js and the process list read /proc: cgroupfs lives in
+// memory, and a few hundred asynchronous GIO reads cost the shell about 15
+// times the CPU (30.8 against 2.0 ms per sample for 73 units, measured by
+// tests/bench/tracker_cost.js).
+//
 // This module only reads and names counters (HAL). Deltas, energy and
 // history are the ledger's job (lib/engine/batteryledger.js).
 import GLib from 'gi://GLib';
-import { readFileAsync, listDirAsync, noteReadError } from '../common/utils.js';
+import { readFileAsync, noteReadError } from '../common/utils.js';
+
+// Units read per idle callback: about 0.03 ms each.
+const BATCH = 24;
+const decoder = new TextDecoder('utf-8', { fatal: false });
+
+/** A cgroup file's text, or null when it is gone (the unit ended) or unreadable. */
+function readCgroupFile(path) {
+    try {
+        return decoder.decode(GLib.file_get_contents(path)[1]);
+    } catch (e) {
+        // ENOENT: the unit ended after it was listed, or a controller is not
+        // enabled for it; a normal event, reported once like any other.
+        noteReadError(e);
+        return null;
+    }
+}
+
+/** Unit directories under `root`, slices descended into: [dir, name] pairs. */
+function listUnits(root) {
+    const out = [];
+    const pending = [root];
+    while (pending.length > 0) {
+        const dir = pending.pop();
+        let handle;
+        try {
+            handle = GLib.Dir.open(dir, 0);
+        } catch (e) {
+            // A slice removed while being walked: normal.
+            noteReadError(e);
+            continue;
+        }
+        try {
+            for (let name = handle.read_name(); name !== null; name = handle.read_name()) {
+                if (name.endsWith('.slice')) pending.push(`${dir}/${name}`);
+                else out.push([dir, name]);
+            }
+        } finally {
+            handle.close();
+        }
+    }
+    return out;
+}
 
 // Launchers that prefix the application id in app-<launcher>-<id>-<n>.scope.
 // A launcher is one word; the id's own dashes are escaped as \x2d.
@@ -88,6 +136,16 @@ export class AppUsageSampler {
         // whose CPU time did not move started and ended no process, so its
         // process list and (for a few readings) its memory are kept.
         this._cache = new Map();
+        this._idleId = 0;
+        this._finish = null;
+    }
+
+    /** Stop a reading in progress (tracking stopped); its call resolves with no units. */
+    cancel() {
+        if (this._idleId) GLib.source_remove(this._idleId);
+        this._idleId = 0;
+        this._finish?.({ time: GLib.get_monotonic_time(), total: null, system: null, units: [] });
+        this._finish = null;
     }
 
     async _sessionRoot() {
@@ -100,34 +158,37 @@ export class AppUsageSampler {
         return this._session;
     }
 
-    async _readUsage(path) {
-        try {
-            return usageUsec(await readFileAsync(`${path}/cpu.stat`));
-        } catch (e) {
-            noteReadError(e);
-            return null;
-        }
+    _readUsage(path) {
+        const text = readCgroupFile(`${path}/cpu.stat`);
+        return text === null ? null : usageUsec(text);
     }
 
-    async _readMemory(path) {
-        try {
-            const bytes = Number((await readFileAsync(`${path}/memory.current`)).trim());
-            return Number.isFinite(bytes) ? bytes : null;
-        } catch (e) {
-            // ENOENT: the unit ended after it was listed, or the memory
-            // controller is not enabled for it; a normal event.
-            noteReadError(e);
-            return null;
-        }
+    _readMemory(path) {
+        const text = readCgroupFile(`${path}/memory.current`);
+        const bytes = text === null ? NaN : Number(text.trim());
+        return Number.isFinite(bytes) ? bytes : null;
     }
 
-    async _readPids(path) {
-        try {
-            return (await readFileAsync(`${path}/cgroup.procs`)).split('\n').filter(Boolean).map(Number);
-        } catch (e) {
-            noteReadError(e);
-            return [];
+    _readPids(path) {
+        return (readCgroupFile(`${path}/cgroup.procs`) ?? '').split('\n').filter(Boolean).map(Number);
+    }
+
+    /** One unit's reading, or null for a slice-less name or a counter that cannot be read. */
+    _readUnit(dir, name, withPids, withMemory) {
+        const what = describeUnit(name);
+        if (!what) return null;
+        const usec = this._readUsage(`${dir}/${name}`);
+        if (usec === null) return null;
+        const unit = { unit: name, usec, ...what };
+        const before = this._cache.get(name);
+        const idle = before?.usec === usec;
+        if (withPids) unit.pids = idle && before.pids ? before.pids : this._readPids(`${dir}/${name}`);
+        if (withMemory) {
+            const fresh = !idle || before.memory === undefined || before.age + 1 >= IDLE_MEMORY_EVERY;
+            unit.memory = fresh ? this._readMemory(`${dir}/${name}`) : before.memory;
+            unit.memoryAge = fresh ? 0 : before.age + 1;
         }
+        return unit;
     }
 
     /**
@@ -143,43 +204,32 @@ export class AppUsageSampler {
      *   error is reported once by noteReadError)
      */
     async sample({ withPids = false, withMemory = false } = {}) {
+        this.cancel();
         const time = GLib.get_monotonic_time();
         const root = await this._sessionRoot();
+        // Slices nest (app.slice/app-gnome\x2dsession\x2dmanager.slice/…);
+        // units are the leaves that count.
+        const todo = root ? listUnits(root) : [];
         const units = [];
-        if (root) {
-            // Slices nest (app.slice/app-gnome\x2dsession\x2dmanager.slice/…);
-            // units are the leaves that count.
-            const pending = [root];
-            while (pending.length > 0) {
-                const dir = pending.pop();
-                for (const name of await listDirAsync(dir)) {
-                    if (name.endsWith('.slice')) {
-                        pending.push(`${dir}/${name}`);
-                        continue;
-                    }
-                    const what = describeUnit(name);
-                    if (!what) continue;
-                    const usec = await this._readUsage(`${dir}/${name}`);
-                    if (usec === null) continue;
-                    const unit = { unit: name, usec, ...what };
-                    const before = this._cache.get(name);
-                    const idle = before?.usec === usec;
-                    if (withPids) unit.pids = idle && before.pids ? before.pids : await this._readPids(`${dir}/${name}`);
-                    if (withMemory) {
-                        const fresh = !idle || before.memory === undefined || before.age + 1 >= IDLE_MEMORY_EVERY;
-                        unit.memory = fresh ? await this._readMemory(`${dir}/${name}`) : before.memory;
-                        unit.memoryAge = fresh ? 0 : before.age + 1;
-                    }
-                    units.push(unit);
+        return new Promise(resolve => {
+            this._finish = resolve;
+            let i = 0;
+            const step = () => {
+                for (const end = Math.min(i + BATCH, todo.length); i < end; i++) {
+                    const unit = this._readUnit(...todo[i], withPids, withMemory);
+                    if (unit) units.push(unit);
                 }
-            }
-        }
-        this._cache = new Map(units.map(u => [u.unit, { usec: u.usec, pids: u.pids, memory: u.memory, age: u.memoryAge ?? 0 }]));
-        const [total, system] = await Promise.all([
-            this._readUsage(this._mount),
-            this._readUsage(`${this._mount}/system.slice`),
-        ]);
-        this.available = root !== null && total !== null;
-        return { time, total, system, units };
+                if (i < todo.length) return GLib.SOURCE_CONTINUE;
+                this._idleId = 0;
+                this._finish = null;
+                this._cache = new Map(units.map(u => [u.unit, { usec: u.usec, pids: u.pids, memory: u.memory, age: u.memoryAge ?? 0 }]));
+                const total = this._readUsage(this._mount);
+                const system = this._readUsage(`${this._mount}/system.slice`);
+                this.available = root !== null && total !== null;
+                resolve({ time, total, system, units });
+                return GLib.SOURCE_REMOVE;
+            };
+            this._idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, step);
+        });
     }
 }

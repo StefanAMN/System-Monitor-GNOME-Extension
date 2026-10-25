@@ -1333,3 +1333,36 @@ Owner: "reconstruct the UI for the tracking and diagnostics to include less text
 - Built as designed; one deviation: the "what is recorded" and "where findings come from" texts are tooltips on info icons (no popovers, so no new transient surface for themes to paint).
 - Proof: lint clean; `test-unit` passed; `test-i18n` passed (every string translated); `test-ui` passed with prefs-check 273 of 273 in the nested shell, the real pointer choosing "7 days", switching "On battery" off and on, opening a finding to its detail and pressing Copy report; prefs-check under the owner's Orchis-Pink theme 287 of 287 (`gjs -m tests/ui-driver/prefs-check.js "$PWD/src"`). The dropdown look check moved from Tracking's Period (now segments) to the agent's dropdown.
 - On the way: the pointer clicks after the chart's wheel check missed because the test set the scroll position while the wheel's scrolling still moved the page; the test now holds the page at the top until it settles. Focus stayed on the top row throughout, so users see no jump.
+
+## GNOME 51, and the tracking's cost (branch `gnome-51`, 2026-10-25)
+
+Owner: "expand the extension to GNOME 51 and review the efficiency of the extension and if there are any ways to optimize the tracking using any custom scripts/using other programming languages to speed up the data tracking".
+
+### GNOME 51
+- Porting notes (gjs.guide, "Port extensions to GNOME Shell 51") that touch this code: St's `vertical` property is removed (73 uses); `PopupMenu.close()` takes `{animate}`; `Clutter.get_default_backend()` is removed (the UI test driver); `disable()` must not be async (it is not); event signals (`button-press-event` …) are deprecated, still working.
+- `src/ui/panel/compat.js`: `VERTICAL` (`orientation` on 48+, `vertical` on 46/47) spread into every vertical St.BoxLayout; `closeMenuNow()` for `disable()`.
+- Test rig: Fedora 45 ships GNOME Shell 51.0 (gjs 1.90, libadwaita 1.10): `compat_fedora 51 -> 45`; its packages already make /tmp/.X11-unix, so the image uses `install -d`. CI matrix 46-51; the memory soak moves to 51.
+- Proof: the suite on 51 before the port (to see what breaks), then after, and on 46-50 (VERTICAL's two branches); CI.
+
+### Tracking cost, measured (tests/bench/tracker_cost.js, this machine: 73 session units, 213 processes; every reading forced whole)
+| Reading | Before | After |
+| --- | --- | --- |
+| apps: CPU, processes, memory (cgroups) | 30.8 ms | 2.9 ms |
+| apps: GPU time (fdinfo) | 8.3-10.0 ms | 1.7 ms |
+| apps: disk bytes (/proc/<pid>/io) | 1.4 ms | 1.6 ms |
+| machine, network, temperature, power, battery | 1.5 ms | 2.4 ms (noise) |
+| ledger ingest | 0.1 ms | 0.1 ms |
+| **per sample (every 30 s)** | **40.6 ms = 0.135 % of a core** | **8.6 ms = 0.029 %** |
+
+- **Where the time went:** one asynchronous GIO read per tiny cgroup/proc file (~220 per sample), ~0.14 ms each in thread-pool hand-offs and main-loop round trips; the reading itself is microseconds.
+- **Other languages, the same cgroup walk:** C 0.9 ms, Python 2.4 ms in process (+~10 ms to start an interpreter), GJS with synchronous reads 2.0 ms (GLib.Dir) / 2.6 ms (Gio enumerator). A helper spawned per sample costs 3.1 ms in GJS alone plus the child's own CPU, more than the in-process GJS walk; a resident helper would hold memory all session for a 1 ms saving. extensions.gnome.org also forbids binaries in extensions ("Extensions MUST NOT include binary executables or libraries") and wants scripts in GJS unless another language is required. So: no helper; synchronous GJS reads.
+- **Change:** appusage.js and gpuusage.js read synchronously, a batch per idle callback (24 units / 32 processes), as appio.js and the process list already do for /proc (owner's earlier decision: keep the batched /proc reads); `cancel()` on both, called by the tracker's `stop()`, so no idle source outlives `disable()`. GPU fds are read in fd order (a client open in several fds always read from the lowest).
+- **Proof:** the benchmark before/after (above); unit tests (cancel resolves empty and removes its idle source; GPU dedup); `test-overhead` in the shell (tracking ms per sample, menu-closed budget); test-ui / soak unchanged.
+
+### The panel's collectors (every poll, 2 s by default)
+Measured the same way (all 8 metrics, the compact menu-closed reads, 100 polls): 2.71 ms per poll = 0.135 % of a core, most of the +0.23 % the shell spends with the menu closed. The /proc reads on each poll (/proc/stat, loadavg, uptime, meminfo, vmstat, net/dev, diskstats, mounts, pressure) now go through `readProcFile()` (utils.js), a synchronous read for procfs only: cpu 0.65 -> 0.22 ms, memory 0.23 -> 0.06, disk 0.33 -> 0.12, network 0.24 -> 0.13. Left asynchronous on purpose: every sysfs read (battery attributes can wait on the embedded controller, hwmon sensors on a bus, GPU attributes on the device), /proc/cpuinfo (on x86 its frequency lines can query every CPU), and one-off reads at start.
+
+### State (2026-10-25): done
+- GNOME 51: before the port the extension did not enable on 51.0 ("No property vertical on StBoxLayout"; test-headless, test-ui, test-i18n, test-zip failed); after it, all five suites pass on 51.0, and on 46.10, 47.10, 48.8, 49.10 and 50.6 (`test-compat`). `test-ui` passes on this machine.
+- In the shell, master against this branch, alternately, 90 s windows (`RP_OVERHEAD_WINDOW=90 test-overhead 0`): tracking 32.3 / 36.5 ms CPU per sample on master, 6.3 / 5.8 ms on the branch (about 5.5 times less; +0.11 % -> +0.02 % of a core). Menu closed: +0.57 / +0.74 % on master, +0.56 / +0.44 % on the branch; this figure moves with the host's background load between runs (+0.20 to +0.74 % on the same code today), so the panel collectors' saving (about 0.6 ms per poll in isolation, 0.03 % of a core) is below what the shell measurement resolves and is not claimed from it.
+- Unit tests 563 passed (cancel() of both samplers; GPU fds in fd order).
