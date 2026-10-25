@@ -256,6 +256,7 @@ async function main() {
         await settingsClicks(shown.window, shown, shownSettings);
         shown.window.hide();
         await agentClicks(battery.window, battery.settings, battery.diagnostics, battery.fake);
+        await findingClicks(battery.window, battery.diagnostics);
         await componentClicks(battery.window, battery.tracking.rows);
         shown.window.destroy();
     }
@@ -390,9 +391,9 @@ const show = rgb => `rgb(${rgb.slice(0, 3).join(', ')})`;
  * An open dropdown (Adw.ComboRow) in `window`: its current value on the card,
  * its options on the popover's colour, text readable.
  */
-async function dropdownLook(window, combo, variant, p) {
+async function dropdownLook(window, combo, variant, p, pageName) {
     window.present();
-    window.set_visible_page_name('tracking');
+    window.set_visible_page_name(pageName);
     await sleep(400);
     const lum = c => (c[0] + c[1] + c[2]) / 3;
     // The last opaque pixel a widget draws: its text's ink.
@@ -573,9 +574,9 @@ async function renderedLook(shown, battery) {
 
         // The Settings page's own parts, as rendered.
         await settingsPartsLook(window, shown, variant, p);
-        // An open dropdown: the Settings page has none left, so Tracking's
-        // Period (the same widget as every dropdown in the window).
-        await dropdownLook(battery.window, battery.tracking.rows.period, variant, p);
+        // An open dropdown: the Settings and Tracking pages have none left,
+        // so the agent's (the same widget as every dropdown in the window).
+        await dropdownLook(battery.window, battery.diagnostics.agent.agentRow, variant, p, 'diagnostics');
         window.present();
         await sleep(300);
     }
@@ -688,8 +689,8 @@ async function batteryPages(styleWindow) {
     // 0.1 s per sample is not in any named unit: kernel and other users.
     ok(r.appRows.map(row => row.appId).join() === 'chat,editor,@system,@other',
         `tracking: apps ranked ${r.appRows.map(row => row.appId).join()}, expected chat,editor,@system,@other`);
-    ok(r.appRows[0].share > r.appRows[1].share && r.appRows[0].subtitle.includes('100 % in the background') &&
-        r.appRows[1].subtitle.includes('0 % in the background'), `tracking: shares and background split ('${r.appRows[0].subtitle}' / '${r.appRows[1].subtitle}')`);
+    ok(r.appRows[0].share > r.appRows[1].share && r.appRows[0].subtitle.includes('100 % background') &&
+        r.appRows[1].subtitle.includes('0 % background'), `tracking: shares and background split ('${r.appRows[0].subtitle}' / '${r.appRows[1].subtitle}')`);
     ok(r.drain.value.label === '9.5 W' && r.runtime.value.label === '4h 12m' && r.used.detail.label.includes('% of a full charge'),
         `tracking: summary '${r.used.value.label}' (${r.used.detail.label}), '${r.drain.value.label}', '${r.runtime.value.label}'`);
     // Two hours on battery, one bar per hour: the chart has them, battery above processor.
@@ -699,7 +700,7 @@ async function batteryPages(styleWindow) {
         `tracking: chart bars ${filled.map(p => `${p.battery.toFixed(2)}/${p.processor.toFixed(2)}`).join(' ')}`);
     ok(Math.abs(filled.reduce((t, p) => t + p.battery, 0) - parseFloat(r.used.value.label)) < 0.1, 'tracking: the bars add up to the battery used');
     ok(r.rest.visible && r.idle.value.label !== 'not measured', 'tracking: the unmeasured rest and the idle share are shown');
-    ok(r.graphics.visible && r.appRows[1].subtitle.includes('of graphics time'), `tracking: graphics share and time shown ('${r.appRows[1].subtitle}')`);
+    ok(r.graphics.visible && / GPU/.test(r.appRows[1].subtitle), `tracking: graphics share and time shown ('${r.appRows[1].subtitle}')`);
 
     r.batteryOnly.active = false;
     ok(r.time.title === 'Time recorded' && !r.drain.visible && !r.chart.box.visible, 'tracking: the AC-and-battery view drops the battery figures');
@@ -739,7 +740,9 @@ async function batteryPages(styleWindow) {
     ok(!diagnostics.nothing.visible && !diagnostics.groups.data.visible && diagnostics.groups.memory.visible,
         'diagnostics: areas without findings are hidden, and so is "nothing found"');
     const chat = found().find(row => row.findingId === 'background:chat');
-    ok(/Saves about [\d.]+ W, about \d+ min more per full charge/.test(chat.subtitle), `diagnostics: estimate shown ('${chat.subtitle.split('\n').pop()}')`);
+    ok(/^≈[\d.]+ W · \+\d+ min per charge$/.test(chat.subtitle), `diagnostics: the saving is the subtitle ('${chat.subtitle}')`);
+    ok(chat instanceof Adw.ExpanderRow && !chat.expanded && /without focus/.test(chat.detailLabel.label),
+        `diagnostics: the detail and evidence open beneath ('${chat.detailLabel.label.split('\n').pop()}')`);
     found().find(row => row.findingId === 'charge-limit').actionButton.emit('clicked');
     await sleep(300);
     ok(launched.join() === 'gnome-control-center power', `diagnostics: the charge-limit action opens Power settings (${launched.join()})`);
@@ -763,7 +766,7 @@ async function batteryPages(styleWindow) {
     ok(/\nBattery\n- \[\w+\] The battery is worn: /.test(copied ?? '') && /\nMemory\n- \[warning\] The machine swaps: /.test(copied ?? '') &&
         /\n- \[\w+\] chat works in the background: /.test(copied ?? '') && /\nNetwork\n/.test(copied ?? ''),
         'copy report: findings grouped by area');
-    ok(diagnostics.copy.label === 'Copied', `copy report: the button says '${diagnostics.copy.label}'`);
+    ok(diagnostics.copy.icon_name === 'object-select-symbolic' && diagnostics.copy.tooltip_text === 'Copied', `copy report: the button shows ${diagnostics.copy.icon_name} '${diagnostics.copy.tooltip_text}'`);
 
     // The file changes (the extension saved): both pages follow.
     ok(r.summary.visible, 'tracking: the summary is shown when there are figures');
@@ -886,7 +889,7 @@ async function chartZoom(r) {
     const [lo, hi] = chart.bounds;
     ok(!chart.view && chart.points.length >= 24 && chart.points[1].t - chart.points[0].t === 3600e3 && !chart.zoomLine.reset.visible,
         `zoom: the day starts unzoomed in ${chart.points.length} hourly bars, no Reset`);
-    ok(/^Hourly bars · drag across/.test(chart.zoomLine.label.label), `zoom: the line reads '${chart.zoomLine.label.label}'`);
+    ok(chart.zoomLine.label.label === 'Hourly bars' && /drag across/i.test(chart.zoomLine.label.tooltip_text), `zoom: the line reads '${chart.zoomLine.label.label}', how to zoom on hover`);
     chart.zoomTo(hi - 2 * 3600e3, hi);
     ok(chart.view && chart.points.length >= 24 && chart.points.every(p => p.step === 300e3), `zoom: two hours in ${chart.points.length} five-minute bars`);
     const filled = chart.points.filter(p => p.battery > 0).length;
@@ -898,7 +901,7 @@ async function chartZoom(r) {
     ok(barPeriod(chart.points, i) === period && chart.hover.text().startsWith(period) && /battery \d/.test(chart.hover.text()),
         `zoom: any five-minute bar reads its own period ('${chart.hover.text()}', wanted ${period})`);
     chart.hover.set(-1);
-    ok(chart.zoomLine.reset.visible && /^Zoomed: .* · 5-minute bars$/.test(chart.zoomLine.label.label), `zoom: the line reads '${chart.zoomLine.label.label}', Reset shown`);
+    ok(chart.zoomLine.reset.visible && /^\d.*–.* · 5-minute bars$/.test(chart.zoomLine.label.label), `zoom: the line reads '${chart.zoomLine.label.label}', Reset shown`);
     // Not past the period, and not narrower than half an hour.
     chart.zoomTo(hi - 60e3, hi + 60e3);
     // Each render takes a new "now": the period ends a few ms after `hi`.
@@ -1304,8 +1307,13 @@ async function componentClicks(window, r) {
     await act(`PREFS-CHECK SCROLL chart-wheel ${at(area.get_width() * 0.6, y)} down`);
     ok(span() === wider && sAdj.value !== page, `zoom (pointer): the plain wheel scrolled the page (${page} -> ${sAdj.value}) and left the zoom`);
     r.chart.reset();
-    sAdj.value = 0;
-    await sleep(300);
+    // Back to the top, held until the wheel's scrolling has settled: set
+    // while it still moves, the value does not stick.
+    for (let t = 0, still = 0; t < 3000 && still < 3; t += 100) {
+        still = sAdj.value === 0 ? still + 1 : 0;
+        sAdj.value = 0;
+        await sleep(100);
+    }
     const tab = r.component.buttons[2];
     const [, p] = tab.compute_point(window, new Graphene.Point().init(tab.get_width() / 2, tab.get_height() / 2));
     const [sx, sy] = window.get_surface_transform();
@@ -1313,6 +1321,45 @@ async function componentClicks(window, r) {
     ok(await until(() => r.component.selected === 2), `components (pointer): clicking the Memory tab shows it (selected ${r.component.selected})`);
     ok(r.componentGroup.visible && r.componentGroup.title === 'Memory' && tab.has_css_class('rp-tint-memory'), 'components (pointer): the Memory view is on the page, its tab tinted');
     r.component.selected = 0;
+    await sleep(300);
+    // The period's segments and the battery filter, clicked.
+    const clickOn = async (widget, name) => {
+        const [, q] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() / 2, widget.get_height() / 2));
+        await act(`PREFS-CHECK CLICK ${name} ${Math.round(q.x + sx)} ${Math.round(q.y + sy)}`);
+    };
+    await clickOn(r.period.buttons[2], 'period-week');
+    ok(await until(() => r.period.selected === 2) && r.period.buttons[2].label === '7 days', `period (pointer): clicking '7 days' chose it (selected ${r.period.selected})`);
+    await clickOn(r.batteryOnly, 'battery-filter');
+    ok(await until(() => !r.batteryOnly.active) && r.time.title === 'Time recorded', `period (pointer): clicking On battery let the charger time in ('${r.time.title}')`);
+    await clickOn(r.batteryOnly, 'battery-filter');
+    ok(await until(() => r.batteryOnly.active) && r.time.title === 'Time on battery', 'period (pointer): clicking it again leaves the charger time out');
+    await clickOn(r.period.buttons[0], 'period-day');
+    ok(await until(() => r.period.selected === 0), 'period (pointer): back to 24 h');
+}
+
+/**
+ * Driven by the shell: on Diagnostics, a finding opened to its detail and
+ * Copy report, both clicked with the real pointer.
+ */
+async function findingClicks(window, diagnostics) {
+    window.present();
+    window.set_visible_page_name('diagnostics');
+    const adj = findScrolled(window.get_visible_page())?.get_vadjustment();
+    if (adj) adj.value = 0;
+    await sleep(600);
+    const [sx, sy] = window.get_surface_transform();
+    const at = (widget, fx, fy) => {
+        const [, q] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() * fx, widget.get_height() * fy));
+        return `${Math.round(q.x + sx)} ${Math.round(q.y + sy)}`;
+    };
+    const first = diagnostics.lists.memory.get_first_child();
+    ok(first instanceof Adw.ExpanderRow && !first.expanded, 'findings (pointer): the first finding starts closed');
+    // Its header: the title's middle, left of any button.
+    await act(`PREFS-CHECK CLICK finding ${at(first, 0.4, 0.5 * 56 / Math.max(56, first.get_height()))}`);
+    ok(await until(() => first.expanded) && first.detailLabel.get_mapped(), `findings (pointer): clicking it opened its detail (expanded ${first.expanded})`);
+    await act(`PREFS-CHECK CLICK copy-report ${at(diagnostics.copy, 0.5, 0.5)}`);
+    ok(await until(() => diagnostics.copy.icon_name === 'object-select-symbolic'), `findings (pointer): Copy report shows ${diagnostics.copy.icon_name}`);
+    first.expanded = false;
 }
 
 /**

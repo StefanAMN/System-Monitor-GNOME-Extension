@@ -21,11 +21,13 @@ import { METRIC_COLORS } from './style.js';
 const HOUR_MS = 3600 * 1000;
 const APPS_SHOWN = 15;
 
+// `short` labels the period's segment; `label` is its tooltip.
 export const PERIODS = [
-    { id: 'day', label: () => _('Last 24 hours'), from: now => now - 24 * HOUR_MS },
-    { id: 'today', label: () => _('Today'), from: now => new Date(new Date(now).setHours(0, 0, 0, 0)).getTime() },
-    { id: 'week', label: () => _('Last 7 days'), from: now => now - 7 * 24 * HOUR_MS },
-    { id: 'all', label: () => fill(ngettext('Last {n} day', 'Last {n} days', DAYS_KEPT), { n: DAYS_KEPT }), from: now => now - DAYS_KEPT * 24 * HOUR_MS },
+    { id: 'day', label: () => _('Last 24 hours'), short: () => _('24 h'), from: now => now - 24 * HOUR_MS },
+    { id: 'today', label: () => _('Today'), short: () => _('Today'), from: now => new Date(new Date(now).setHours(0, 0, 0, 0)).getTime() },
+    { id: 'week', label: () => _('Last 7 days'), short: () => _('7 days'), from: now => now - 7 * 24 * HOUR_MS },
+    { id: 'all', label: () => fill(ngettext('Last {n} day', 'Last {n} days', DAYS_KEPT), { n: DAYS_KEPT }),
+        short: () => fill(ngettext('{n} day', '{n} days', DAYS_KEPT), { n: DAYS_KEPT }), from: now => now - DAYS_KEPT * 24 * HOUR_MS },
 ];
 
 /** "1.24 Wh" / "320 mWh". */
@@ -113,12 +115,14 @@ export class HistorySource {
     }
 }
 
-/** A stat tile like the panel's cards: name, value, one line of detail. */
-function tile(title, tint = null) {
+/** A stat tile like the panel's cards: name, value, a few words of detail; `about` explains it on hover. */
+function tile(title, tint = null, about = null) {
     const box = new Gtk.Box({
         orientation: Gtk.Orientation.VERTICAL, spacing: 2, hexpand: true,
         css_classes: ['rp-tile', ...(tint ? [`rp-tint-${tint}`] : [])],
+        ...(about ? { tooltip_text: about } : {}),
     });
+    if (about) box.update_property([Gtk.AccessibleProperty.DESCRIPTION], [about]);
     const label = new Gtk.Label({ label: title, xalign: 0, wrap: true, css_classes: ['rp-tile-label'] });
     box.value = new Gtk.Label({ xalign: 0, wrap: true, css_classes: ['rp-tile-value'] });
     box.detail = new Gtk.Label({ xalign: 0, wrap: true, css_classes: ['rp-tile-detail'] });
@@ -305,13 +309,17 @@ function paintSelection(area, cr, height, chart) {
 }
 
 /**
- * The header's zoom line: the range shown and the bar size, with a Reset
- * button while zoomed.
+ * The header's zoom line: the bar size, and while zoomed the range shown and
+ * a Reset button. How to zoom is its tooltip.
  */
 function zoomHeader() {
     const box = new Gtk.Box({ spacing: 8, css_classes: ['rp-zoom-line'] });
-    const label = new Gtk.Label({ xalign: 0, hexpand: true, wrap: true, css_classes: ['rp-tile-detail'] });
-    const reset = new Gtk.Button({ label: _('Reset zoom'), css_classes: ['flat', 'rp-zoom-reset'], valign: Gtk.Align.CENTER });
+    const label = new Gtk.Label({
+        xalign: 0, hexpand: true, wrap: true, css_classes: ['rp-tile-detail'],
+        tooltip_text: _('Drag across the chart to zoom in; Ctrl+scroll zooms in and out'),
+    });
+    const reset = new Gtk.Button({ icon_name: 'zoom-original-symbolic', tooltip_text: _('Reset zoom'), css_classes: ['flat', 'rp-zoom-reset'], valign: Gtk.Align.CENTER });
+    reset.update_property([Gtk.AccessibleProperty.LABEL], [_('Reset zoom')]);
     box.append(label);
     box.append(reset);
     box.update = (chart, points) => {
@@ -322,9 +330,7 @@ function zoomHeader() {
         }
         const name = stepName(points);
         const span = fill(_('{from}–{to}'), { from: axisLabel(points, points[0].t), to: axisLabel(points, points[points.length - 1].t + stepMs(points)) });
-        label.label = chart.view
-            ? fill(_('Zoomed: {span} · {bars}'), { span, bars: name })
-            : fill(_('{bars} · drag across the chart, or Ctrl+scroll, to zoom'), { bars: `${name[0].toUpperCase()}${name.slice(1)}` });
+        label.label = chart.view ? fill(_('{span} · {bars}'), { span, bars: name }) : `${name[0].toUpperCase()}${name.slice(1)}`;
         reset.visible = !!chart.view;
     };
     box.label = label;
@@ -531,16 +537,15 @@ export function componentSpecs(unit = 'C') {
         battery: { title: _('Battery') },
         cpu: {
             title: _('Processor'),
-            description: _('The processor\'s load is its share of all cores over the time recorded.'),
             tiles: [
                 [_('Average load'), t => [pct(t.load), _('of all cores')]],
-                [_('Waiting for the processor'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time, some program waited')]],
+                [_('Waiting for the processor'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time')]],
                 [_('Above the temperature alert'), t => [hotFor(t.hot), '']],
                 [_('Time recorded'), t => [formatDuration(t.time), '']],
             ],
             chart: _('Processor load'), series: [[_('load'), 'load']], axis: pct,
             app: a => [formatCpu(a.app.cpu), a.app.id.startsWith('@') || a.app.cpu <= 0 ? ''
-                : fill(_('{percent} % in the background'), { percent: Math.round((1 - a.app.fg / a.app.cpu) * 100) })],
+                : fill(_('{percent} % background'), { percent: Math.round((1 - a.app.fg / a.app.cpu) * 100) })],
             appsTitle: _('Apps by processor time'),
         },
         memory: {
@@ -549,25 +554,25 @@ export function componentSpecs(unit = 'C') {
                 [_('Average in use'), t => [mib(t.average), t.total ? fill(_('of {total}'), { total: mib(t.total) }) : '']],
                 [_('Highest in use'), t => [mib(t.highest), t.total && t.highest !== null ? fill(_('{percent} of the total'), { percent: pct(t.highest / t.total) }) : '']],
                 [_('Swap in use, at most'), t => [mib(t.swap), t.swapTotal ? fill(_('of {total}'), { total: mib(t.swapTotal) }) : _('no swap')]],
-                [_('Waiting for memory'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time, some program waited')]],
+                [_('Waiting for memory'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time')]],
             ],
             chart: _('Memory in use'), series: [[_('highest'), 'highest'], [_('average'), 'average']], nested: true, axis: mib,
             app: a => [mib(a.value), fill(_('at most {size}'), { size: mib(a.app.memMaxMiB) })],
             appsTitle: _('Apps by memory'),
-            appsDescription: _('Average over the period, the hours an app was not running included'),
+            appsDescription: _('Average over the period'),
         },
         disk: {
             title: _('Disk'),
             tiles: [
-                [_('Read'), t => [bytes(t.read), _('by the disks')]],
-                [_('Written'), t => [bytes(t.written), _('by the disks')]],
-                [_('Waiting for the disk'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time, some program waited')]],
-                [_('Seen per app'), t => [bytes(t.apps), _('read and written, an estimate')]],
+                [_('Read'), t => [bytes(t.read), '']],
+                [_('Written'), t => [bytes(t.written), '']],
+                [_('Waiting for the disk'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time')]],
+                [_('Seen per app'), t => [bytes(t.apps), _('estimate')]],
             ],
             chart: _('Disk traffic'), series: [[_('read'), 'read'], [_('written'), 'written']], axis: bytes,
             app: a => [bytes(a.value), fill(_('{read} read · {written} written'), { read: bytes(a.app.diskRead), written: bytes(a.app.diskWritten) })],
             appsTitle: _('Apps by disk traffic'),
-            appsDescription: _('An estimate: what a process read or wrote is missed if it started and ended between two readings, 30 seconds apart'),
+            appsDescription: _('Estimate'),
         },
         network: {
             title: _('Network'),
@@ -578,17 +583,17 @@ export function componentSpecs(unit = 'C') {
             ],
             chart: _('Network traffic'), series: [[_('received'), 'received'], [_('sent'), 'sent']], axis: bytes,
             appsTitle: _('Apps'),
-            noApps: _('Traffic per app cannot be read without administrator rights; these are the whole computer\'s figures.'),
+            noApps: _('Needs administrator rights'),
         },
         gpu: {
             title: _('Graphics'),
             tiles: [
-                [_('Graphics busy'), t => [t.busy === null ? dash : formatDuration(t.busy), _('time the GPU worked for apps')]],
+                [_('Graphics busy'), t => [t.busy === null ? dash : formatDuration(t.busy), '']],
                 [_('Share of the time'), t => [pct(t.share), '']],
-                [_('Graphics energy'), t => [t.energy === null ? _('not measured') : formatWh(t.energy), _('an estimate')]],
+                [_('Graphics energy'), t => [t.energy === null ? _('not measured') : formatWh(t.energy), _('estimate')]],
             ],
             chart: _('Graphics busy'), series: [[_('busy'), 'busy']], axis: x => formatDuration(x),
-            app: a => [formatCpu(a.app.gpu / 1000), fill(_('{percent} % of the graphics time'), { percent: Math.round(a.share * 100) })],
+            app: a => [formatCpu(a.app.gpu / 1000), fill(_('{percent} % of graphics'), { percent: Math.round(a.share * 100) })],
             appsTitle: _('Apps by graphics time'),
         },
         thermal: {
@@ -600,7 +605,7 @@ export function componentSpecs(unit = 'C') {
             ],
             chart: _('Processor temperature'), series: [[_('highest'), 'highest'], [_('average'), 'average']], nested: true, axis: temp,
             appsTitle: _('Apps'),
-            noApps: _('Temperature belongs to the processor, not to apps: the Processor view shows which apps kept it busy.'),
+            noApps: _('See Processor for the apps that kept it busy'),
         },
     };
 }
@@ -627,9 +632,9 @@ function rankedRow(entry, [value, detail], tint) {
 function appRow(app, total, hasEnergy) {
     const info = appInfo(app.id);
     const background = app.cpu > 0 ? 1 - app.fg / app.cpu : 0;
-    const parts = [fill(_('{time} of processor time'), { time: formatCpu(app.cpu) })];
-    if (app.gpu > 0) parts.push(fill(_('{time} of graphics time'), { time: formatCpu(app.gpu / 1000) }));
-    if (!app.id.startsWith('@') && app.cpu > 0) parts.push(fill(_('{percent} % in the background'), { percent: Math.round(background * 100) }));
+    const parts = [fill(_('{time} CPU'), { time: formatCpu(app.cpu) })];
+    if (app.gpu > 0) parts.push(fill(_('{time} GPU'), { time: formatCpu(app.gpu / 1000) }));
+    if (!app.id.startsWith('@') && app.cpu > 0) parts.push(fill(_('{percent} % background'), { percent: Math.round(background * 100) }));
     const row = new Adw.ActionRow({ title: info.name, subtitle: parts.join(' · ') });
     row.appId = app.id;
     const icon = info.gicon ? new Gtk.Image({ gicon: info.gicon, pixel_size: 32 }) : new Gtk.Image({ icon_name: info.iconName, pixel_size: 24 });
@@ -646,6 +651,36 @@ function appRow(app, total, hasEnergy) {
     row.add_suffix(box);
     row.share = share;
     return row;
+}
+
+/**
+ * Linked toggle buttons, one chosen (the Settings page's segmented look).
+ * Keeps `selected` and `model` (the long labels) as a dropdown has them.
+ * @param {Array<[string, string]>} choices short label and tooltip
+ * @param {function()} onChange
+ */
+function segmented(choices, onChange) {
+    const widget = new Gtk.Box({ css_classes: ['linked', 'rp-segmented'], valign: Gtk.Align.CENTER });
+    const buttons = choices.map(([label, tooltip], i) => {
+        const button = new Gtk.ToggleButton({ label, tooltip_text: tooltip });
+        if (i > 0) button.set_group(widget.get_first_child());
+        widget.append(button);
+        return button;
+    });
+    buttons[0].active = true;
+    for (const button of buttons) {
+        button.connect('toggled', () => {
+            if (button.active) onChange();
+        });
+    }
+    const control = { widget, buttons, model: Gtk.StringList.new(choices.map(([, tooltip]) => tooltip)) };
+    Object.defineProperty(control, 'selected', {
+        get: () => buttons.findIndex(b => b.active),
+        set: i => {
+            if (buttons[i]) buttons[i].active = true;
+        },
+    });
+    return control;
 }
 
 /**
@@ -709,20 +744,25 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     const page = new Adw.PreferencesPage({ title: _('Tracking'), name: 'tracking', icon_name: 'battery-level-70-symbolic' });
     const rows = {};
 
-    // Tracking itself.
-    const control = new Adw.PreferencesGroup({
-        title: _('Usage tracking'),
-        description: fill(_('Records which apps use the processor, memory, disk and graphics, and how much the network moves and how warm the processor runs, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
-            { seconds: TRACK_INTERVAL_S, days: DAYS_KEPT }),
-    });
+    // Tracking itself: one row, its status as the subtitle; what is recorded
+    // is the info icon's tooltip.
+    const control = new Adw.PreferencesGroup();
     page.add(control);
-    rows.tracking = new Adw.SwitchRow({ title: _('Track usage per app') });
+    rows.status = new Adw.ActionRow({ title: _('Usage tracking') });
+    const recorded = fill(_('Records which apps use the processor, memory, disk and graphics, and how much the network moves and how warm the processor runs, every {seconds} seconds while you are logged in. Kept for {days} days, on this computer only.'),
+        { seconds: TRACK_INTERVAL_S, days: DAYS_KEPT });
+    rows.about = new Gtk.Image({ icon_name: 'dialog-information-symbolic', tooltip_text: recorded, css_classes: ['dim-label'], valign: Gtk.Align.CENTER });
+    rows.about.update_property([Gtk.AccessibleProperty.LABEL], [recorded]);
+    rows.status.add_suffix(rows.about);
+    rows.clearButton = new Gtk.Button({ icon_name: 'user-trash-symbolic', tooltip_text: _('Clear history…'), valign: Gtk.Align.CENTER, css_classes: ['flat'] });
+    rows.clearButton.update_property([Gtk.AccessibleProperty.LABEL], [_('Clear history…')]);
+    rows.status.add_suffix(rows.clearButton);
+    rows.tracking = new Gtk.Switch({ valign: Gtk.Align.CENTER });
+    rows.tracking.update_property([Gtk.AccessibleProperty.LABEL], [_('Usage tracking')]);
     settings.bind('battery-tracking', rows.tracking, 'active', Gio.SettingsBindFlags.DEFAULT);
-    control.add(rows.tracking);
-    rows.status = new Adw.ActionRow({ title: _('Status') });
+    rows.status.add_suffix(rows.tracking);
+    rows.status.activatable_widget = rows.tracking;
     control.add(rows.status);
-    rows.clear = new Adw.ActionRow({ title: _('History'), subtitle: fill(ngettext('Recorded figures of the last {n} day', 'Recorded figures of the last {n} days', DAYS_KEPT), { n: DAYS_KEPT }) });
-    rows.clearButton = new Gtk.Button({ label: _('Clear…'), valign: Gtk.Align.CENTER, css_classes: ['destructive-action'] });
     rows.clearButton.connect('clicked', () => {
         const dialog = new Adw.AlertDialog({
             heading: _('Clear the battery history?'),
@@ -736,8 +776,6 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         });
         dialog.present(page.get_root());
     });
-    rows.clear.add_suffix(rows.clearButton);
-    control.add(rows.clear);
 
     // The components as tabs: each shows the whole page for one of them.
     const specsNow = () => componentSpecs(settings.get_string('unit-temp') || 'C');
@@ -746,18 +784,22 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     rows.component = componentTabs(COMPONENTS.map(c => [c, specsNow()[c].title]), iconFor, () => render());
     tabsGroup.add(rows.component.widget);
 
-    // What to report on.
-    const options = new Adw.PreferencesGroup({ title: _('Report') });
+    // What to report on, in one line: the period, and for the battery
+    // whether the time on the charger counts.
+    const options = new Adw.PreferencesGroup();
     page.add(options);
-    rows.period = new Adw.ComboRow({ title: _('Period'), model: Gtk.StringList.new(PERIODS.map(p => p.label())) });
-    options.add(rows.period);
-    rows.batteryOnly = new Adw.SwitchRow({ title: _('On battery only'), subtitle: _('Leave out the time on the charger'), active: true });
-    options.add(rows.batteryOnly);
+    const optionsLine = new Gtk.Box({ spacing: 8 });
+    rows.period = segmented(PERIODS.map(p => [p.short(), p.label()]), () => periodChanged());
+    rows.period.widget.update_property([Gtk.AccessibleProperty.LABEL], [_('Period')]);
+    optionsLine.append(rows.period.widget);
+    optionsLine.append(new Gtk.Box({ hexpand: true }));
+    const filterBox = new Gtk.Box({ css_classes: ['linked', 'rp-segmented'], valign: Gtk.Align.CENTER });
+    rows.batteryOnly = new Gtk.ToggleButton({ label: _('On battery'), active: true, tooltip_text: _('Leave out the time on the charger') });
+    filterBox.append(rows.batteryOnly);
+    optionsLine.append(filterBox);
+    options.add(optionsLine);
 
-    const summary = new Adw.PreferencesGroup({
-        title: _('Summary'),
-        description: _('Processor energy is shared among apps by the processor time each used, and the integrated graphics part by graphics time where the machine reports it: an estimate. The display, radios and the rest of the machine cannot be measured per app.'),
-    });
+    const summary = new Adw.PreferencesGroup();
     page.add(summary);
     for (const [key, title] of [['used', _('Battery used')], ['drain', _('Average drain')], ['runtime', _('A full charge lasts')], ['time', _('Time on battery')]])
         rows[key] = tile(title, 'battery');
@@ -793,9 +835,14 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     chartBox.append(area);
     batteryBox.append(chartBox);
 
-    for (const [key, title] of [['apps', _('Processor, shared among apps')], ['graphics', _('of which graphics')], ['idle', _('Processor idle and platform')],
-        ['rest', _('Display, radios and the rest')], ['gap', _('While locked or asleep')]])
-        rows[key] = tile(title);
+    // What the energy split means, on hover.
+    for (const [key, title, about] of [
+        ['apps', _('Processor, shared among apps'), _('Processor energy is shared among apps by the processor time each used: an estimate.')],
+        ['graphics', _('of which graphics'), _('The integrated graphics part, shared by graphics time where the machine reports it.')],
+        ['idle', _('Processor idle and platform'), null],
+        ['rest', _('Display, radios and the rest'), _('The display, radios and the rest of the machine cannot be measured per app.')],
+        ['gap', _('While locked or asleep'), _('Not shared among apps: extensions pause while the screen is locked.')]])
+        rows[key] = tile(title, null, about);
     rows.graphics.add_css_class('rp-tint-gpu');
     rows.apps.add_css_class('rp-tint-cpu');
     batteryBox.append(tileGrid([rows.apps, rows.graphics, rows.idle, rows.rest, rows.gap]));
@@ -850,7 +897,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     componentGroup.add(componentBox);
     rows.componentGroup = componentGroup;
 
-    const appsGroup = new Adw.PreferencesGroup({ title: _('Apps'), description: _('Most first') });
+    const appsGroup = new Adw.PreferencesGroup({ title: _('Apps') });
     rows.appsGroup = appsGroup;
     page.add(appsGroup);
     const list = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
@@ -867,11 +914,11 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         const hours = history.ledger.summarize().seconds / 3600;
 
         if (history.problem) rows.status.subtitle = fill(_('Problem: {problem}'), { problem: history.problem });
-        else if (!tracking) rows.status.subtitle = hours > 0 ? _('Off. The history below is kept until you clear it.') : _('Off');
-        else if (hours === 0) rows.status.subtitle = _('Recording. The first figures appear within a minute.');
+        else if (!tracking) rows.status.subtitle = hours > 0 ? _('Off · history kept') : _('Off');
+        else if (hours === 0) rows.status.subtitle = _('Recording · first figures within a minute');
         else rows.status.subtitle = fill(sum.hasEnergy || history.ledger.summarize().hasEnergy
-            ? _('Recording · {time} recorded · energy measured')
-            : _('Recording · {time} recorded · processor time only: power readings are not available'), { time: formatDuration(hours * 3600) });
+            ? _('Recording · {time}')
+            : _('Recording · {time} · no power readings'), { time: formatDuration(hours * 3600) });
         rows.clearButton.sensitive = history.ledger.buckets.length > 0;
 
         const component = COMPONENTS[rows.component.selected] ?? 'battery';
@@ -883,33 +930,33 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
             return;
         }
         appsGroup.title = _('Apps');
-        appsGroup.description = _('Most first');
+        appsGroup.description = '';
 
         // Nothing recorded for this period: no column of zeros.
         summary.visible = sum.seconds > 0 || sum.gapWh > 0;
         const full = fullWh();
         const drain = sum.seconds > 0 && sum.batteryWh > 0 ? sum.batteryWh / (sum.seconds / 3600) : null;
-        const ofBattery = wh => (sum.batteryWh > 0 ? fill(_('{percent} % of the battery used'), { percent: Math.round(wh / sum.batteryWh * 100) }) : '');
+        const ofBattery = wh => (sum.batteryWh > 0 ? fill(_('{percent} % of use'), { percent: Math.round(wh / sum.batteryWh * 100) }) : '');
         rows.used.value.label = formatWh(sum.batteryWh);
         rows.used.detail.label = full > 0 && sum.batteryWh > 0 ? fill(_('{percent} % of a full charge'), { percent: Math.round(sum.batteryWh / full * 100) }) : '';
         rows.time.title = batteryOnly ? _('Time on battery') : _('Time recorded');
         rows.time.value.label = formatDuration(sum.seconds);
         rows.time.detail.label = '';
         rows.drain.value.label = drain !== null ? `${drain.toFixed(1)} W` : '—';
-        rows.drain.detail.label = _('on average');
+        rows.drain.detail.label = '';
         rows.runtime.value.label = drain !== null && full > 0 ? `${formatDuration(full / drain * 3600)}` : '—';
-        rows.runtime.detail.label = drain !== null && full > 0 ? _('at this drain') : '';
+        rows.runtime.detail.label = '';
         rows.apps.value.label = sum.hasEnergy ? formatWh(sum.attributedWh) : _('not measured');
-        rows.apps.detail.label = sum.hasEnergy ? ofBattery(sum.attributedWh) : _('power readings are not available');
+        rows.apps.detail.label = sum.hasEnergy ? ofBattery(sum.attributedWh) : _('no power readings');
         rows.idle.value.label = sum.hasEnergy ? formatWh(sum.idleWh) : _('not measured');
         rows.idle.detail.label = sum.hasEnergy ? ofBattery(sum.idleWh) : '';
         rows.graphics.value.label = formatWh(sum.graphicsWh);
-        rows.graphics.detail.label = _('by graphics time');
+        rows.graphics.detail.label = '';
         const rest = Math.max(0, sum.batteryWh - sum.packageWh);
         rows.rest.value.label = formatWh(rest);
-        rows.rest.detail.label = ofBattery(rest) ? fill(_('{share}; not measurable per app'), { share: ofBattery(rest) }) : _('not measurable per app');
+        rows.rest.detail.label = ofBattery(rest);
         rows.gap.value.label = formatWh(sum.gapWh);
-        rows.gap.detail.label = _('not attributed: extensions pause while the screen is locked');
+        rows.gap.detail.label = '';
         showTile(rows.graphics, sum.graphicsWh > 0);
         showTile(rows.rest, batteryOnly && sum.hasEnergy && sum.batteryWh > 0);
         showTile(rows.gap, sum.gapWh > 0);
@@ -933,16 +980,15 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         }
         const hidden = sum.apps.filter(a => a.cpu > 0).slice(APPS_SHOWN);
         if (hidden.length > 0) {
-            const more = new Adw.ActionRow({ title: fill(_('{n} more'), { n: hidden.length }), subtitle: _('Each below the ones above') });
-            list.append(more);
+            list.append(new Adw.ActionRow({ title: fill(_('{n} more'), { n: hidden.length }) }));
         }
-        if (shown.length === 0) {
-            list.append(new Adw.ActionRow({
-                title: _('No figures for this period'),
-                subtitle: tracking ? _('Tracking is on; figures appear as time passes.') : _('Switch on tracking above to start recording.'),
-            }));
-        }
+        if (shown.length === 0) list.append(emptyRow(tracking));
     };
+
+    const emptyRow = tracking => new Adw.ActionRow({
+        title: _('No figures for this period'),
+        subtitle: tracking ? _('They appear as time passes') : _('Switch on tracking to record'),
+    });
 
     /** One component other than the battery, over [from, now]. */
     const renderComponent = (component, from, now, tracking) => {
@@ -951,7 +997,6 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         const [viewFrom, viewTo] = rows.bars.view ? [rows.bars.view.from, rows.bars.view.to] : rows.bars.bounds;
         const view = componentView(component, history.ledger, { from, now, cores: GLib.get_num_processors(), viewFrom, viewTo });
         componentGroup.title = spec.title;
-        componentGroup.description = spec.description ?? '';
         rows.componentView = view;
         rows.componentTiles.forEach((t, i) => {
             const def = spec.tiles[i];
@@ -979,14 +1024,12 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         rows.bars.zoomLine.update(rows.bars, view.points);
         barsArea.queue_draw();
         rows.componentEmpty.visible = !view.has;
-        rows.componentEmpty.label = tracking
-            ? _('No figures for this period yet: they are recorded while tracking is on, and this kind only since a recent version.')
-            : _('No figures for this period. Switch on tracking above to start recording.');
+        rows.componentEmpty.label = tracking ? _('No figures for this period yet') : _('No figures · switch on tracking to record');
 
         list.remove_all();
         rows.appRows = [];
         appsGroup.title = spec.appsTitle;
-        appsGroup.description = view.apps ? spec.appsDescription ?? _('Most first') : '';
+        appsGroup.description = view.apps ? spec.appsDescription ?? '' : '';
         if (!view.apps) {
             list.append(new Adw.ActionRow({ title: _('No figures per app'), subtitle: spec.noApps }));
             return;
@@ -997,21 +1040,16 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
             rows.appRows.push(row);
         }
         if (view.apps.length > APPS_SHOWN)
-            list.append(new Adw.ActionRow({ title: fill(_('{n} more'), { n: view.apps.length - APPS_SHOWN }), subtitle: _('Each below the ones above') }));
-        if (view.apps.length === 0) {
-            list.append(new Adw.ActionRow({
-                title: _('No figures for this period'),
-                subtitle: tracking ? _('Tracking is on; figures appear as time passes.') : _('Switch on tracking above to start recording.'),
-            }));
-        }
+            list.append(new Adw.ActionRow({ title: fill(_('{n} more'), { n: view.apps.length - APPS_SHOWN }) }));
+        if (view.apps.length === 0) list.append(emptyRow(tracking));
     };
 
-    rows.period.connect('notify::selected', () => {
+    const periodChanged = () => {
         // A zoom belongs to the period it was made in.
         rows.chart.view = null;
         rows.bars.view = null;
         render();
-    });
+    };
     const unitId = settings.connect('changed::unit-temp', render);
     rows.batteryOnly.connect('notify::active', render);
     const trackingId = settings.connect('changed::battery-tracking', () => {
