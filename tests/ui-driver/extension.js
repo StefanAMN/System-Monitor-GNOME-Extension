@@ -1636,6 +1636,24 @@ async function run() {
     check(last.stateObj._summaryCards.cpu.valueLabel.text !== '--%', 'the panel was not filled when it opened');
     last.stateObj._indicator.menu.close();
     await sleep(300);
+
+    // The shell shutting down: it destroys the panel, and the indicator in
+    // it, without disable(), while a poll waits on its readings (seen on
+    // CI as "St.Icon ... already disposed" from the poll's drawing). Then
+    // disable() itself, after the indicator is gone. The log scan fails the
+    // test on any disposed-object critical.
+    const rp = last.stateObj;
+    rp._poll();
+    Main.panel.statusArea[TARGET].destroy();
+    await sleep(2500);
+    check(rp._indicatorGone && !rp._timeoutId && !rp._deferredPollId && !rp._glideId,
+        `shutdown: timers left after the shell destroyed the indicator (poll ${rp._timeoutId}, deferred ${rp._deferredPollId}, glide ${rp._glideId})`);
+    Main.extensionManager.disableExtension(TARGET);
+    await sleep(500);
+    check(!Main.panel.statusArea[TARGET], 'shutdown: the destroyed indicator is still in the panel');
+    Main.extensionManager.enableExtension(TARGET);
+    await sleep(1500);
+    check(Main.extensionManager.lookup(TARGET)?.stateObj?._indicator?.get_parent(), 'shutdown: the extension did not come back after its indicator was destroyed');
 }
 
 export default class Driver extends Extension {

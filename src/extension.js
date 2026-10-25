@@ -163,6 +163,18 @@ export default class ResourcePulseExtension extends Extension {
 
         // Panel indicator
         this._indicator = new PanelMenu.Button(0.0, 'Resource Pulse', false);
+        // Destroyed by the shell itself, without disable(): when it shuts
+        // down the panel goes first. A poll still waiting on its readings,
+        // and the timers, must then not draw into the destroyed widgets.
+        this._indicatorGone = false;
+        this._indicator.connect('destroy', () => {
+            this._indicatorGone = true;
+            this._gen++;
+            for (const key of ['_timeoutId', '_deferredPollId', '_glideId', '_fitIdleId', '_sizeIdleId', '_tooltipIdleId', '_causeTimerId']) {
+                if (this[key]) GLib.source_remove(this[key]);
+                this[key] = 0;
+            }
+        });
         this._indicatorBox = new St.BoxLayout({ style_class: 'resource-pulse-indicator-box' });
         this._indicator.add_child(this._indicatorBox);
         this._topBarWidgets = {};
@@ -398,7 +410,7 @@ export default class ResourcePulseExtension extends Extension {
             GLib.source_remove(this._pollDeadlineId);
             this._pollDeadlineId = null;
         }
-        if (this._openStateId) this._indicator.menu.disconnect(this._openStateId);
+        if (this._openStateId && !this._indicatorGone) this._indicator.menu.disconnect(this._openStateId);
         if (this._monitorsChangedId) {
             Main.layoutManager.disconnect(this._monitorsChangedId);
             this._monitorsChangedId = null;
@@ -437,16 +449,19 @@ export default class ResourcePulseExtension extends Extension {
         }
         this._resizeHandles = {};
 
-        for (const [actor, id] of this._fitSignals ?? []) actor.disconnect(id);
+        if (!this._indicatorGone) for (const [actor, id] of this._fitSignals ?? []) actor.disconnect(id);
         this._fitSignals = [];
         if (this._fitIdleId) {
             GLib.source_remove(this._fitIdleId);
             this._fitIdleId = 0;
         }
 
-        // Destroying an open menu leaves the shell allocating a disposed BoxPointer.
-        closeMenuNow(this._indicator.menu);
-        this._indicator.destroy();
+        // Destroying an open menu leaves the shell allocating a disposed
+        // BoxPointer. Already destroyed by the shell: nothing to close.
+        if (!this._indicatorGone) {
+            closeMenuNow(this._indicator.menu);
+            this._indicator.destroy();
+        }
         this._indicator = null;
         this._indicatorBox = null;
         this._topBarWidgets = {};

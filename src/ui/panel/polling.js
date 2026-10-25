@@ -68,7 +68,7 @@ export class PollingMethods {
     }
 
     _deferPoll(waitUs) {
-        if (this._deferredPollId) return;
+        if (this._deferredPollId || this._indicatorGone) return;
         this._deferredPollId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.ceil(waitUs / 1000), () => {
             this._deferredPollId = null;
             this._poll();
@@ -132,7 +132,7 @@ export class PollingMethods {
 
     /** Frames, while the menu is open, until the glide has arrived. */
     _runGlide() {
-        if (this._glideId) return;
+        if (this._glideId || this._indicatorGone) return;
         this._glideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, GLIDE_FRAME_MS, () => {
             const now = GLib.get_monotonic_time();
             const done = !this._smoothOn() || !this._menuOpen || now - this._shownAt >= this._intervalUs;
@@ -289,7 +289,7 @@ export class PollingMethods {
      * refresh (menu opened, setting changed, refresh button).
      */
     async _poll(tick = false) {
-        if (!this._settings || !this._indicator) return;
+        if (!this._settings || !this._indicator || this._indicatorGone) return;
         const now = GLib.get_monotonic_time();
         if (tick) {
             if (this._pollInFlight) {
