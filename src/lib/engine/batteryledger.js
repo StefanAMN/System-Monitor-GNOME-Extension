@@ -36,6 +36,17 @@ export const MEMORY_MIN_MIB = 16;
 const MIB = 1024 * 1024;
 const HOUR_MS = 3600 * 1000;
 
+// Five-minute totals for the charts' finer bars: machine figures only (no
+// apps), for the last 48 hours, AC and battery apart like the hourly ones.
+export const FINE_MS = 5 * 60 * 1000;
+export const FINE_KEPT_MS = 48 * HOUR_MS;
+export const MAX_FINE = (FINE_KEPT_MS / FINE_MS) * 2;
+// Fields a five-minute bucket sums, as the hourly bucket does; and the
+// highest values it keeps.
+const FINE_SUMS = ['s', 'bw', 'pw', 'iw', 'gw', 'hs', 'uw', 'gpu', 'cpu', 'ms', 'mu', 'si', 'so', 'ps', 'pc', 'pm', 'pf', 'pi',
+    'ns', 'rx', 'tx', 'is', 'ir', 'it', 'ds', 'dr', 'dw', 'tt', 'ta'];
+const FINE_MAXES = ['mx', 'mt', 'sx', 'st', 'tm'];
+
 // Pseudo-app ids. They cannot clash with desktop ids, which never start with '@'.
 export const SYSTEM = '@system'; // system services (system.slice)
 export const OTHER = '@other'; // kernel, other users: machine total minus everything named
@@ -104,6 +115,7 @@ function emptyBucket(start, onBattery) {
 export class BatteryLedger {
     constructor(state = null) {
         this.buckets = state?.buckets ?? [];
+        this.fine = Array.isArray(state?.fine) ? state.fine : [];
         this.baselineW = state?.baselineW ?? null;
         this.uncoreBaselineW = state?.uncoreBaselineW ?? null;
         this._prevGpu = null;
@@ -136,6 +148,8 @@ export class BatteryLedger {
             throw new LedgerFormatError(`version ${obj?.version} is not one of ${READABLE_VERSIONS.join(', ')}`);
         if (!Array.isArray(obj.buckets) || !obj.buckets.every(b => Number.isFinite(b?.t) && typeof b.a === 'object'))
             throw new LedgerFormatError('buckets are malformed');
+        // Five-minute totals are optional (newer files); bad ones are dropped, not fatal.
+        if (obj.fine !== undefined && !(Array.isArray(obj.fine) && obj.fine.every(b => Number.isFinite(b?.t)))) obj.fine = [];
         const ledger = new BatteryLedger(obj);
         ledger.loadedVersion = obj.version;
         return ledger;
@@ -148,11 +162,30 @@ export class BatteryLedger {
             uncoreBaselineW: this.uncoreBaselineW,
             last: { wall: this._prevWall || this._lastSeenWall, batteryWh: this._prevBatteryWh },
             buckets: this.buckets,
+            fine: this.fine,
         };
     }
 
     clear() {
         this.buckets = [];
+        this.fine = [];
+    }
+
+    /** The five-minute bucket for `wallMs` (created, older ones pruned). */
+    _fineBucket(wallMs, onBattery) {
+        const start = Math.floor(wallMs / FINE_MS) * FINE_MS;
+        const last = this.fine[this.fine.length - 1];
+        if (last && last.t === start && last.b === onBattery) return last;
+        let bucket = this.fine.find(b => b.t === start && b.b === onBattery);
+        if (!bucket) {
+            bucket = { t: start, b: onBattery, energy: false };
+            for (const key of [...FINE_SUMS, ...FINE_MAXES]) bucket[key] = 0;
+            this.fine.push(bucket);
+            const oldest = start - FINE_KEPT_MS;
+            if (this.fine[0].t <= oldest) this.fine = this.fine.filter(b => b.t > oldest);
+            if (this.fine.length > MAX_FINE) this.fine.splice(0, this.fine.length - MAX_FINE);
+        }
+        return bucket;
     }
 
     /**
@@ -377,6 +410,8 @@ export class BatteryLedger {
         let attributed = false;
 
         const bucket = this._bucket(wall, onBattery);
+        // What this sample adds to the hour is added to its five minutes too.
+        const hourBefore = FINE_SUMS.map(key => bucket[key] ?? 0);
         const delivered = onBattery && batteryWh !== null && this._prevBatteryWh !== null
             ? Math.max(0, this._prevBatteryWh - batteryWh) : 0;
 
@@ -468,6 +503,19 @@ export class BatteryLedger {
             }
             const rest = Math.max(0, totalCpu - named);
             if (rest > 0) this._add(bucket, OTHER, rest, 0, whFor(rest));
+        }
+
+        const fine = this._fineBucket(wall, onBattery);
+        FINE_SUMS.forEach((key, i) => {
+            fine[key] += (bucket[key] ?? 0) - hourBefore[i];
+        });
+        if (attributed) {
+            fine.energy ||= bucket.energy;
+            const highs = {
+                mx: machine?.memUsed / MIB, mt: machine?.memTotal / MIB, sx: machine?.swapUsed / MIB, st: machine?.swapTotal / MIB,
+                tm: Number.isFinite(temp) && temp > 0 ? temp : NaN,
+            };
+            for (const key of FINE_MAXES) if (Number.isFinite(highs[key])) fine[key] = Math.max(fine[key], highs[key]);
         }
 
         this._prevUnits = new Map(usage.units.map(u => [u.unit, u.usec]));
