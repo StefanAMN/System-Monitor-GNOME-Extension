@@ -1,14 +1,14 @@
-// The Diagnostics page's second section: hand the findings to a coding agent.
-// Writes report.md (agentreport.js) into a folder of its own and opens the
-// agent the user picked in a terminal there, with a prompt to fix what the
-// report lists. GTK side (preferences process).
+// The Diagnostics page's second section: one button that hands the findings to
+// a coding agent. The user picks an installed agent, an app or a terminal
+// program; the report (agentreport.js) is written to a folder of its own and
+// the agent opened there with the prompt. GTK side (preferences process).
 import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 
-import { AGENTS, findAgents, findTerminals, agentArgv, terminalArgv, promptText, LaunchError } from '../../lib/common/agentlaunch.js';
+import { TYPED, CLIPBOARD, findProgram, findTargets, agentArgv, terminalArgv, promptText, LaunchError } from '../../lib/common/agentlaunch.js';
 import { _, fill } from '../../lib/common/i18n.js';
 
 export const REPORT_NAME = 'report.md';
@@ -36,8 +36,11 @@ function copyText(widget, text) {
  * @param {object} opts
  * @param {function(): Promise<string>} opts.makeReport the report as Markdown
  * @param {string} [opts.dir] where report.md goes and the agent runs
- * @param {function(string): ?string} [opts.which] program lookup, for tests
+ * @param {function(string): ?string} [opts.which] terminal lookup, for tests
+ * @param {function(string): ?string} [opts.find] agent program lookup, for tests
+ * @param {function(string): ?object} [opts.findApp] desktop app lookup, for tests
  * @param {function(string[], string): Gio.Subprocess} [opts.spawn] for tests
+ * @param {function(object, ?string): void} [opts.openApp] for tests
  * @param {function(string, Gtk.Widget): Promise<string>} [opts.confirm] asks before the first
  *   hand-off to an agent; resolves to 'open', 'preview' or 'cancel'
  */
@@ -45,138 +48,46 @@ export function buildAgentGroup(settings, {
     makeReport,
     dir = agentDir(),
     which = GLib.find_program_in_path,
+    find = findProgram,
+    findApp = id => Gio.DesktopAppInfo.new(id),
     spawn = (argv, cwd) => {
         const launcher = new Gio.SubprocessLauncher({ flags: Gio.SubprocessFlags.NONE });
         launcher.set_cwd(cwd);
         return launcher.spawnv(argv);
     },
+    openApp = (app, uri) => {
+        if (uri) app.launch_uris([uri], null);
+        else app.launch([], null);
+    },
     confirm = confirmDialog,
 } = {}) {
     // What is sent, and where, is said in the first-use confirmation.
-    const group = new Adw.PreferencesGroup({ title: _('Fix with an agent') });
+    const group = new Adw.PreferencesGroup();
 
-    // Agent: the presets found on PATH, then a command of the user's own.
-    const agents = [...findAgents(which), { id: 'custom', name: _('Custom command') }];
-    const agentRow = new Adw.ComboRow({ title: _('Agent'), model: Gtk.StringList.new(agents.map(a => a.name)) });
-    if (agents.length === 1) agentRow.subtitle = fill(_('{agents} not found'), { agents: AGENTS.map(a => a.name).join(', ') });
-    group.add(agentRow);
-    const commandRow = new Adw.EntryRow({ title: _('Command ({prompt} = the prompt)') });
-    settings.bind('agent-command', commandRow, 'text', Gio.SettingsBindFlags.DEFAULT);
-    group.add(commandRow);
-
-    const terminals = [{ id: 'auto', name: _('Default terminal') }, ...findTerminals(which).map(t => ({ id: t.id, name: _(t.name) }))];
-    const terminalRow = new Adw.ComboRow({ title: _('Terminal'), model: Gtk.StringList.new(terminals.map(t => t.name)) });
-    group.add(terminalRow);
-
-    const promptRow = new Adw.ExpanderRow({ title: _('Prompt') });
-    const promptView = new Gtk.TextView({
-        wrap_mode: Gtk.WrapMode.WORD_CHAR, top_margin: 8, bottom_margin: 8, left_margin: 10, right_margin: 10,
-        css_classes: ['rp-prompt'],
-    });
-    promptView.update_property([Gtk.AccessibleProperty.LABEL], [_('Prompt')]);
-    promptView.buffer.text = promptText(settings.get_string('agent-prompt'));
-    const promptBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 8, margin_top: 8, margin_bottom: 8, margin_start: 12, margin_end: 12 });
-    promptBox.append(new Gtk.Frame({ child: promptView }));
-    const reset = new Gtk.Button({ label: _('Use the built-in prompt'), halign: Gtk.Align.END });
-    promptBox.append(reset);
-    promptRow.add_row(promptBox);
-    group.add(promptRow);
-
-    const buttons = new Gtk.Box({ spacing: 8, halign: Gtk.Align.START, margin_top: 12 });
-    const preview = new Gtk.Button({ label: _('Preview report') });
-    const copyPrompt = new Gtk.Button({ label: _('Copy prompt'), tooltip_text: _('Write report.md and copy the prompt, to run the agent yourself') });
-    const open = new Gtk.Button({ css_classes: ['suggested-action'] });
-    buttons.append(preview);
-    buttons.append(copyPrompt);
-    buttons.append(open);
-    group.add(buttons);
+    const menu = new Gtk.MenuButton({ label: _('Fix with an agent'), halign: Gtk.Align.START, always_show_arrow: true });
+    menu.add_css_class('suggested-action');
+    const list = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2, margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6 });
+    const popover = new Gtk.Popover({ child: list });
+    popover.add_css_class('rp-agent-menu');
+    menu.popover = popover;
+    group.add(menu);
     const status = new Gtk.Label({ xalign: 0, wrap: true, visible: false, margin_top: 8, css_classes: ['dim-label'] });
     group.add(status);
 
-    const selectedAgent = () => agents[agentRow.selected] ?? agents[0];
-    const selectedTerminal = () => terminals[terminalRow.selected] ?? terminals[0];
     const say = (text, error = false) => {
         status.label = text;
         status.visible = !!text;
         if (error) status.add_css_class('error');
         else status.remove_css_class('error');
     };
-    const syncRows = () => {
-        const agent = selectedAgent();
-        commandRow.visible = agent.id === 'custom';
-        open.label = agent.id === 'custom' ? _('Open agent') : fill(_('Open {agent}'), { agent: agent.name });
-    };
+    const state = { launched: null, opened: null, running: false, preview: null, entries: new Map() };
 
-    // Settings <-> rows. An agent or terminal that is no longer installed reads as the first one.
-    const fromSettings = () => {
-        const agentIndex = agents.findIndex(a => a.id === settings.get_string('agent'));
-        agentRow.selected = Math.max(0, agentIndex);
-        const terminalIndex = terminals.findIndex(t => t.id === settings.get_string('agent-terminal'));
-        terminalRow.selected = Math.max(0, terminalIndex);
-        syncRows();
-    };
-    fromSettings();
-    const handlers = [
-        settings.connect('changed::agent', fromSettings),
-        settings.connect('changed::agent-terminal', fromSettings),
-    ];
-    agentRow.connect('notify::selected', () => {
-        if (settings.get_string('agent') !== selectedAgent().id) settings.set_string('agent', selectedAgent().id);
-        syncRows();
-    });
-    terminalRow.connect('notify::selected', () => {
-        if (settings.get_string('agent-terminal') !== selectedTerminal().id) settings.set_string('agent-terminal', selectedTerminal().id);
-    });
-    // The built-in prompt is not stored: it follows the user's language.
-    promptView.buffer.connect('changed', () => {
-        const text = promptView.buffer.text;
-        settings.set_string('agent-prompt', text === promptText('') ? '' : text);
-    });
-    reset.connect('clicked', () => {
-        promptView.buffer.text = promptText('');
-    });
-
-    const prompt = () => promptText(promptView.buffer.text);
-    const state = { launched: null, running: false, preview: null };
-
-    preview.connect('clicked', async () => {
-        try {
-            state.preview = showPreview(group, await makeReport());
-        } catch (e) {
-            say(fill(_('The report could not be made: {error}'), { error: e.message }), true);
-        }
-    });
-
-    copyPrompt.connect('clicked', async () => {
-        try {
-            const path = writeReport(dir, await makeReport());
-            copyText(copyPrompt, `${prompt()}\n\n${fill(_('report.md is {path}'), { path })}`);
-            say(fill(_('Prompt copied. The report is in {dir}; start your agent there.'), { dir }));
-        } catch (e) {
-            say(fill(_('The report could not be written: {error}'), { error: e.message }), true);
-        }
-    });
-
-    open.connect('clicked', async () => {
-        if (state.running) return;
-        state.running = true;
-        open.sensitive = false;
-        try {
-            const agent = selectedAgent();
-            const consent = settings.get_strv('agent-consent');
-            if (!consent.includes(agent.id)) {
-                const answer = await confirm(agent.id === 'custom' ? _('your agent') : agent.name, group);
-                if (answer === 'preview') state.preview = showPreview(group, await makeReport());
-                if (answer !== 'open') return;
-                settings.set_strv('agent-consent', [...consent, agent.id]);
-            }
-            const cmd = agentArgv({ agent: agent.id, command: settings.get_string('agent-command'), prompt: prompt(), reportPath: REPORT_NAME });
-            if (!which(cmd[0]) && !GLib.path_is_absolute(cmd[0])) throw new LaunchError(fill(_('"{program}" was not found.'), { program: cmd[0] }));
-            writeReport(dir, await makeReport());
-            const argv = terminalArgv(selectedTerminal().id, dir, cmd, which);
+    /** Start the agent the report was written for, and tell the user what is left to do. */
+    const launch = (agent, prompt) => {
+        if (agent.path) {
+            const argv = terminalArgv(dir, agentArgv(agent, prompt), which);
             const proc = spawn(argv, dir);
             state.launched = { argv, dir };
-            say(fill(_('Started in a terminal, in {dir}.'), { dir }));
             proc?.wait_async?.(null, (p, res) => {
                 try {
                     p.wait_finish(res);
@@ -187,26 +98,79 @@ export function buildAgentGroup(settings, {
                 if (p.get_if_exited() && p.get_exit_status() !== 0)
                     say(fill(_('The terminal ended with an error (exit {code}).'), { code: p.get_exit_status() }), true);
             });
+        } else {
+            const uri = agent.uri?.(prompt, dir) ?? null;
+            openApp(agent.app, uri);
+            state.opened = { id: agent.id, uri };
+        }
+    };
+
+    const pick = async agent => {
+        if (state.running) return;
+        state.running = true;
+        menu.sensitive = false;
+        popover.popdown();
+        try {
+            const consent = settings.get_strv('agent-consent');
+            if (!consent.includes(agent.id)) {
+                const answer = await confirm(agent.name, group);
+                if (answer === 'preview') state.preview = showPreview(group, await makeReport());
+                if (answer !== 'open') return;
+                settings.set_strv('agent-consent', [...consent, agent.id]);
+            }
+            const path = writeReport(dir, await makeReport());
+            // Nothing tells a pasted prompt which folder "this folder" is.
+            const prompt = agent.prompt === CLIPBOARD ? `${promptText()}\n\n${fill(_('report.md is {path}'), { path })}` : promptText();
+            if (agent.prompt === CLIPBOARD) copyText(menu, prompt);
+            launch(agent, prompt);
+            if (agent.prompt === TYPED) say(fill(_('{agent} is open with the prompt typed. Press Enter to begin.'), { agent: agent.name }));
+            else if (agent.prompt === CLIPBOARD) say(fill(_('{agent} is open and the prompt is copied. Paste it and press Enter.'), { agent: agent.name }));
+            else say(fill(_('{agent} started in a terminal and is reading the report.'), { agent: agent.name }));
         } catch (e) {
             say(e instanceof LaunchError ? e.message : fill(_('Could not start it: {error}'), { error: e.message }), true);
         } finally {
             state.running = false;
-            open.sensitive = true;
+            menu.sensitive = true;
         }
-    });
-
-    const dispose = () => {
-        for (const id of handlers) settings.disconnect(id);
-        handlers.length = 0;
     };
-    return { group, agentRow, terminalRow, commandRow, promptRow, promptView, preview, copyPrompt, open, status, state, dispose };
+
+    const addSection = (title, agents) => {
+        if (agents.length === 0) return;
+        const heading = new Gtk.Label({ label: title, xalign: 0, margin_start: 8, margin_top: list.get_first_child() ? 8 : 2, margin_bottom: 2 });
+        heading.add_css_class('caption-heading');
+        heading.add_css_class('dim-label');
+        list.append(heading);
+        for (const agent of agents) {
+            const entry = new Gtk.Button({ child: new Gtk.Label({ label: agent.name, xalign: 0 }) });
+            entry.add_css_class('flat');
+            entry.connect('clicked', () => pick(agent));
+            list.append(entry);
+            state.entries.set(agent.id, entry);
+        }
+    };
+
+    // Read each time it opens, so an agent installed meanwhile shows up.
+    const fillList = () => {
+        for (let child = list.get_first_child(); child; child = list.get_first_child()) list.remove(child);
+        state.entries.clear();
+        const { apps, terminal } = findTargets(find, findApp);
+        addSection(_('Apps'), apps);
+        addSection(_('Terminal'), terminal);
+        if (apps.length + terminal.length === 0)
+            list.append(new Gtk.Label({ label: _('No agent was found'), margin_top: 6, margin_bottom: 6, margin_start: 8, margin_end: 8 }));
+    };
+    fillList();
+    popover.connect('show', fillList);
+
+    const dispose = () => {};
+    return { group, menu, popover, status, state, pick, dispose };
 }
 
 /** Before the first hand-off to an agent: what goes where. */
 function confirmDialog(agentName, parent) {
     const dialog = new Adw.AlertDialog({
         heading: fill(_('Send the report to {agent}?'), { agent: agentName }),
-        body: _('The agent reads report.md and sends it to its service to work on it. The report holds app names, processor, memory and network figures, and the computer\'s model and system version; no files, user name or host name. The agent runs in a terminal and asks before it changes anything.'),
+        body: _('The agent reads report.md and sends it to its service to work on it. The report holds app names, processor, memory and network figures, and the computer\'s model and system version; no files, user name or host name. The agent asks before it changes anything.'),
         close_response: 'cancel',
         default_response: 'open',
     });

@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-30 18:57+0200\n"
+"POT-Creation-Date: 2026-10-30 22:17+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -76,15 +76,7 @@ msgstr ""
 msgid "Thermal Zone {n}"
 msgstr ""
 
-#: src/lib/common/agentlaunch.js:27
-msgid "Console"
-msgstr ""
-
-#: src/lib/common/agentlaunch.js:28
-msgid "GNOME Terminal"
-msgstr ""
-
-#: src/lib/common/agentlaunch.js:33
+#: src/lib/common/agentlaunch.js:61
 msgid ""
 "Read the file report.md in this folder. Resource Pulse, a system monitor, "
 "wrote it from what it measured on this computer: apps and services that use "
@@ -102,22 +94,8 @@ msgid ""
 "left."
 msgstr ""
 
-#: src/lib/common/agentlaunch.js:65
-msgid "Enter the command that starts your agent."
-msgstr ""
-
-#: src/lib/common/agentlaunch.js:70
-msgid "The command cannot be read:"
-msgstr ""
-
-#: src/lib/common/agentlaunch.js:90
-msgid "Choose an agent."
-msgstr ""
-
-#: src/lib/common/agentlaunch.js:106
-msgid ""
-"No terminal was found. Install one, or copy the prompt and run your agent "
-"yourself."
+#: src/lib/common/agentlaunch.js:161
+msgid "No terminal was found. Install one, or use an agent's app."
 msgstr ""
 
 #: src/lib/common/appnames.js:7
@@ -132,7 +110,7 @@ msgstr ""
 msgid "Other apps"
 msgstr ""
 
-#: src/lib/common/appnames.js:10 src/ui/prefs/agent.js:68
+#: src/lib/common/appnames.js:10 src/ui/prefs/agent.js:158
 msgid "Terminal"
 msgstr ""
 
@@ -677,9 +655,9 @@ msgstr ""
 msgid "{minutes} min more per full charge"
 msgstr ""
 
-#: src/lib/engine/agentreport.js:130 src/ui/prefs/tracking.js:586
-#: src/ui/prefs/tracking.js:608 src/ui/prefs/tracking.js:901
-#: src/ui/prefs/tracking.js:973
+#: src/lib/engine/agentreport.js:130 src/ui/prefs/agent.js:157
+#: src/ui/prefs/tracking.js:586 src/ui/prefs/tracking.js:608
+#: src/ui/prefs/tracking.js:901 src/ui/prefs/tracking.js:973
 msgid "Apps"
 msgstr ""
 
@@ -1751,7 +1729,7 @@ msgid "End"
 msgstr ""
 
 #: src/ui/panel/processes.js:101 src/ui/panel/processes.js:263
-#: src/ui/panel/processes.js:292 src/ui/prefs/agent.js:213
+#: src/ui/panel/processes.js:292 src/ui/prefs/agent.js:177
 #: src/ui/prefs/backup.js:141 src/ui/prefs/tracking.js:772
 msgid "Cancel"
 msgstr ""
@@ -1916,120 +1894,68 @@ msgstr ""
 msgid "{average} avg, {peak} peak"
 msgstr ""
 
-#: src/ui/prefs/agent.js:56
+#: src/ui/prefs/agent.js:67
 msgid "Fix with an agent"
 msgstr ""
 
-#: src/ui/prefs/agent.js:59
-msgid "Custom command"
-msgstr ""
-
-#: src/ui/prefs/agent.js:60
-msgid "Agent"
-msgstr ""
-
-#: src/ui/prefs/agent.js:61
-msgid "{agents} not found"
-msgstr ""
-
-#: src/ui/prefs/agent.js:63
-msgid "Command ({prompt} = the prompt)"
-msgstr ""
-
-#: src/ui/prefs/agent.js:67
-msgid "Default terminal"
-msgstr ""
-
-#: src/ui/prefs/agent.js:71 src/ui/prefs/agent.js:76
-msgid "Prompt"
-msgstr ""
-
-#: src/ui/prefs/agent.js:80
-msgid "Use the built-in prompt"
-msgstr ""
-
-#: src/ui/prefs/agent.js:86 src/ui/prefs/agent.js:214
-msgid "Preview report"
-msgstr ""
-
-#: src/ui/prefs/agent.js:87
-msgid "Copy prompt"
-msgstr ""
-
-#: src/ui/prefs/agent.js:87
-msgid "Write report.md and copy the prompt, to run the agent yourself"
-msgstr ""
-
-#: src/ui/prefs/agent.js:107
-msgid "Open agent"
-msgstr ""
-
-#: src/ui/prefs/agent.js:107
-msgid "Open {agent}"
-msgstr ""
-
-#: src/ui/prefs/agent.js:146
-msgid "The report could not be made: {error}"
-msgstr ""
-
-#: src/ui/prefs/agent.js:153
-msgid "report.md is {path}"
-msgstr ""
-
-#: src/ui/prefs/agent.js:154
-msgid "Prompt copied. The report is in {dir}; start your agent there."
-msgstr ""
-
-#: src/ui/prefs/agent.js:156
-msgid "The report could not be written: {error}"
-msgstr ""
-
-#: src/ui/prefs/agent.js:168
-msgid "your agent"
-msgstr ""
-
-#: src/ui/prefs/agent.js:174
-msgid "\"{program}\" was not found."
-msgstr ""
-
-#: src/ui/prefs/agent.js:179
-msgid "Started in a terminal, in {dir}."
-msgstr ""
-
-#: src/ui/prefs/agent.js:188
+#: src/ui/prefs/agent.js:99
 msgid "The terminal ended with an error (exit {code})."
 msgstr ""
 
-#: src/ui/prefs/agent.js:191
+#: src/ui/prefs/agent.js:123
+msgid "report.md is {path}"
+msgstr ""
+
+#: src/ui/prefs/agent.js:126
+msgid "{agent} is open with the prompt typed. Press Enter to begin."
+msgstr ""
+
+#: src/ui/prefs/agent.js:127
+msgid "{agent} is open and the prompt is copied. Paste it and press Enter."
+msgstr ""
+
+#: src/ui/prefs/agent.js:128
+msgid "{agent} started in a terminal and is reading the report."
+msgstr ""
+
+#: src/ui/prefs/agent.js:130
 msgid "Could not start it: {error}"
 msgstr ""
 
-#: src/ui/prefs/agent.js:208
+#: src/ui/prefs/agent.js:160
+msgid "No agent was found"
+msgstr ""
+
+#: src/ui/prefs/agent.js:172
 msgid "Send the report to {agent}?"
 msgstr ""
 
-#: src/ui/prefs/agent.js:209
+#: src/ui/prefs/agent.js:173
 msgid ""
 "The agent reads report.md and sends it to its service to work on it. The "
 "report holds app names, processor, memory and network figures, and the "
 "computer's model and system version; no files, user name or host name. The "
-"agent runs in a terminal and asks before it changes anything."
+"agent asks before it changes anything."
 msgstr ""
 
-#: src/ui/prefs/agent.js:215
+#: src/ui/prefs/agent.js:178
+msgid "Preview report"
+msgstr ""
+
+#: src/ui/prefs/agent.js:179
 msgid "Open"
 msgstr ""
 
-#: src/ui/prefs/agent.js:230
+#: src/ui/prefs/agent.js:194
 msgid "Report"
 msgstr ""
 
-#: src/ui/prefs/agent.js:231 src/ui/prefs/diagnostics.js:214
+#: src/ui/prefs/agent.js:195 src/ui/prefs/diagnostics.js:214
 #: src/ui/prefs/diagnostics.js:391
 msgid "Copy report"
 msgstr ""
 
-#: src/ui/prefs/agent.js:234 src/ui/prefs/diagnostics.js:386
+#: src/ui/prefs/agent.js:198 src/ui/prefs/diagnostics.js:386
 #: src/ui/prefs/rows.js:533
 msgid "Copied"
 msgstr ""
