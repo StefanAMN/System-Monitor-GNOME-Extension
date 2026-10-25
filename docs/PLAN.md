@@ -1296,3 +1296,17 @@ Variants (5c5724c): `menu-closed` (1 s polls, all 8 metrics in the top bar, no m
 - **The growth needs the menu on screen,** with or without polling (one paused run at 0.44, near the limit).
 - **It is not a per-poll leak:** the same code with the same number of polls gives -0.17 to +0.86 MB/min; a leak that a poll or a repaint causes would repeat in every run. The JS heap is flat in all nine.
 - The pattern fits allocator retention while the shell paints a large menu in software (llvmpipe renders on several threads; glibc gives each thread an arena). Being tested: the plain soak against `MALLOC_ARENA_MAX=2` and against `LP_NUM_THREADS=0` (`RP_SHELL_ENV`, 749f530), three runs each (temporary branch `soak-alloc`).
+
+## Allocator and renderer settings (2026-10-25): the cause and the fix
+
+`RP_SHELL_ENV` (749f530) gives gnome-shell extra environment in the soak. CI runs 40179217476 and 40180809089 (temporary branch `soak-alloc`, GNOME 50, 20 minutes, the normal soak):
+
+| Shell setting | Runs | RSS slope after the first half (MB/min) | RSS at the end (MB) |
+| --- | --- | --- | --- |
+| as is | 3 | -0.233, 0.089, **0.830** | 337-339 |
+| `MALLOC_ARENA_MAX=2` | 3 | 0.083, **0.818**, -0.277 | 316-324 |
+| `LP_NUM_THREADS=0` (llvmpipe on one thread) | 9 | 0.141, 0.047, 0.066, 0.304, -0.171, 0.041, 0.063, 0.297, 0.255 | 309.5-313.4 |
+
+- **Cause:** llvmpipe, the software renderer the CI and headless shells paint with, rasterizes on several threads; how much of their memory the shell keeps differs from run to run while the menu is painted. Fewer malloc arenas do not change it; one render thread does. With threads, 5 of the 12 normal soaks this session went over 0.5 MB/min (ending at 320-348 MB); on one thread 9 of 9 stayed under 0.31 and ended within 4 MB of each other. The JS heap is flat throughout, the bare shell is flat, and the collectors with the menu closed are flat: no leak in the extension. A GPU does not use llvmpipe, so users are not affected.
+- **Fix:** `test-soak` runs the shell with `LP_NUM_THREADS=0` unless `RP_SHELL_ENV` says otherwise (`RP_SHELL_ENV=none` soaks with the threads). The RSS limit stays at 0.5 MB/min, now with room above the spread. `test-overhead` (CPU budgets) keeps the default renderer.
+- **Proof:** the nine soaks above, and the master CI soak through the default.
