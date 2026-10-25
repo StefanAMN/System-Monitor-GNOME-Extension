@@ -679,7 +679,7 @@ cmd_test_compat() {
             mkdir -p "$art"
             chmod 777 "$art"
             # shellcheck disable=SC2086
-            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts -e RP_SOAK_LEAK="${RP_SOAK_LEAK:-0}" "${EXTRA[@]}" \
+            if docker run --rm -v "$REPO_DIR":/src:ro -v "$art":/artifacts -e RP_ARTIFACTS=/artifacts -e RP_SOAK_LEAK="${RP_SOAK_LEAK:-0}" -e RP_SOAK_VARIANT="${RP_SOAK_VARIANT:-all}" "${EXTRA[@]}" \
                     "$img" ./scripts/dev.sh $t > "$art.log" 2>&1; then
                 line="$line|$name pass"
             else
