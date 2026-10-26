@@ -539,7 +539,7 @@ cmd_test_ui() {
 
     local SANDBOX LOG BAD
     # About 5 minutes on a laptop; more under software rendering on a runner.
-    run_driver ui-driver rp-ui-driver@resource-pulse.test 480
+    run_driver ui-driver rp-ui-driver@resource-pulse.test 540
 
     if driver_passed; then
         log_success "UI test passed${RP_KEEP:+ (screenshots: $SANDBOX/shots)}"
@@ -565,7 +565,7 @@ cmd_test_overhead() {
 
     local SANDBOX LOG BAD
     export RP_SOAK="$SOAK" RP_OVERHEAD_WINDOW="$WINDOW"
-    run_driver overhead-driver rp-overhead-driver@resource-pulse.test $(( WINDOW * 5 + SOAK + 120 ))
+    run_driver overhead-driver rp-overhead-driver@resource-pulse.test $(( WINDOW * 7 + SOAK + 120 ))
 
     grep -o "RP-OVERHEAD .*" "$LOG" | sed 's/^RP-OVERHEAD /  /' || true
     if driver_passed; then

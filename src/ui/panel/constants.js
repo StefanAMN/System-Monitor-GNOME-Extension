@@ -22,6 +22,14 @@ export const METRIC_NAMES = translated({
 // Alerts watch metrics that are not pinned too; the slower ones less often.
 export const ALERT_DISK_EVERY_US = 60e6;
 export const ALERT_GPU_EVERY_US = 30e6;
+// The two reads that cost most (nvidia-smi is a process of its own, the process
+// list walks /proc) are not repeated faster than this at short intervals, a
+// little under a second so that a 1 s timer still reads them each time.
+export const GPU_EVERY_US = 900000;
+export const PROCESS_EVERY_US = 900000;
+// A metric silent for longer than 2.5 intervals was not being read; below
+// this floor a busy moment of the shell is not that.
+export const MIN_GAP_US = 2.5e6;
 // Network, battery and power are read this often while not shown, so the
 // 1 h / 24 h charts and the network day totals have no holes.
 export const BACKGROUND_EVERY_US = 60e6;
@@ -35,6 +43,9 @@ export const NET_USAGE_SAVE_US = 5 * 60e6;
 // all: gliding the top bar cost about 0.4 % around the clock, which broke
 // the 1 % menu-closed budget; it shows the averaged values once per reading.
 export const GLIDE_FRAME_MS = 250;
+// A glide lasts one interval, but no longer than this: at 30 s the values
+// would still be on their way when the next reading came.
+export const GLIDE_MAX_US = 2e6;
 // Rows in each top-process list (the sampler is asked for this many).
 export const PROCESS_ROWS = 5;
 // Rows a process search shows at most (matches, busiest first).

@@ -12,7 +12,7 @@ import Adw from 'gi://Adw';
 import Pango from 'gi://Pango';
 import Graphene from 'gi://Graphene';
 
-import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned, movePinned, formatSettingValue } from '../../lib/common/settingsmodel.js';
+import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned, movePinned, formatSettingValue, nearestStop } from '../../lib/common/settingsmodel.js';
 import { formatTemp } from '../../lib/common/format.js';
 import { sanitizeMetricList } from '../../lib/common/present.js';
 import { RAPL_FIX_COMMANDS, raplFixWarning } from '../../lib/common/raplfix.js';
@@ -280,16 +280,30 @@ function sliderRow(row, settings, iconFor) {
     const widget = explain(new Adw.ActionRow({ title: _(row.title) }), _(row.detail));
     const gicon = row.metric ? iconFor?.(row.metric) : null;
     if (gicon) widget.add_prefix(new Gtk.Image({ gicon, css_classes: [`rp-c-${row.metric}`] }));
-    const adjustment = new Gtk.Adjustment({ lower: row.min, upper: row.max, step_increment: row.step, page_increment: row.step });
+    // With stops the slider moves over their positions and the setting keeps the value.
+    const stops = row.stops;
+    const adjustment = stops
+        ? new Gtk.Adjustment({ lower: 0, upper: stops.length - 1, step_increment: 1, page_increment: 1 })
+        : new Gtk.Adjustment({ lower: row.min, upper: row.max, step_increment: row.step, page_increment: row.step });
     const scale = new Gtk.Scale({ adjustment, draw_value: false, digits: 0, round_digits: 0, width_request: 180, valign: Gtk.Align.CENTER, css_classes: ['rp-slider'] });
     scale.update_property([Gtk.AccessibleProperty.LABEL], [_(row.title)]);
     widget.knobOnly = knobOnly(scale);
     const label = new Gtk.Label({ width_chars: 6, xalign: 1, css_classes: ['rp-slider-value', 'numeric'] });
     widget.add_suffix(scale);
     widget.add_suffix(label);
-    settings.bind(row.key, adjustment, 'value', Gio.SettingsBindFlags.DEFAULT);
+    if (stops) {
+        // An off-stop value stays stored until the slider is moved.
+        adjustment.connect('value-changed', () => {
+            const at = Math.round(adjustment.value);
+            if (at !== nearestStop(stops, settings.get_int(row.key))) settings.set_int(row.key, stops[at]);
+        });
+    } else {
+        settings.bind(row.key, adjustment, 'value', Gio.SettingsBindFlags.DEFAULT);
+    }
     const show = () => {
-        label.label = formatSettingValue(row, Math.round(adjustment.value), settings.get_string('unit-temp') || 'C');
+        if (stops) adjustment.value = nearestStop(stops, settings.get_int(row.key));
+        label.label = formatSettingValue(row, stops ? settings.get_int(row.key) : Math.round(adjustment.value), settings.get_string('unit-temp') || 'C');
+        if (stops) scale.update_property([Gtk.AccessibleProperty.VALUE_TEXT], [label.label]);
     };
     adjustment.connect('value-changed', show);
     show();

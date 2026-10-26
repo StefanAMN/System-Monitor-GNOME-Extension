@@ -12,7 +12,7 @@ import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
 import { _, fill } from '../../lib/common/i18n.js';
 import { logOnce } from '../../lib/common/utils.js';
-import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, SEARCH_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
+import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, GPU_EVERY_US, PROCESS_EVERY_US, MIN_GAP_US, GLIDE_MAX_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, SEARCH_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
 
 export class PollingMethods {
     /** Pinned metrics as stored, minus unknown keys and duplicates. */
@@ -43,17 +43,19 @@ export class PollingMethods {
 
     _startPolling() {
         if (this._timeoutId) GLib.source_remove(this._timeoutId);
-        const interval = Math.max(1, this._settings.get_int('poll-interval') || 2);
-        this._intervalUs = interval * 1000000;
+        const intervalMs = this._settings.get_int('poll-interval-ms');
+        const interval = intervalMs / 1000;
+        this._glideUs = Math.min(intervalMs * 1000, GLIDE_MAX_US);
+        this._gapUs = Math.max(2.5 * intervalMs * 1000, MIN_GAP_US);
 
         // Samples taken at another cadence would distort the time axis.
         for (const key of HISTORY_KEYS) this._hist[key].clear();
-        const span = interval * HISTORY_CAPACITY;
+        const span = Math.round(interval * HISTORY_CAPACITY);
         // Translators: how much a chart shows, kept short: "2m", "60s".
         const spanLabel = span > 60 && span % 60 === 0 ? fill(_('{m}m'), { m: span / 60 }) : fill(_('{s}s'), { s: span });
         this._spanLabel = spanLabel;
         this._sampleSeconds = interval;
-        this._pwrStats.maxGapS = 2.5 * interval;
+        this._pwrStats.maxGapS = this._gapUs / 1e6;
         for (const spark of this._sparklines) {
             spark.setSpanLabel(spanLabel);
             spark.setSampleSeconds(interval);
@@ -61,10 +63,14 @@ export class PollingMethods {
         this._applyRange();
 
         this._poll();
-        this._timeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, () => {
+        const tick = () => {
             this._poll(true);
             return GLib.SOURCE_CONTINUE;
-        });
+        };
+        // Whole seconds wake together with the rest of the session's timers.
+        this._timeoutId = intervalMs % 1000 === 0
+            ? GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, interval, tick)
+            : GLib.timeout_add(GLib.PRIORITY_DEFAULT, intervalMs, tick);
     }
 
     _deferPoll(waitUs) {
@@ -95,14 +101,14 @@ export class PollingMethods {
     /** The reading as shown right now: part of the way through the glide. */
     _shownNow(now = GLib.get_monotonic_time(), out = null) {
         if (!this._shownTo) return null;
-        const t = this._intervalUs > 0 ? (now - this._shownAt) / this._intervalUs : 1;
+        const t = this._glideUs > 0 ? (now - this._shownAt) / this._glideUs : 1;
         return interpolateReading(this._shownFrom, this._shownTo, t, out);
     }
 
     /**
      * A new reading: glide from what is shown now to it (CPU, GPU, network
-     * and disk lightly smoothed first) over one polling interval, so the
-     * values arrive as the next reading does.
+     * and disk lightly smoothed first) over one polling interval, at most
+     * GLIDE_MAX_US, so the values arrive by the time the next reading does.
      */
     _present(data) {
         const now = GLib.get_monotonic_time();
@@ -135,7 +141,7 @@ export class PollingMethods {
         if (this._glideId || this._indicatorGone) return;
         this._glideId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, GLIDE_FRAME_MS, () => {
             const now = GLib.get_monotonic_time();
-            const done = !this._smoothOn() || !this._menuOpen || now - this._shownAt >= this._intervalUs;
+            const done = !this._smoothOn() || !this._menuOpen || now - this._shownAt >= this._glideUs;
             // Frames write into one reused buffer; a new reading copies it
             // as the next glide's start (_present), so no frame allocates a
             // whole new reading.
@@ -155,7 +161,7 @@ export class PollingMethods {
         // A metric that was not sampled for a while (unpinned with the menu
         // closed) restarts its graph instead of joining stale and fresh points.
         const last = this._histStamp[key] || 0;
-        if (last && now - last > 2.5 * this._intervalUs) this._hist[key].clear();
+        if (last && now - last > this._gapUs) this._hist[key].clear();
         this._histStamp[key] = now;
         this._hist[key].push(value);
     }
@@ -343,7 +349,7 @@ export class PollingMethods {
                 mem: true,
                 thm: true,
                 dsk: shown.dsk || due('dsk', ALERT_DISK_EVERY_US),
-                gpu: shown.gpu || due('gpu', ALERT_GPU_EVERY_US),
+                gpu: due('gpu', shown.gpu ? GPU_EVERY_US : ALERT_GPU_EVERY_US),
                 net: shown.net || due('net', BACKGROUND_EVERY_US),
                 bat: shown.bat || due('bat', BACKGROUND_EVERY_US),
             };
@@ -418,17 +424,28 @@ export class PollingMethods {
                 // on another tab) would turn the rates into long averages.
                 // The open page's search, if any: matches instead of the busiest five.
                 const filter = this._procFilters?.[isDetailedMem ? 'memory' : isDetailedDsk ? 'disk' : 'cpu'] ?? '';
-                const procResult = await this._guarded('processes', deadline,
-                    () => this._proc.sample(mem.total, isDetailedMem, filter ? SEARCH_ROWS : PROCESS_ROWS, 2.5 * this._sampleSeconds, { io: isDetailedDsk, filter }), null);
-                if (gen !== this._gen) return;
-                // null: the sampler was destroyed or is still reading.
-                // CPU and disk rates need two readings; memory is valid from the first.
-                procWarmingUp = !!procResult?.warmingUp && !isDetailedMem;
-                if (procResult && !procWarmingUp) {
-                    processes = procResult.top;
-                    procSort = isDetailedMem ? 'memory' : isDetailedDsk ? 'disk' : 'cpu';
-                    procFilter = filter;
-                    ioDenied = procResult.ioDenied;
+                procSort = isDetailedMem ? 'memory' : isDetailedDsk ? 'disk' : 'cpu';
+                procFilter = filter;
+                const held = this._procHeld;
+                if (tick && held?.sort === procSort && held.filter === filter && now - held.at < PROCESS_EVERY_US) {
+                    // Too soon for a new list: this reading shows the last one.
+                    processes = held.processes;
+                    ioDenied = held.ioDenied;
+                } else {
+                    const procResult = await this._guarded('processes', deadline,
+                        () => this._proc.sample(mem.total, isDetailedMem, filter ? SEARCH_ROWS : PROCESS_ROWS, this._gapUs / 1e6, { io: isDetailedDsk, filter }), null);
+                    if (gen !== this._gen) return;
+                    // null: the sampler was destroyed or is still reading.
+                    // CPU and disk rates need two readings; memory is valid from the first.
+                    procWarmingUp = !!procResult?.warmingUp && !isDetailedMem;
+                    if (procResult && !procWarmingUp) {
+                        processes = procResult.top;
+                        ioDenied = procResult.ioDenied;
+                        this._procHeld = { at: now, sort: procSort, filter, processes, ioDenied };
+                    } else {
+                        procSort = null;
+                        procFilter = '';
+                    }
                 }
             } else if (!isOpen) {
                 // Deltas across a closed menu would be averages over minutes.

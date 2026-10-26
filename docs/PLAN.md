@@ -1484,3 +1484,20 @@ Rejected: a pty wrapper typing into the three CLIs. Their first screens (update 
 **Edge cases:** first run in the agent folder shows the agent's own trust question. A future Claude Code that drops `--prefill` would fail in the terminal: the flag is undocumented.
 
 **Proof:** lint clean; `test-unit` 610 passed; `test-ui` passed, also with the owner's `~/.config/gtk-4.0/gtk.css` (`RP_GTK_USER_CSS`), the real pointer opening the menu, picking Claude Code and answering the confirmation, the open menu's colours and contrast read from rendered pixels; `test-i18n` passed. Real launches: `claude --prefill` in a pty shows the text with "Pre-filled prompt · review before pressing Enter" and sends nothing, multi-line too; the Claude and Codex apps were opened on their URLs. Not verified: the prompt showing inside the Claude and Codex windows (not seen on screen); a direct `prefs-check` on the host desktop reported "did not paint" on Settings component and diagnostics renders, none about the agent section.
+
+# Update every: steps that widen with the value (2026-10-30)
+
+Owner: the slider should scale about exponentially, precise in the very frequent updates and faster at high values.
+
+**Change:** 19 stops from 0.25 s to 30 s, about equal ratios (`POLL_STOPS_MS`). Whole seconds could not hold them, so a new key `poll-interval-ms`; a set `poll-interval` moves over once at enable or when the window opens, and backups with the old key still restore. A stored value between stops (8 s) is kept and shown as it is until the slider moves. Whole seconds keep `timeout_add_seconds`, which wakes together with the session's other timers.
+
+**Why these limits:** 0.25 s is the glide's frame time, and a process's CPU share in that window moves in steps of 4 points (10 ms ticks). 30 s keeps a reading in every minute of the 1 h chart and at least two readings in the 30 s alert hold.
+
+**What short and long intervals needed:**
+- A chart restarted when a metric was silent for 2.5 intervals: 0.6 s at the fast end, which a busy shell reaches. Floor of 2.5 s (`MIN_GAP_US`), also for the power statistics and the process baseline.
+- nvidia-smi and the /proc walk stay at about one read a second (`GPU_EVERY_US`, `PROCESS_EVERY_US`); ticks in between show the last result. Clicks and searches still read at once.
+- A glide lasts at most 2 s (`GLIDE_MAX_US`): at 30 s values would still be on their way at the next reading.
+
+**Proof:** unit (stops, nearest stop, migration on a memory backend, old backups). test-ui under Orchis-Pink, real pointer: drag to both ends and a sixth along; in the shell 10-13 ticks in 3 s at 0.25 s, 3-5 process and GPU reads in 4 s, no ticks in 2 s at 30 s. `test-overhead 0`, one run on a quiet machine: 2 s default closed +0.33 % (budget 1 %); 0.25 s closed +4.33 %, CPU tab +7.10 %; an earlier run with another shell test running read +3.60 % and +14.87 %.
+
+**Open:** the 1 % budget holds at the default, not below about 1 s (cost scales with the rate); that is the owner's choice per setting, and the row's tooltip says so. Sub-second intervals with a real NVIDIA card were not run.

@@ -188,7 +188,7 @@ function growth(a, b, polls) {
 async function overhead() {
     let ext = rp();
     check(ext, 'target extension not enabled');
-    ext._settings.set_int('poll-interval', 2);
+    ext._settings.set_int('poll-interval-ms', 2000);
     ext._settings.set_strv('pinned-metrics', ALL_METRICS);
 
     // Baseline: same shell, extension disabled.
@@ -204,6 +204,19 @@ async function overhead() {
 
     const closed = await measureCpu(WINDOW_S) - base;
     report(`menu closed, all 8 metrics pinned, 2 s interval: +${closed.toFixed(2)}% (budget ${BUDGET_CLOSED}%)`);
+
+    // Each 8 times the readings of the default; a choice of the owner, so reported, not judged.
+    ext._settings.set_int('poll-interval-ms', 250);
+    await sleep(3000);
+    const closedFast = await measureCpu(WINDOW_S) - base;
+    ext._indicator.menu.open();
+    showTab(ext, 'cpu');
+    await sleep(3000);
+    const openFast = await measureCpu(WINDOW_S) - base;
+    ext._indicator.menu.close();
+    ext._settings.set_int('poll-interval-ms', 2000);
+    await sleep(3000);
+    report(`shortest interval, 0.25 s: menu closed +${closedFast.toFixed(2)}%, CPU tab +${openFast.toFixed(2)}%`);
 
     ext._indicator.menu.open();
     showTab(ext, 'overview');
@@ -317,7 +330,7 @@ async function soak() {
             return present.call(this, data);
         };
     }
-    ext._settings.set_int('poll-interval', 1);
+    ext._settings.set_int('poll-interval-ms', 1000);
     if (SOAK_MENU) ext._indicator.menu.open();
     // Polls that ran during the soak; with polling paused, every page is
     // built with real readings first.
@@ -375,7 +388,7 @@ async function soak() {
     delete ext._poll;
     showTab(ext, 'overview');
     ext._indicator.menu.close();
-    ext._settings.set_int('poll-interval', 2);
+    ext._settings.set_int('poll-interval-ms', 2000);
     if (SOAK_LEAK) delete ext._present;
 
     // RSS after the first half: the collector and the allocator settle
