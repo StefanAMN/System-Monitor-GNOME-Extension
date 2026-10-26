@@ -1784,6 +1784,17 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         GLib.file_set_contents(`${proc}/100/fdinfo/3`, client(7, 5e9));
         got = await gs.sample(units);
         eq(got.get('app-a.scope'), 6e9, 'gpu: later samples read the cached GPU fds');
+        // A process whose fds are not ours to read: left out, the others still read.
+        GLib.mkdir_with_parents(`${proc}/400/fd`, 0o000);
+        if (Gio.Credentials.new().get_unix_user() === 0) {
+            print('SKIP gpu: an unreadable fd table cannot be simulated as root');
+        } else {
+            const denied = await new GpuUsageSampler(proc).sample(new Map([['app-a.scope', [400, 100, 101]]]));
+            eq(denied.get('app-a.scope'), 6e9, 'gpu: a process whose fds cannot be read is left out, the rest still counted');
+        }
+        GLib.chmod(`${proc}/400/fd`, 0o755);
+        GLib.rmdir(`${proc}/400/fd`);
+        GLib.rmdir(`${proc}/400`);
         const gpuPending = gs.sample(units);
         const gpuIdle = gs._idleId;
         gs.cancel();

@@ -12,7 +12,7 @@
 //
 // HAL layer: reads and sums counters; deltas are the ledger's job.
 import GLib from 'gi://GLib';
-import { noteReadError } from '../common/utils.js';
+import { noteReadError, logOnce } from '../common/utils.js';
 
 const RESCAN_US = 10 * 60 * 1e6;
 // Bounded cache: one entry per live process that was looked at.
@@ -43,7 +43,13 @@ function gpuLinks(dir) {
     try {
         handle = GLib.Dir.open(dir, 0);
     } catch (e) {
-        // A process that exited meanwhile, or another user's: normal.
+        // Not ours to read (a privileged helper in the session, another
+        // user's process): normal, said once, not per process.
+        if (e.matches?.(GLib.FileError, GLib.FileError.ACCES) || e.matches?.(GLib.FileError, GLib.FileError.PERM)) {
+            logOnce('ResourcePulse: some processes\' open files cannot be read (permission denied); GPU time per app leaves those processes out');
+            return fds;
+        }
+        // A process that exited meanwhile: normal (noteReadError keeps quiet on ENOENT).
         noteReadError(e);
         return fds;
     }
