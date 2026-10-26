@@ -355,7 +355,7 @@ cmd_test_dedicated() {
         echo "$NOTES"
     fi
     if [ "${OTHERS:-0}" -gt 0 ]; then
-        log_info "$OTHERS error(s) in the log come from other extensions (their stack traces do not mention $UUID)."
+        log_info "$OTHERS error(s) in the log are not this extension's: GNOME Shell's own or another extension's (their stack traces do not mention $UUID)."
     fi
 }
 
