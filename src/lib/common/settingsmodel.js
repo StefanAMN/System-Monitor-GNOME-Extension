@@ -90,7 +90,7 @@ export const SETTINGS_SECTIONS = [
             },
             {
                 key: 'smooth-transitions', kind: 'switch', title: N_('Smooth changes'),
-                detail: N_('Values glide to each new reading over one update; CPU, GPU, network and disk are lightly averaged'),
+                detail: N_('Values glide to each new reading; CPU, GPU, power, network and disk show their average over 10 s'),
             },
             {
                 key: 'unit-temp', kind: 'choice', title: N_('Temperature'),

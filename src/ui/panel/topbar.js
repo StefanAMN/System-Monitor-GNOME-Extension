@@ -290,7 +290,7 @@ export class TopbarMethods {
                 text = na();
             else if (key === 'power' && data.pwr) {
                 const readout = powerReadout(data.pwr);
-                text = readout.value === null ? na() : `${readout.value.toFixed(1)}W`;
+                text = readout.value === null ? na() : `${Math.round(readout.value)}W`;
             }
             else if (key === 'disk' && data.dsk && data.dsk.mounts.length > 0)
                 text = `${Math.round(data.dsk.mounts[0].percent)}%`;

@@ -123,9 +123,10 @@ export function labelTemplate(key, opts = {}) {
         // gap before the next metric whenever it was absent.
         return '100%';
     case 'power':
-        // Draw rarely crosses 10 W back and forth, so one integer digit:
-        // a second one would sit empty on most laptops most of the time.
-        return '9.9W';
+        // Two digits, about the room '9.9W' took: laptop draw under load
+        // crosses 10 W often (6 to 16 W averaged, measured), and neighbours
+        // must not shift when it does.
+        return '99W';
     case 'thermal':
         return opts.tempUnit === 'F' ? '199°F' : '99°C';
     case 'network':

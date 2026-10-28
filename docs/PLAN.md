@@ -1539,3 +1539,19 @@ Owner: look through the extension for bugs, and ways to use fewer resources or b
 | Menu open, CPU tab | +2.43, +2.40, +2.53 % | +2.60, +2.70, +2.03 % |
 
 Not run: a real attached or removed disk, a slow real mount, a client ending in a real GPU app (fixtures only), a battery driver that signs its power, AMD or NVIDIA GPUs.
+
+# Shown values: a 10 s average instead of a weight per reading (2026-10-31)
+
+Owner: values go up and down oddly (power 4 W to 6 W and back within seconds); the way they are shown reads as bizarre.
+
+**Cause:** not the glide. Power was not smoothed at all: a 2 s reading really swings (`6.0 5.4 6.3 8.0 6.3 7.1`), as bursts of work fall into one window or the next. CPU, GPU, disk and network had only a 50 % weight per reading.
+
+**Change:** `DisplayAverage` (`smoothing.js`): CPU, per-core, GPU, CPU and system power, disk and network show their average over the last 10 s, each reading weighted by the time it covers, so it does not depend on the interval (at 10 s and over a reading is shown as it is). Replaces `ema`, `smoothReading` and `smoothAlpha`. Power reads in whole watts in the top bar and on its card; the Power page keeps one decimal, also averaged. The glide stays. "Smooth changes" off still shows raw readings.
+
+**Data gathering is untouched:** no extra reads. Charts, alerts, power peak and mean, network totals and tracking keep the raw readings. Fixed memory: three arrays of 48 per value shown. A part of a reading repeated from the last poll is not counted again.
+
+**Edge cases:** the first reading covers no time (rates have no baseline), so it is shown but carries no weight. A number lags a real change by up to 10 s, and a short spike shows lower in the number than in the chart (28 W read 16 W). An alert can turn a value red before its average looks high. Per card for GPUs, so a change of the card shown does not mix them. Departed interfaces are forgotten.
+
+**Choices from measurement** (100 s of real power at 2 s; direction reversals): raw 27; weight 0.5: 25; weight 0.25: 17; 10 s average: 13; 20 s: 11; 10 s in whole watts: 7. Updating only on a change of at least 0.5 W or 10 %: 25, with bigger jumps.
+
+**Proof:** lint clean; test-unit 654 passed, including the real power figures above (reversals at least halved, a real rise visible within 10 s); test-ui and test-i18n passed, the panel's power values checked as whole watts. test-overhead: menu closed +0.30 %, overview +3.63 %, CPU tab +2.27 %, within the earlier runs' spread. The top-bar label keeps room for two digits (`99W`), about what `9.9W` took. Not run: power on battery (UPower's figure), a GPU reporting its own power.

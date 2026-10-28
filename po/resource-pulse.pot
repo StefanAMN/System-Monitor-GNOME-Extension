@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-30 23:04+0200\n"
+"POT-Creation-Date: 2026-10-31 10:31+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -32,7 +32,7 @@ msgstr ""
 msgid "Linux OS"
 msgstr ""
 
-#: src/lib/collectors/gpu.js:388
+#: src/lib/collectors/gpu.js:395
 msgid "No Active GPU"
 msgstr ""
 
@@ -247,7 +247,7 @@ msgstr ""
 
 #: src/lib/common/present.js:66 src/lib/common/settingsmodel.js:24
 #: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:20
-#: src/ui/panel/constants.js:64 src/ui/panel/dashboard.js:379
+#: src/ui/panel/constants.js:64 src/ui/panel/dashboard.js:380
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:626
 msgid "GPU"
 msgstr ""
@@ -475,8 +475,8 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:93
 msgid ""
-"Values glide to each new reading over one update; CPU, GPU, network and disk "
-"are lightly averaged"
+"Values glide to each new reading; CPU, GPU, power, network and disk show "
+"their average over 10 s"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:96 src/lib/common/settingsmodel.js:127
@@ -1289,48 +1289,48 @@ msgstr ""
 msgid "{h}h {m}m remaining"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:172
+#: src/ui/panel/dashboard.js:173
 msgid "Charging (+{watts} W)"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:174
+#: src/ui/panel/dashboard.js:175
 msgid "Energy counters not readable"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:187
+#: src/ui/panel/dashboard.js:188
 msgid "0.0 W (Full)"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:212
+#: src/ui/panel/dashboard.js:213
 #, javascript-format
 msgid "used on / · {busy}% busy"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:311
+#: src/ui/panel/dashboard.js:312
 msgid "No sensor found"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:328
+#: src/ui/panel/dashboard.js:329
 msgid "No sensors found"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:384
+#: src/ui/panel/dashboard.js:385
 msgid "No GPU Detected"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:397
+#: src/ui/panel/dashboard.js:398
 msgid "{brand} Graphics"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:400
+#: src/ui/panel/dashboard.js:401
 msgid "Driver: {driver}"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:492
+#: src/ui/panel/dashboard.js:493
 msgid "No process matches “{text}”."
 msgstr ""
 
-#: src/ui/panel/dashboard.js:499
+#: src/ui/panel/dashboard.js:500
 msgid "Yours only · {n} system process needs administrator rights"
 msgid_plural "Yours only · {n} system processes need administrator rights"
 msgstr[0] ""

@@ -158,7 +158,8 @@ export class DashboardMethods {
             
             const readout = powerReadout(pwr);
             const draw = readout.value ?? 0;
-            const drawStr = readout.value === null ? na() : `${draw.toFixed(1)} W`;
+            // Whole watts at a glance; the Power page keeps the decimal.
+            const drawStr = readout.value === null ? na() : `${Math.round(draw)} W`;
 
             const bat = data.bat;
             const isCharging = bat && bat.present && bat.state === 'charging' && bat.energyRate > 0;

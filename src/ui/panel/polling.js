@@ -6,7 +6,7 @@ import Shell from 'gi://Shell';
 import { BatteryTracker } from '../../lib/engine/batterytracker.js';
 import { powerReadout, thermalUnavailable } from '../../lib/common/present.js';
 import { RANGES } from '../../lib/engine/longhistory.js';
-import { smoothAlpha, smoothReading, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
+import { DisplayAverage, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
 import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
@@ -106,8 +106,8 @@ export class PollingMethods {
     }
 
     /**
-     * A new reading: glide from what is shown now to it (CPU, GPU, network
-     * and disk lightly smoothed first) over one polling interval, at most
+     * A new reading: glide from what is shown now to it (CPU, GPU, power,
+     * network and disk averaged over 10 s first) over one polling interval, at most
      * GLIDE_MAX_US, so the values arrive by the time the next reading does.
      */
     _present(data) {
@@ -115,12 +115,12 @@ export class PollingMethods {
         if (!this._smoothOn()) {
             this._shownFrom = null;
             this._shownTo = data;
-            this._smoothPrev = null;
+            this._average = null;
             this._render(data);
             return;
         }
-        const target = smoothReading(this._smoothPrev, data, smoothAlpha(this._sampleSeconds * 1000));
-        this._smoothPrev = target;
+        this._average ??= new DisplayAverage();
+        const target = this._average.add(data, now);
         if (!this._menuOpen) {
             // Closed: averaged values, once per reading, no frames.
             this._shownFrom = null;

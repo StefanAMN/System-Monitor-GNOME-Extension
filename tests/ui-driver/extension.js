@@ -373,7 +373,7 @@ async function cycleTabs(rp, pass, tag = null) {
     for (const [key, w] of Object.entries(rp._topBarWidgets)) {
         if (!w.label) continue;
         const widths = [];
-        for (const text of ['9%', '99%', 'n/a', '9%']) {
+        for (const text of key === 'power' ? ['9W', '99W', 'n/a', '9W'] : ['9%', '99%', 'n/a', '9%']) {
             w.label.text = text;
             widths.push(w.label.get_preferred_width(-1)[1]);
         }
@@ -1281,7 +1281,7 @@ async function smoothGlide(rp) {
         const reading = (mem, cpu) => ({ ...base, mem: { ...base.mem, percent: mem }, cpu: { ...base.cpu, total: cpu } });
         const mem = () => parseInt(rp._summaryCards.memory.valueLabel.text, 10);
         const cpu = () => parseInt(rp._summaryCards.cpu.valueLabel.text, 10);
-        rp._smoothPrev = null;
+        rp._average = null;
         rp._shownTo = null;
         rp._present(reading(20, 10));
         await sleep(rp._glideUs / 1000 + 300);
@@ -1309,9 +1309,15 @@ async function smoothGlide(rp) {
         check(between.size >= 5, `glide: memory showed ${[...between].join(', ')} on the way (want ≥ 4 in-between values)`);
         check(seen.every((v, i) => i === 0 || v >= seen[i - 1]), `glide: memory went back on the way (${seen.join(', ')})`);
         check(mem() === 80, `glide: memory ended at ${mem()}, not the reading 80`);
-        check(cpu() === 50, `glide: CPU ended at ${cpu()}, not the average 50 of 10 and 90`);
+        // The first reading after a start covers no time: the second is the average so far.
+        check(cpu() === 90, `glide: CPU ended at ${cpu()}, not 90, the average of what covers any time`);
         check(rp._topBarWidgets.memory.label.text === '80%', `glide: top bar memory ends at '${rp._topBarWidgets.memory.label.text}'`);
         check(rp._summaryCards.memory.pbar.pct === 80, `glide: the memory bar ends at ${rp._summaryCards.memory.pbar.pct} %`);
+        // Power in whole watts at a glance; the Power page keeps the decimal.
+        const powerCard = rp._summaryCards.power?.valueLabel.text;
+        check(powerCard === undefined || /^(\d+ W|n\/a)$/.test(powerCard), `glide: the power card reads '${powerCard}', not whole watts`);
+        const powerBar = rp._topBarWidgets.power?.label?.text;
+        check(powerBar === undefined || /^(\d+W|n\/a|--)$/.test(powerBar), `glide: the top-bar power reads '${powerBar}', not whole watts`);
         console.log(`RP-UITEST glide: memory 20 -> ${seen.join(' ')} -> ${mem()} over ${(rp._glideUs / 1e6).toFixed(0)} s`);
 
         // Menu closed: no frames at all (the budget is 1 %); the top bar
@@ -1320,8 +1326,9 @@ async function smoothGlide(rp) {
         await sleep(400);
         rp._present(reading(40, 10));
         check(!rp._glideId, 'glide: frames run with the menu closed');
-        check(rp._topBarWidgets.memory.label.text === '40%' && rp._topBarWidgets.cpu.label.text === '30%',
-            `glide: closed top bar shows '${rp._topBarWidgets.memory.label.text}' / '${rp._topBarWidgets.cpu.label.text}', not 40% / the average 30%`);
+        const closedCpu = parseInt(rp._topBarWidgets.cpu.label.text, 10);
+        check(rp._topBarWidgets.memory.label.text === '40%' && closedCpu > 10 && closedCpu < 90,
+            `glide: closed top bar shows '${rp._topBarWidgets.memory.label.text}' / '${rp._topBarWidgets.cpu.label.text}', not 40% / an average between 90% and 10%`);
 
     } finally {
         delete rp._poll;

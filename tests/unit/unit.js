@@ -31,7 +31,7 @@ import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler
 import { parseProcIo, AppIoSampler } from '../../src/lib/collectors/appio.js';
 import { componentView, healthView, bars, COMPONENTS, stepFor, zoomAbout, clampRange, MIN_SPAN_MS } from '../../src/lib/engine/trackingview.js';
 import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
-import { ema, smoothAlpha, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
+import { DisplayAverage, DISPLAY_WINDOW_US, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES, FINE_MS, FINE_KEPT_MS, MAX_FINE, HEALTH_DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth, combineBatteries, BatterySampler } from '../../src/lib/collectors/battery.js';
@@ -450,7 +450,7 @@ docker0: 1 2 3
     const fits = (key, opts, samples) => samples.every(t => t.length <= labelTemplate(key, opts).length);
     ok(fits('cpu', {}, ['0%', '9%', '99%', 'n/a', '--']), 'template: cpu covers normal values');
     ok(labelTemplate('cpu').length < '100%'.length, 'template: no room reserved for the rare 100%');
-    ok(fits('power', {}, ['0.0W', '6.7W', 'n/a']), 'template: power');
+    ok(fits('power', {}, ['0W', '7W', '16W', 'n/a']), 'template: power');
     ok(fits('thermal', { tempUnit: 'C' }, [formatTemp(99, 'C'), 'n/a']), 'template: thermal C');
     eq(labelTemplate('battery', { batFmt: 'percent-time' }), '100%', 'template: no room reserved for a battery time estimate that may be absent');
 
@@ -668,7 +668,6 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
 
 // ── display smoothing: averaging and gliding between readings ──
 {
-    eq([ema(10, 30, 0.5), ema(NaN, 30, 0.5), ema(undefined, 7), ema(4, NaN)].map(v => Number.isNaN(v) ? 'NaN' : v), [20, 30, 7, 'NaN'], 'smooth: ema, and no previous value means the reading itself');
     const raw = (cpu, mem, rx) => ({
         cpu: { total: cpu, cores: [cpu, cpu], loadavg: [1.25, 1, 0.5], hardwareModel: 'X' },
         mem: { percent: mem, used: mem * 1e8 },
@@ -678,15 +677,73 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
         processes: [{ comm: 'a', cpu: 5 }],
     });
     const a = raw(10, 20, 1000);
-    eq(smoothReading(null, a), a, 'smooth: the first reading is shown as it is');
-    eq([smoothAlpha(250), smoothAlpha(2000), smoothAlpha(4000)], [0.5, 0.5, 0.75], 'smooth: the weight is fixed up to 2 s, then grows with the interval');
-    ok(smoothAlpha(30000) > 0.999, 'smooth: at 30 s the reading is nearly all new');
     const b = raw(90, 80, 3000);
-    const sb = smoothReading(a, b, 0.5);
-    eq([sb.cpu.total, sb.cpu.cores, sb.net.total.rxRate, sb.net.interfaces.wlp1.rxRate, sb.mem.percent],
-        [50, [50, 50], 2000, 2000, 80], 'smooth: CPU and network rates averaged, memory untouched');
-    eq([b.cpu.total, b.net.total.rxRate], [90, 3000], 'smooth: the raw reading is not modified (alerts and history use it)');
-    ok(sb.processes === b.processes && sb.cpu.loadavg === b.cpu.loadavg, 'smooth: everything else is the reading itself');
+    const S = 1e6;
+    {
+        const avg = new DisplayAverage();
+        const first = avg.add(a, 2 * S);
+        eq([first.cpu.total, first.net.total.rxRate, first.mem.percent], [10, 1000, 20], 'average: the first reading is shown as it is');
+        // The first covers no time (a rate has no baseline then), so it does not pull the next.
+        eq(avg.add(raw(50, 20, 1000), 4 * S).cpu.total, 50, 'average: the first reading carries no weight');
+        const sb = avg.add(b, 6 * S);
+        eq([sb.cpu.total, sb.cpu.cores, sb.net.total.rxRate, sb.net.interfaces.wlp1.rxRate, sb.mem.percent],
+            [70, [70, 70], 2000, 2000, 80], 'average: CPU and network rates averaged, memory untouched');
+        eq([b.cpu.total, b.net.total.rxRate], [90, 3000], 'average: the raw reading is not modified (alerts and history use it)');
+        ok(sb.processes === b.processes && sb.cpu.loadavg === b.cpu.loadavg, 'average: everything else is the reading itself');
+        // A part repeated from the last poll (not read this time) is not counted again.
+        const repeated = { ...raw(90, 80, 9000), net: b.net };
+        eq(avg.add(repeated, 8 * S).net.total.rxRate, 2000, 'average: a repeated reading is not counted twice');
+    }
+    {
+        // By the time each reading covers, within the window only.
+        const avg = new DisplayAverage();
+        const reading = cpu => ({ cpu: { total: cpu, cores: [] } });
+        avg.add(reading(0), 1 * S);
+        avg.add(reading(100), 3 * S);
+        eq(avg.add(reading(0), 9 * S).cpu.total, 25, 'average: weighted by the time each reading covers');
+        eq(avg.add(reading(50), 12 * S).cpu.total, 25, 'average: only the last 10 s, a reading on its edge in part');
+        eq(avg.add(reading(30), 60 * S).cpu.total, 30, 'average: a reading covering the whole window is that figure, at 30 s intervals too');
+        const quiet = new DisplayAverage();
+        quiet.add(reading(40), 1 * S);
+        eq(quiet.add(reading(40), 1 * S + DISPLAY_WINDOW_US * 3).cpu.total, 40, 'average: nothing recent still shows the last reading');
+    }
+    {
+        // Power: no figure stays no figure, on battery and off it.
+        const avg = new DisplayAverage();
+        const pwr = (packagePower, systemPower) => ({ pwr: { raplSupported: true, packagePower, systemPower } });
+        avg.add(pwr(0, null), 1 * S);
+        avg.add(pwr(4, null), 3 * S);
+        const ac = avg.add(pwr(8, null), 5 * S);
+        eq([ac.pwr.packagePower, ac.pwr.systemPower], [6, null], 'average: package power, and no system figure on AC');
+        avg.add(pwr(8, 20), 7 * S);
+        eq(avg.add(pwr(8, 10), 9 * S).pwr.systemPower, 10, 'average: on battery, the system figure from the first with a baseline');
+        // The GPU shown changes: its figures are not mixed with the other card's.
+        const cards = new DisplayAverage();
+        const gpu = (key, percent) => ({ gpu: { present: true, key, percent, powerDraw: null } });
+        cards.add(gpu('a', 90), 1 * S);
+        cards.add(gpu('a', 90), 3 * S);
+        cards.add(gpu('b', 10), 5 * S);
+        eq(cards.add(gpu('b', 20), 7 * S).gpu.percent, 20, 'average: per card');
+        // Interfaces that left are forgotten.
+        const ifaces = new DisplayAverage();
+        const net = name => ({ net: { total: { rxRate: 0, txRate: 0 }, interfaces: { [name]: { rxRate: 1, txRate: 1 } } } });
+        ifaces.add(net('veth1'), 1 * S);
+        ifaces.add(net('veth2'), 3 * S);
+        eq([...ifaces._interfaces.keys()], ['veth2'], 'average: an interface that left is forgotten');
+    }
+    {
+        // Real CPU power, read every 2 s on the owner's machine: the number
+        // stops going up and down, and a real rise still shows within 10 s.
+        const watts = [8.1, 7.8, 6.5, 7.2, 5.9, 6.9, 6.1, 6.0, 5.4, 6.3, 8.0, 6.3, 7.1, 6.7, 7.8, 8.6, 28.1, 20.8, 10.5, 10.2, 10.1, 23.9, 16.3, 8.9, 6.7];
+        const avg = new DisplayAverage();
+        const shown = watts.map((w, i) => Math.round(avg.add({ pwr: { packagePower: w, systemPower: null } }, (i + 1) * 2 * S).pwr.packagePower));
+        const reversals = list => {
+            const moves = list.slice(1).map((w, i) => w - list[i]).filter(Boolean);
+            return moves.slice(1).filter((m, i) => m * moves[i] < 0).length;
+        };
+        ok(reversals(shown) * 2 < reversals(watts.map(Math.round)), `average: real power reverses ${reversals(shown)} times, not ${reversals(watts.map(Math.round))}`);
+        ok(shown[20] > 15, `average: a real rise shows within 10 s (${shown[20]} W)`);
+    }
 
     const half = interpolateReading(a, b, 0.5);
     eq([half.cpu.total, half.cpu.cores, half.mem.percent, half.mem.used, half.net.total.rxRate, half.dsk.mounts[0].percent],

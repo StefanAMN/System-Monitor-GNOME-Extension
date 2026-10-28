@@ -1,79 +1,149 @@
 // Display smoothing. Engine layer, pure: the panel shows values that glide
 // from one reading to the next over one polling interval, and the noisiest
-// readings are lightly smoothed first. Alerts, history and the battery
+// readings are averaged over 10 s first. Alerts, history and the battery
 // tracker keep using the raw readings; only what is drawn goes through here.
 
-// Weight of a new reading for the noisy metrics: a one-reading spike shows
-// at half height, a real change is mostly there after two or three readings.
-export const SMOOTH_ALPHA = 0.5;
+// What is shown for the noisy readings: their average over the last 10 s. A
+// 2 s reading of CPU power really does swing from 6 to 8 W and back, as bursts
+// of work fall into one window or the next; numbers that do so read as noise.
+// The rates come from running totals, so this is the true figure over 10 s.
+export const DISPLAY_WINDOW_US = 10e6;
+// Kept per value. The shortest interval, 0.25 s, needs 40 in the window.
+const WINDOW_READINGS = 48;
 
-// The interval SMOOTH_ALPHA was chosen for; from here up the weight grows.
-const SMOOTH_INTERVAL_MS = 2000;
-
-/**
- * Weight of a new reading at a polling interval. A reading further apart is
- * already an average over that long and the old one says less about now: at
- * 30 s a fixed weight would still show half of a value from 30 s ago. Up to
- * the 2 s it was chosen for, SMOOTH_ALPHA, so fast intervals stay responsive.
- * @param {number} intervalMs
- */
-export function smoothAlpha(intervalMs) {
-    if (!(intervalMs > SMOOTH_INTERVAL_MS)) return SMOOTH_ALPHA;
-    return 1 - (1 - SMOOTH_ALPHA) ** (intervalMs / SMOOTH_INTERVAL_MS);
-}
-
-/** Exponential moving average; without a usable previous value, the reading itself. */
-export function ema(prev, next, alpha = SMOOTH_ALPHA) {
-    if (!Number.isFinite(next)) return next;
-    if (!Number.isFinite(prev)) return next;
-    return prev + (next - prev) * alpha;
-}
-
-/**
- * The reading to display for CPU, GPU, network and disk rates, smoothed
- * against the previous smoothed one. Memory, battery, temperature and
- * everything else pass through unchanged. Only the objects that change are
- * copied; the raw reading is never modified.
- * @param {?object} prev the previous result of this function
- * @param {object} data the new raw reading
- */
-export function smoothReading(prev, data, alpha = SMOOTH_ALPHA) {
-    if (!prev) return data;
-    const out = { ...data };
-    if (data.cpu && prev.cpu) {
-        out.cpu = { ...data.cpu, total: ema(prev.cpu.total, data.cpu.total, alpha) };
-        if (Array.isArray(data.cpu.cores) && prev.cpu.cores?.length === data.cpu.cores.length)
-            out.cpu.cores = data.cpu.cores.map((v, i) => ema(prev.cpu.cores[i], v, alpha));
+/** A value's readings over the window, each weighted by the time it covers. */
+class WindowMean {
+    constructor() {
+        this._end = new Float64Array(WINDOW_READINGS);
+        this._covers = new Float64Array(WINDOW_READINGS);
+        this._value = new Float64Array(WINDOW_READINGS);
+        this._next = 0;
+        this._count = 0;
+        this._last = NaN;
     }
-    if (data.gpu?.present && prev.gpu?.present)
-        out.gpu = { ...data.gpu, percent: ema(prev.gpu.percent, data.gpu.percent, alpha) };
-    if (data.dsk && prev.dsk) {
-        out.dsk = {
-            ...data.dsk,
-            readRate: ema(prev.dsk.readRate, data.dsk.readRate, alpha),
-            writeRate: ema(prev.dsk.writeRate, data.dsk.writeRate, alpha),
-            diskPercent: ema(prev.dsk.diskPercent, data.dsk.diskPercent, alpha),
-        };
+
+    add(value, now) {
+        const newest = (this._next + WINDOW_READINGS - 1) % WINDOW_READINGS;
+        this._end[this._next] = now;
+        // The first reading covers no time: it has no baseline (a rate reads 0).
+        this._covers[this._next] = this._count > 0 ? now - this._end[newest] : 0;
+        this._value[this._next] = value;
+        this._next = (this._next + 1) % WINDOW_READINGS;
+        if (this._count < WINDOW_READINGS) this._count++;
+        this._last = value;
     }
-    if (data.net?.total && prev.net?.total) {
-        const interfaces = {};
-        for (const [name, iface] of Object.entries(data.net.interfaces ?? {})) {
-            const p = prev.net.interfaces?.[name];
-            interfaces[name] = p
-                ? { ...iface, rxRate: ema(p.rxRate, iface.rxRate, alpha), txRate: ema(p.txRate, iface.txRate, alpha) }
-                : iface;
+
+    /** The average over the window; with nothing in it, the last reading. */
+    mean(now) {
+        const from = now - DISPLAY_WINDOW_US;
+        let sum = 0;
+        let weight = 0;
+        for (let back = 1; back <= this._count; back++) {
+            const i = (this._next + WINDOW_READINGS - back) % WINDOW_READINGS;
+            if (this._end[i] <= from) break;
+            const part = this._end[i] - Math.max(this._end[i] - this._covers[i], from);
+            sum += this._value[i] * part;
+            weight += part;
         }
-        out.net = {
-            ...data.net,
-            interfaces,
-            total: {
-                ...data.net.total,
-                rxRate: ema(prev.net.total.rxRate, data.net.total.rxRate, alpha),
-                txRate: ema(prev.net.total.txRate, data.net.total.txRate, alpha),
-            },
-        };
+        return weight > 0 ? sum / weight : this._last;
     }
-    return out;
+}
+
+/**
+ * The readings to display for CPU, GPU, power, network and disk: each its
+ * average over DISPLAY_WINDOW_US. Memory, battery, temperature and everything
+ * else pass through unchanged. Only what changes is copied; the raw reading is
+ * never modified, and a part of it repeated from the last poll (not read this
+ * time) is not counted twice. Fixed memory per value shown.
+ */
+export class DisplayAverage {
+    constructor() {
+        this._values = new Map();
+        this._interfaces = new Map();
+        this._raw = {};
+    }
+
+    /** A number's average; anything else (no reading) as it is, and the value starts anew. */
+    _mean(values, key, value, fresh, now) {
+        if (!Number.isFinite(value)) {
+            values.delete(key);
+            return value;
+        }
+        let series = values.get(key);
+        if (!series) values.set(key, series = new WindowMean());
+        if (fresh) series.add(value, now);
+        return series.mean(now);
+    }
+
+    /**
+     * @param {object} data the new raw reading
+     * @param {number} now monotonic µs
+     * @returns {object} the reading to display
+     */
+    add(data, now) {
+        const out = { ...data };
+        const v = this._values;
+        const raw = this._raw;
+        if (data.cpu) {
+            const fresh = data.cpu !== raw.cpu;
+            out.cpu = { ...data.cpu, total: this._mean(v, 'cpu', data.cpu.total, fresh, now) };
+            if (Array.isArray(data.cpu.cores))
+                out.cpu.cores = data.cpu.cores.map((value, i) => this._mean(v, `core${i}`, value, fresh, now));
+        }
+        if (data.gpu?.present) {
+            // Per card: the one shown can change.
+            const fresh = data.gpu !== raw.gpu;
+            const key = data.gpu.key ?? '';
+            out.gpu = {
+                ...data.gpu,
+                percent: this._mean(v, `gpu${key}`, data.gpu.percent, fresh, now),
+                powerDraw: this._mean(v, `gpuPower${key}`, data.gpu.powerDraw, fresh, now),
+            };
+        }
+        if (data.pwr) {
+            const fresh = data.pwr !== raw.pwr;
+            out.pwr = {
+                ...data.pwr,
+                packagePower: this._mean(v, 'package', data.pwr.packagePower, fresh, now),
+                systemPower: this._mean(v, 'system', data.pwr.systemPower, fresh, now),
+            };
+        }
+        if (data.dsk) {
+            const fresh = data.dsk !== raw.dsk;
+            out.dsk = {
+                ...data.dsk,
+                readRate: this._mean(v, 'read', data.dsk.readRate, fresh, now),
+                writeRate: this._mean(v, 'write', data.dsk.writeRate, fresh, now),
+                diskPercent: this._mean(v, 'busy', data.dsk.diskPercent, fresh, now),
+            };
+        }
+        if (data.net?.total) {
+            const fresh = data.net !== raw.net;
+            const interfaces = {};
+            for (const [name, iface] of Object.entries(data.net.interfaces ?? {})) {
+                let own = this._interfaces.get(name);
+                if (!own) this._interfaces.set(name, own = new Map());
+                interfaces[name] = {
+                    ...iface,
+                    rxRate: this._mean(own, 'rx', iface.rxRate, fresh, now),
+                    txRate: this._mean(own, 'tx', iface.txRate, fresh, now),
+                };
+            }
+            // Interfaces come and go (containers, VPNs).
+            for (const name of this._interfaces.keys()) if (!(name in interfaces)) this._interfaces.delete(name);
+            out.net = {
+                ...data.net,
+                interfaces,
+                total: {
+                    ...data.net.total,
+                    rxRate: this._mean(v, 'rx', data.net.total.rxRate, fresh, now),
+                    txRate: this._mean(v, 'tx', data.net.total.txRate, fresh, now),
+                },
+            };
+        }
+        this._raw = data;
+        return out;
+    }
 }
 
 // Numeric fields that glide. Anything else (names, counts, identifiers, load
@@ -81,7 +151,7 @@ export function smoothReading(prev, data, alpha = SMOOTH_ALPHA) {
 // those would show long decimals or mix two different processes.
 const GLIDE = new Set([
     'total', 'cores', 'percent', 'used', 'available', 'swapPercent',
-    'energyRate', 'packagePower', 'systemPower', 'gpuPower',
+    'energyRate', 'packagePower', 'systemPower', 'gpuPower', 'powerDraw',
     'readRate', 'writeRate', 'diskPercent', 'rxRate', 'txRate',
     'packageTemp', 'temp', 'clock', 'power', 'memUsed',
 ]);
