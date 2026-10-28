@@ -44,7 +44,6 @@ export class ThrottleSampler {
     async sample() {
         if (this._files === undefined) this._files = await this._findFiles();
         if (!this._files) return null;
-        const time = GLib.get_monotonic_time();
         const ms = [];
         for (const file of this._files) {
             try {
@@ -54,6 +53,8 @@ export class ThrottleSampler {
                 return null;
             }
         }
+        // After the reads: an asynchronous read waits longest on a busy machine.
+        const time = GLib.get_monotonic_time();
         const prev = this._prev;
         this._prev = { time, ms };
         if (!prev) return null;

@@ -251,6 +251,12 @@ export class GpuSampler {
         } catch (e) {
             logOnce(`GPU detection failed: ${e.message}`, 'error');
         }
+        // Looking for the cards again must not lose a rate's baseline: the next
+        // reading of every card would have no busy figure to report.
+        for (const card of cards) {
+            const before = this._cards?.find(c => c.key === card.key && c.rc6Path === card.rc6Path);
+            if (before) Object.assign(card, { prevRc6Ms: before.prevRc6Ms, prevRc6Time: before.prevRc6Time, lastBusy: before.lastBusy });
+        }
         this._cards = cards;
         this._nvidiaCards = nvidia;
         this._lastDetect = GLib.get_monotonic_time();
@@ -327,7 +333,8 @@ export class GpuSampler {
     }
 
     async _readIntel(conf) {
-        let percent = 0;
+        // No figure this time (too soon, counter reset): the last one stands, not 0.
+        let percent = conf.lastBusy ?? 0;
         let foundStats = false;
         if (conf.busyPath) {
             const busy = await this._readNumber(conf.busyPath);
@@ -342,7 +349,7 @@ export class GpuSampler {
                 if (conf.prevRc6Ms !== undefined) {
                     const busy = intelBusyFromRc6(conf.prevRc6Ms, rc6Ms, (rc6Time - conf.prevRc6Time) / 1000);
                     if (busy !== null) {
-                        percent = busy;
+                        percent = conf.lastBusy = busy;
                         foundStats = true;
                     }
                 }

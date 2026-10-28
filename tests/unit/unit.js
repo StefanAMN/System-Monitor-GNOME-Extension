@@ -8,12 +8,12 @@ import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime,
 import { RingBuffer } from '../../src/lib/engine/ringbuffer.js';
 import { RunningStats } from '../../src/lib/engine/stats.js';
 import { METRICS, SETTINGS_SECTIONS, POLL_STOPS_MS, allSettingRows, formatSettingValue, nearestStop, stepSettingValue, pinPositions, togglePinned, movePinned } from '../../src/lib/common/settingsmodel.js';
-import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses, filterGroups, groupState, reniceProcesses, LOWER_NICE } from '../../src/lib/collectors/process.js';
+import { parseStatBlob, cpuPercent, groupByName, parseStatm, groupMemoryPages, readGroupMemory, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses, filterGroups, groupState, reniceProcesses, LOWER_NICE } from '../../src/lib/collectors/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
 import { migrateSettings, listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
 import { parseNetDev, counterDelta, NetworkSampler } from '../../src/lib/collectors/network.js';
 import { sessionIdentity, sessionStateText, parseSessionState, currentSessionIdentity } from '../../src/lib/engine/sessiontotals.js';
-import { parseDiskstats, parseMounts, ioUtilization } from '../../src/lib/collectors/disk.js';
+import { parseDiskstats, parseMounts, ioUtilization, spaceUsedPercent, DiskSampler } from '../../src/lib/collectors/disk.js';
 import { sensorLabel, parseMilliCelsius, pickPackageTemp, primarySensor, ThermalSampler } from '../../src/lib/collectors/thermal.js';
 import { raplWatts, PowerSampler } from '../../src/lib/collectors/power.js';
 import { describeUnit, unescapeUnit, sessionRootFrom, AppUsageSampler, IDLE_MEMORY_EVERY } from '../../src/lib/collectors/appusage.js';
@@ -31,7 +31,7 @@ import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler
 import { parseProcIo, AppIoSampler } from '../../src/lib/collectors/appio.js';
 import { componentView, healthView, bars, COMPONENTS, stepFor, zoomAbout, clampRange, MIN_SPAN_MS } from '../../src/lib/engine/trackingview.js';
 import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
-import { ema, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
+import { ema, smoothAlpha, smoothReading, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES, FINE_MS, FINE_KEPT_MS, MAX_FINE, HEALTH_DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
 import { upowerState, batteryHealth, combineBatteries, BatterySampler } from '../../src/lib/collectors/battery.js';
@@ -341,6 +341,7 @@ docker0: 1 2 3
     eq(parseNvidiaSmi('NVIDIA-SMI has failed because it couldn\'t communicate with the NVIDIA driver.'), null, 'nvidia-smi: driver error text');
     eq(parseAmdSclk('0: 500Mhz\n1: 1200Mhz *\n2: 2400Mhz\n'), 1200, 'amdgpu: active sclk level');
     eq(parseAmdSclk('0: 500Mhz\n'), null, 'amdgpu: no active level');
+    eq([spaceUsedPercent(50, 50), spaceUsedPercent(95, 0), spaceUsedPercent(0, 0)], [50, 100, 0], 'disk space: as df counts it, reserved blocks in neither figure');
     eq(intelBusyFromRc6(1000, 1250, 1000), 75, 'intel rc6: 25% asleep = 75% busy');
     eq(intelBusyFromRc6(1000, 2000, 1000), 0, 'intel rc6: fully asleep');
 
@@ -678,6 +679,8 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     });
     const a = raw(10, 20, 1000);
     eq(smoothReading(null, a), a, 'smooth: the first reading is shown as it is');
+    eq([smoothAlpha(250), smoothAlpha(2000), smoothAlpha(4000)], [0.5, 0.5, 0.75], 'smooth: the weight is fixed up to 2 s, then grows with the interval');
+    ok(smoothAlpha(30000) > 0.999, 'smooth: at 30 s the reading is nearly all new');
     const b = raw(90, 80, 3000);
     const sb = smoothReading(a, b, 0.5);
     eq([sb.cpu.total, sb.cpu.cores, sb.net.total.rxRate, sb.net.interfaces.wlp1.rxRate, sb.mem.percent],
@@ -935,6 +938,140 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         GLib.spawn_command_line_sync(`rm -rf ${sys}`);
     }
     {
+        // A driver that signs the battery's power by direction reads as a draw, not a negative one.
+        const sys = GLib.dir_make_tmp('rp-bat-sign-XXXXXX');
+        for (const name of ['BAT0', 'BAT1']) {
+            const dir = `${sys}/class/power_supply/${name}`;
+            GLib.mkdir_with_parents(dir, 0o755);
+            const values = { capacity: 50, status: 'Discharging', energy_now: 10e6, energy_full: 20e6, energy_full_design: 25e6, power_now: -5e6 };
+            for (const [file, value] of Object.entries(values)) GLib.file_set_contents(`${dir}/${file}`, `${value}\n`);
+        }
+        const r = await new BatterySampler(sys).sample();
+        eq([r.energyRate, r.timeRemaining], [10, 7200], 'battery fixture: a negative power_now counts as its size');
+        GLib.spawn_command_line_sync(`rm -rf ${sys}`);
+    }
+    {
+        // Intel without gpu_busy_percent: the busy figure comes from RC6 growth,
+        // so it needs the previous reading, across looking for the cards again.
+        const sys = GLib.dir_make_tmp('rp-gpu-rc6-XXXXXX');
+        const dev = 'devices/pci0000:00/0000:00:02.0';
+        GLib.mkdir_with_parents(`${sys}/${dev}/power`, 0o755);
+        GLib.file_set_contents(`${sys}/${dev}/vendor`, '0x8086\n');
+        GLib.file_set_contents(`${sys}/${dev}/power/runtime_status`, 'active\n');
+        GLib.mkdir_with_parents(`${sys}/class/drm/card0/power`, 0o755);
+        Gio.File.new_for_path(`${sys}/class/drm/card0/device`).make_symbolic_link(`../../../${dev}`, null);
+        const rc6 = `${sys}/class/drm/card0/power/rc6_residency_ms`;
+        GLib.file_set_contents(rc6, '1000\n');
+        const sampler = new GpuSampler(sys);
+        eq((await sampler.sample()).percent, 0, 'gpu rc6: nothing to compare the first reading with');
+        await sleep(200);
+        eq((await sampler.sample()).percent, 100, 'gpu rc6: never asleep since the last reading');
+        await sleep(200);
+        sampler._lastDetect = 0;
+        eq((await sampler.sample()).percent, 100, 'gpu rc6: looking for the cards again keeps the baseline (it read 0 % once a minute)');
+        sampler._lastDetect = 0;
+        eq((await sampler.sample()).percent, 100, 'gpu rc6: a reading too soon for a figure repeats the last one');
+        GLib.spawn_command_line_sync(`rm -rf ${sys}`);
+    }
+    {
+        // Disk rates from a /proc fixture.
+        const proc = GLib.dir_make_tmp('rp-disk-XXXXXX');
+        GLib.file_set_contents(`${proc}/mounts`, '');
+        const stats = (disks) => GLib.file_set_contents(`${proc}/diskstats`, Object.entries(disks)
+            .map(([name, [read, written]]) => `259 0 ${name} 1 0 ${read} 1 1 0 ${written} 1 0 5 5\n`).join(''));
+        const MiB = 2048; // sectors
+        stats({ nvme0n1: [0, 0] });
+        const sampler = new DiskSampler(proc);
+        await sampler.sample(false);
+
+        // What the disk did while the mounts answered belongs to the next
+        // reading; it used to be divided by the time before the mounts.
+        await sleep(200);
+        stats({ nvme0n1: [MiB, 0] });
+        const query = sampler._queryMounts;
+        sampler._cachedMounts = [];
+        sampler._queryMounts = async function () {
+            stats({ nvme0n1: [6 * MiB, 0] });
+            await sleep(300);
+            return query.call(this, false);
+        };
+        const slow = await sampler.sample(false);
+        ok(slow.readRate > 0 && slow.readRate <= 1048576 / 0.2, `disk: rate measured at its read, not across the mounts' answer (${slow.readRate})`);
+        sampler._queryMounts = query;
+
+        // A refresh of the free space does not hold the reading up.
+        sampler._lastMountCheck = 0;
+        let refreshed = false;
+        sampler._queryMounts = async () => {
+            await sleep(300);
+            refreshed = true;
+        };
+        const t0 = GLib.get_monotonic_time();
+        const quick = await sampler.sample(false);
+        ok(GLib.get_monotonic_time() - t0 < 200000 && !refreshed && quick.mounts.length > 0, 'disk: a slow refresh of the free space runs behind the reading');
+        await sleep(400);
+        ok(refreshed, 'disk: the refresh did run');
+        sampler._queryMounts = query;
+
+        // A disk that appears counts from the next reading; one that goes does not hide the rest.
+        await sleep(100);
+        stats({ nvme0n1: [7 * MiB, 0], sda: [1e7, 1e7] });
+        const attached = await sampler.sample(false);
+        ok(attached.writeRate === 0 && attached.readRate < 1048576 * 2 / 0.1, `disk: a newly attached disk's old counters are no traffic (${attached.readRate} ${attached.writeRate})`);
+        await sleep(100);
+        stats({ nvme0n1: [7 * MiB + 2048, MiB] });
+        const removed = await sampler.sample(false);
+        ok(removed.readRate > 0 && removed.writeRate > 0, 'disk: a disk removed does not hide the traffic of the others');
+        GLib.spawn_command_line_sync(`rm -rf ${proc}`);
+    }
+    {
+        // Group memory: private pages per member, the largest shared part once.
+        eq(parseStatm('100 50 20 1 0 30 0\n'), { resident: 50, shared: 20 }, 'statm: resident and shared pages');
+        eq(parseStatm('garbage'), null, 'statm: not a statm line');
+        eq(groupMemoryPages([{ resident: 50, shared: 20 }, { resident: 30, shared: 20 }]), 60, 'group memory: shared pages once');
+        eq(groupMemoryPages([{ resident: 10, shared: 40 }]), 40, 'group memory: a count that lags (shared over resident) does not go negative');
+        const proc = GLib.dir_make_tmp('rp-statm-XXXXXX');
+        for (const [pid, text] of [[1, '9 50 20 0 0 0 0\n'], [2, '9 30 20 0 0 0 0\n']]) {
+            GLib.mkdir_with_parents(`${proc}/${pid}`, 0o755);
+            GLib.file_set_contents(`${proc}/${pid}/statm`, text);
+        }
+        const both = { count: 3, rss: 80, members: [{ pid: 1 }, { pid: 2 }, { pid: 3 }] };
+        const alone = { count: 1, rss: 7, members: [{ pid: 9 }] };
+        const gone = { count: 2, rss: 5, members: [{ pid: 7 }, { pid: 8 }] };
+        const handle = { id: 0 };
+        ok(await readGroupMemory([both, alone, gone], handle, proc), 'group memory: read');
+        eq([both.rss, alone.rss, gone.rss, handle.id], [60, 7, 5, 0], 'group memory: a member that exited counts nothing, a single process and an unreadable group stay');
+        const pending = readGroupMemory([{ count: 2, rss: 1, members: [{ pid: 1 }, { pid: 2 }] }], handle, proc);
+        const cancelling = new ProcessSampler();
+        cancelling._handle = handle;
+        cancelling.destroy();
+        eq(await pending, false, 'group memory: destroy() ends a reading in progress');
+        GLib.spawn_command_line_sync(`rm -rf ${proc}`);
+
+        // The whole sampler on the real /proc: the figures shown agree with each other.
+        const procs = new ProcessSampler();
+        const list = await procs.sample(16e9, true, 5);
+        ok(list.top.length > 0 && list.top.every(g => g.rssBytes === g.rss * 4096 || g.rssBytes % g.rss === 0), 'group memory: bytes follow the pages');
+        ok(list.top.every((g, i, all) => i === 0 || all[i - 1].rss >= g.rss), 'group memory: sorted by the corrected figure');
+        ok(list.top.every(g => Math.abs(g.mem - g.rssBytes / 16e9 * 100) < 1e-9), 'group memory: the share follows the bytes');
+        procs.destroy();
+
+        // A refused /proc/<pid>/io is not asked for again while the process lives.
+        if (Gio.Credentials.new().get_unix_user() === 0) {
+            print('SKIP process: refused io files cannot be simulated as root');
+        } else {
+            const io = new ProcessSampler();
+            const first = await io.sample(16e9, false, 5, Infinity, { io: true });
+            ok(first.ioDenied > 0 && io._ioDenied.has('1'), `process io: pid 1 is another user's (${first.ioDenied} refused)`);
+            const second = await io.sample(16e9, false, 5, Infinity, { io: true });
+            ok(second.ioDenied > 0 && io._ioDenied.has('1'), 'process io: remembered ones are still counted as refused');
+            io._ioDenied.add('999999999');
+            await io.sample(16e9, false, 5, Infinity, { io: true });
+            ok(!io._ioDenied.has('999999999'), 'process io: an exited process is forgotten');
+            io.destroy();
+        }
+    }
+    {
         // Ending real children: one quits on TERM, one ignores TERM and needs KILL.
         const uid = Gio.Credentials.new().get_unix_user();
         const spawn = argv => Gio.Subprocess.new(argv, Gio.SubprocessFlags.NONE);
@@ -1061,6 +1198,20 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         pwr.forgetProbe();
         const granted = await pwr.sample();
         eq([granted.raplSupported, granted.raplBlocked], [true, false], 'power: after forgetProbe() readable counters are picked up at once');
+        // The energy is timed at its read: a probe that takes a while is part
+        // of the interval (it read 4 times too high here).
+        GLib.file_set_contents(`${zone}/energy_uj`, '1000000\n');
+        await pwr.sample();
+        await sleep(100);
+        GLib.file_set_contents(`${zone}/energy_uj`, '5000000\n');
+        pwr.forgetProbe();
+        const probe = pwr._probeRapl;
+        pwr._probeRapl = async function () {
+            await sleep(300);
+            return probe.call(this);
+        };
+        const watts = (await pwr.sample()).packagePower;
+        ok(watts > 0 && watts <= 10.01, `power: a slow probe does not inflate the rate (${watts} W for 4 J over at least 0.4 s)`);
         for (const name of ['name', 'energy_uj', 'max_energy_range_uj']) GLib.unlink(`${zone}/${name}`);
         GLib.rmdir(zone);
         GLib.rmdir(root);
@@ -1996,6 +2147,27 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const gpuPending = gs.sample(units);
         const gpuIdle = gs._idleId;
         gs.cancel();
+        // One of a unit's clients ends: the unit's figure must not fall, or the
+        // ledger takes it for a counter reset and counts the others' whole
+        // lifetime again.
+        fd(500, 3, '/dev/dri/renderD128', client(20, 10e9));
+        fd(500, 4, '/dev/dri/renderD128', client(21, 1e9));
+        const ending = new GpuUsageSampler(proc);
+        const app = new Map([['app-long.scope', [500]]]);
+        eq((await ending.sample(app)).get('app-long.scope'), 11e9, 'gpu: both clients of a unit');
+        GLib.unlink(`${proc}/500/fd/4`);
+        GLib.unlink(`${proc}/500/fdinfo/4`);
+        ending._pids.clear();
+        GLib.file_set_contents(`${proc}/500/fdinfo/3`, client(20, 10.5e9));
+        eq((await ending.sample(app)).get('app-long.scope'), 11.5e9, 'gpu: a client that ended leaves what it used, and the rest only add what they did');
+        for (let i = 0; i < 25; i++) await ending.sample(app);
+        ok(!ending._clients.has('i915/0000:00:02.0/21'), 'gpu: a client gone for a while is forgotten');
+        eq((await ending.sample(new Map())).size, 0, 'gpu: a unit that ended is forgotten');
+        for (const path of ['fd/3', 'fdinfo/3']) GLib.unlink(`${proc}/500/${path}`);
+        GLib.rmdir(`${proc}/500/fd`);
+        GLib.rmdir(`${proc}/500/fdinfo`);
+        GLib.rmdir(`${proc}/500`);
+        for (const path of ['500/fd/3', '500/fd/4', '500/fdinfo/3', '500/fdinfo/4']) made.splice(made.indexOf(path), 1);
         eq([gpuIdle > 0, gs._idleId, (await gpuPending).size], [true, 0, 0], 'gpu: cancel() resolves a reading in progress with nothing and removes its idle callback');
         for (const path of made.reverse()) GLib.unlink(`${proc}/${path}`);
         for (const pid of [100, 101, 200, 300]) {

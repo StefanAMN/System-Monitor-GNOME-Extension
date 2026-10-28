@@ -6,7 +6,7 @@ import Shell from 'gi://Shell';
 import { BatteryTracker } from '../../lib/engine/batterytracker.js';
 import { powerReadout, thermalUnavailable } from '../../lib/common/present.js';
 import { RANGES } from '../../lib/engine/longhistory.js';
-import { smoothReading, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
+import { smoothAlpha, smoothReading, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
 import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
@@ -119,7 +119,7 @@ export class PollingMethods {
             this._render(data);
             return;
         }
-        const target = smoothReading(this._smoothPrev, data);
+        const target = smoothReading(this._smoothPrev, data, smoothAlpha(this._sampleSeconds * 1000));
         this._smoothPrev = target;
         if (!this._menuOpen) {
             // Closed: averaged values, once per reading, no frames.

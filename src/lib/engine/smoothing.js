@@ -7,6 +7,21 @@
 // at half height, a real change is mostly there after two or three readings.
 export const SMOOTH_ALPHA = 0.5;
 
+// The interval SMOOTH_ALPHA was chosen for; from here up the weight grows.
+const SMOOTH_INTERVAL_MS = 2000;
+
+/**
+ * Weight of a new reading at a polling interval. A reading further apart is
+ * already an average over that long and the old one says less about now: at
+ * 30 s a fixed weight would still show half of a value from 30 s ago. Up to
+ * the 2 s it was chosen for, SMOOTH_ALPHA, so fast intervals stay responsive.
+ * @param {number} intervalMs
+ */
+export function smoothAlpha(intervalMs) {
+    if (!(intervalMs > SMOOTH_INTERVAL_MS)) return SMOOTH_ALPHA;
+    return 1 - (1 - SMOOTH_ALPHA) ** (intervalMs / SMOOTH_INTERVAL_MS);
+}
+
 /** Exponential moving average; without a usable previous value, the reading itself. */
 export function ema(prev, next, alpha = SMOOTH_ALPHA) {
     if (!Number.isFinite(next)) return next;

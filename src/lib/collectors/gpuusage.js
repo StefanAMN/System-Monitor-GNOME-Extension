@@ -19,6 +19,9 @@ const RESCAN_US = 10 * 60 * 1e6;
 const MAX_PIDS = 4096;
 // Processes looked at per idle callback.
 const BATCH = 32;
+// A client not seen for this many readings has ended (ids are not reused
+// within a boot); until then a failed read does not count it as new.
+const CLIENT_KEPT_READINGS = 20;
 const decoder = new TextDecoder('utf-8', { fatal: false });
 
 /**
@@ -75,6 +78,11 @@ export class GpuUsageSampler {
         this._proc = proc;
         // pid -> { fds: string[], scanned: µs }
         this._pids = new Map();
+        // client key -> { ns, reading } when last seen.
+        this._clients = new Map();
+        // unit -> ns its clients have added up to, ended ones included.
+        this._unitNs = new Map();
+        this._reading = 0;
         this._idleId = 0;
         this._finish = null;
     }
@@ -97,7 +105,11 @@ export class GpuUsageSampler {
         return entry.fds;
     }
 
-    /** A process's GPU busy time, each client counted once across the reading (`seen`). */
+    /**
+     * What a process's GPU clients added since they were last read, each client
+     * counted once across the reading (`seen`). Per client: a unit's sum falls
+     * when one of its clients ends, and that must not look like a counter reset.
+     */
     _readPid(pid, now, seen) {
         let ns = 0;
         for (const fd of this._gpuFds(pid, now)) {
@@ -113,7 +125,9 @@ export class GpuUsageSampler {
             const client = parseDrmFdinfo(text);
             if (!client || seen.has(client.key)) continue;
             seen.add(client.key);
-            ns += client.ns;
+            const before = this._clients.get(client.key);
+            ns += before ? Math.max(0, client.ns - before.ns) : client.ns;
+            this._clients.set(client.key, { ns: client.ns, reading: this._reading });
         }
         return ns;
     }
@@ -121,11 +135,13 @@ export class GpuUsageSampler {
     /**
      * GPU busy time of each unit's processes.
      * @param {Map<string, number[]>} unitPids unit name -> pids (from cgroup.procs)
-     * @returns {Promise<Map<string, number>>} unit -> cumulative ns of the GPU clients its processes hold
+     * @returns {Promise<Map<string, number>>} unit -> cumulative ns of the GPU
+     *   clients its processes hold or held; it never falls while the unit lives
      */
     sample(unitPids) {
         this.cancel();
         const now = GLib.get_monotonic_time();
+        const reading = ++this._reading;
         const seen = new Set();
         const live = new Set();
         const out = new Map();
@@ -139,12 +155,17 @@ export class GpuUsageSampler {
                     const [unit, pid] = todo[i];
                     live.add(pid);
                     const ns = this._readPid(pid, now, seen);
-                    if (ns > 0) out.set(unit, (out.get(unit) ?? 0) + ns);
+                    if (ns > 0) this._unitNs.set(unit, (this._unitNs.get(unit) ?? 0) + ns);
                 }
                 if (i < todo.length) return GLib.SOURCE_CONTINUE;
                 this._idleId = 0;
                 this._finish = null;
                 for (const pid of this._pids.keys()) if (!live.has(pid)) this._pids.delete(pid);
+                for (const [key, client] of this._clients) if (reading - client.reading > CLIENT_KEPT_READINGS) this._clients.delete(key);
+                for (const [unit, ns] of this._unitNs) {
+                    if (unitPids.has(unit)) out.set(unit, ns);
+                    else this._unitNs.delete(unit);
+                }
                 resolve(out);
                 return GLib.SOURCE_REMOVE;
             };
