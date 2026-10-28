@@ -1459,6 +1459,93 @@ async function alertsRaise(rp) {
     rp._alerts = new AlertMonitor();
 }
 
+// A reading high for a while, then well below its limit (memory 95 % then
+// 60 % against 90 %), through the real poll, glide and alert path: the ⚠
+// and the red value must go once the reading has been below the limit for
+// the recovery time, for every reading that alerts. The collectors are
+// scripted; the poll, the glide (smooth changes on), the alert engine with
+// its real recovery time and the top bar are the extension's own.
+async function alertsRecover(rp) {
+    const { AlertMonitor, RECOVER_US, DEEP_RECOVER_US, DEEP_DROP } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/engine/alerts.js`);
+    const s = rp._settings;
+    // Raised quickly; recovered with the real timing.
+    rp._alerts = new AlertMonitor({ sustainUs: 2e6 });
+    s.set_int('poll-interval', 1);
+    s.set_strv('pinned-metrics', ['cpu', 'memory', 'disk', 'thermal', 'gpu']);
+    await sleep(1500);
+    const wrap = (obj, change) => {
+        const sample = obj.sample;
+        obj.sample = async (...args) => change(await sample.apply(obj, args));
+        return () => {
+            obj.sample = sample;
+        };
+    };
+    const cases = [
+        { key: 'memory', label: 'memory', limit: s.get_int('threshold-mem'), high: 95, low: 60,
+            script: v => wrap(rp._mem, m => ({ ...m, total: m.total || 16 * 2 ** 30, percent: v() })) },
+        // Near the limit (below the hysteresis band, above the deep line):
+        // the 10 s hold that keeps a value at the line from flapping.
+        { key: 'memory', label: 'memory', limit: s.get_int('threshold-mem'), high: 95, low: 80, near: true,
+            script: v => wrap(rp._mem, m => ({ ...m, total: m.total || 16 * 2 ** 30, percent: v() })) },
+        { key: 'cpu', label: 'cpu', limit: s.get_int('threshold-cpu'), high: 97, low: 40,
+            script: v => wrap(rp._cpu, c => ({ ...c, total: v() })) },
+        { key: 'disk', label: 'disk', limit: s.get_int('threshold-disk'), high: 98, low: 60,
+            script: v => wrap(rp._dsk, d => ({ ...d, mounts: [{ ...(d.mounts?.[0] ?? { mount: '/', device: 'test', total: 1e12, used: 0, free: 0 }), percent: v() }, ...(d.mounts ?? []).slice(1)] })) },
+        { key: 'thermal', label: 'thermal', limit: s.get_int('threshold-temp'), high: 95, low: 55,
+            script: v => wrap(rp._thm, t => ({ ...t, packageTemp: v() })) },
+        { key: 'gpu', label: 'gpu', limit: s.get_int('threshold-gpu'), high: 99, low: 50,
+            script: v => wrap(rp._gpu, g => ({ ...g, present: true, percent: v(), gpus: [{ ...(g.gpus?.[0] ?? {}), percent: v(), asleep: false }] })) },
+        // Waiting for memory: the ⚠ only; the memory value is not over its limit.
+        { key: 'pressure', label: null, limit: 20, high: 40, low: 1,
+            script: v => wrap(rp._psi, p => ({ ...(p ?? { cpu: { some: 0 }, io: { some: 0 } }), memory: { some: v(), full: 0 } })) },
+    ];
+    const red = label => label !== null && (rp._topBarWidgets[label]?.label?.has_style_class_name('resource-pulse-label-danger') ?? false);
+    const anyRed = () => Object.values(rp._topBarWidgets).some(w => w.label?.has_style_class_name('resource-pulse-label-danger'));
+    try {
+        for (const c of cases) {
+            let value = c.high;
+            const restore = c.script(() => value);
+            try {
+                for (let i = 0; i < 30 && !rp._alerts.isActive(c.key); i++) await sleep(250);
+                await sleep(1500);
+                check(rp._alerts.isActive(c.key) && rp._dangerBox.visible && (c.label === null ? !anyRed() : red(c.label)),
+                    `alerts recover ${c.key}: at ${c.high} (limit ${c.limit}): active ${rp._alerts.isActive(c.key)}, ⚠ ${rp._dangerBox.visible}, ${c.label === null ? `a value painted red: ${anyRed()} (none expected)` : `red ${red(c.label)}`}`);
+                // Down, well below the limit.
+                value = c.low;
+                const dropped = GLib.get_monotonic_time();
+                const shown = [];
+                let clearedAt = null;
+                for (let i = 0; i < 60; i++) {
+                    await sleep(250);
+                    shown.push(rp._topBarWidgets[c.label ?? 'memory']?.label?.text);
+                    if (!rp._dangerBox.visible && !red(c.label) && !rp._alerts.isActive(c.key)) {
+                        clearedAt = GLib.get_monotonic_time();
+                        break;
+                    }
+                }
+                const after = clearedAt === null ? null : (clearedAt - dropped) / 1e6;
+                const text = [...new Set(shown)].join(' ');
+                console.log(`RP-UITEST alerts recover ${c.key}: ${c.high} -> ${c.low} (limit ${c.limit}${c.near ? ', near the limit' : ''}); ⚠ ${after === null ? 'still shown after 15 s' : `gone after ${after.toFixed(1)} s`}; top bar showed ${text}`);
+                // A clear drop (DEEP_DROP or more below) clears after
+                // DEEP_RECOVER_US plus a poll or two; a value near the limit
+                // keeps the RECOVER_US hold.
+                const [least, most] = c.near ? [RECOVER_US / 1e6 - 1, RECOVER_US / 1e6 + 3] : [0, DEEP_RECOVER_US / 1e6 + 2.5];
+                check(c.near ? c.limit - c.low < DEEP_DROP : c.limit - c.low >= DEEP_DROP, `alerts recover ${c.key}: case ${c.low} is not ${c.near ? 'near' : 'far below'} the limit ${c.limit}`);
+                check(after !== null && after >= least && after <= most,
+                    `alerts recover ${c.key}: ⚠ ${after === null ? 'still shown 15 s' : `gone after ${after.toFixed(1)} s`} when the value dropped from ${c.high} to ${c.low} (limit ${c.limit}); wanted ${least}-${most} s; active ${rp._alerts.isActive(c.key)}, ⚠ ${rp._dangerBox.visible}, red ${red(c.label)}, alert value ${rp._alerts.active().find(a => a.key === c.key)?.value}`);
+            } finally {
+                restore();
+            }
+            await sleep(1500);
+        }
+    } finally {
+        s.reset('poll-interval');
+        s.reset('pinned-metrics');
+        rp._alerts = new AlertMonitor();
+        rp._showDanger();
+    }
+}
+
 // The pseudo-language run (./scripts/dev.sh test-i18n: LANGUAGE=xx, a
 // catalogue that wraps every string in ⟦ ⟧): visible text, tooltips and
 // accessible names in the top bar and on every page of the panel must read
@@ -1587,6 +1674,7 @@ async function run() {
     await screenReader(ext.stateObj);
     await stuckCollector(ext.stateObj);
     await alertsRaise(ext.stateObj);
+    await alertsRecover(ext.stateObj);
     await endProcesses(ext.stateObj);
     await processSearch(ext.stateObj);
     await historyAndUsage(ext.stateObj);

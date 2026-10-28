@@ -42,15 +42,18 @@ export const SEARCH_ROWS = 10;
 // Share of time (PSI "some", 10 s average) in which programs waited for
 // memory that raises an alert: well past the occasional reclaim stall.
 export const PRESSURE_LIMIT = 20;
-// Panel page and wording per alert.
+// Panel page, the top-bar value painted red, and wording per alert.
 // Ids and labels together, so the labels (N_) are translated where read.
 export const ALERTS = {
-    cpu: { tab: 'cpu', name: N_('CPU'), title: N_('CPU usage is high') },
-    memory: { tab: 'memory', name: N_('Memory'), title: N_('Memory is almost full') },
-    thermal: { tab: 'thermal', name: N_('Temperature'), title: N_('The processor is hot') },
-    gpu: { tab: 'gpu', name: N_('GPU'), title: N_('GPU usage is high') },
-    disk: { tab: 'disk', name: N_('Disk /'), title: N_('Disk space is running out') },
-    pressure: { tab: 'memory', name: N_('Waiting for memory'), title: N_('The system is short of memory') },
+    cpu: { tab: 'cpu', value: 'cpu', name: N_('CPU'), title: N_('CPU usage is high') },
+    memory: { tab: 'memory', value: 'memory', name: N_('Memory'), title: N_('Memory is almost full') },
+    thermal: { tab: 'thermal', value: 'thermal', name: N_('Temperature'), title: N_('The processor is hot') },
+    gpu: { tab: 'gpu', value: 'gpu', name: N_('GPU'), title: N_('GPU usage is high') },
+    disk: { tab: 'disk', value: 'disk', name: N_('Disk /'), title: N_('Disk space is running out') },
+    // Programs waiting for memory: the ⚠ and its tooltip say so, but the
+    // memory value is not painted red, as its percentage can be far from its
+    // limit (a 29 % value in red read as a false warning).
+    pressure: { tab: 'memory', value: null, name: N_('Waiting for memory'), title: N_('The system is short of memory') },
 };
 export const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 

@@ -33,12 +33,15 @@ export class AlertsMethods {
     /** The ⚠ in the top bar, and the pinned values of the metrics in alert. */
     _showDanger() {
         if (!this._dangerBox || !this._alerts) return;
-        const active = new Set(this._alerts.active().map(a => ALERTS[a.key].tab));
-        this._dangerBox.visible = active.size > 0;
-        if (active.size > 0) this._nameValues();
+        const alerts = this._alerts.active();
+        // The values over their own limit; an alert without one (pressure)
+        // shows only the ⚠.
+        const over = new Set(alerts.map(a => ALERTS[a.key].value).filter(Boolean));
+        this._dangerBox.visible = alerts.length > 0;
+        if (alerts.length > 0) this._nameValues();
         for (const [key, widget] of Object.entries(this._topBarWidgets)) {
             if (!widget.label) continue;
-            if (active.has(key)) widget.label.add_style_class_name('resource-pulse-label-danger');
+            if (over.has(key)) widget.label.add_style_class_name('resource-pulse-label-danger');
             else widget.label.remove_style_class_name('resource-pulse-label-danger');
         }
     }

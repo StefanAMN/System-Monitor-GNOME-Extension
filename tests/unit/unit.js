@@ -713,6 +713,25 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     ok(!a.takeNotification('cpu', 599 * S), 'alerts: second within 10 min refused');
     ok(a.takeNotification('memory', 1 * S), 'alerts: the gap is per metric');
     ok(a.takeNotification('cpu', 600 * S), 'alerts: allowed again after 10 min');
+    // A clear drop (15 points or more below) clears after 2 s, not 10.
+    const d = new AlertMonitor({ sustainUs: 30 * S, recoverUs: 10 * S, hysteresis: 5 });
+    const dat = (value, t) => d.update({ memory: { value, threshold: 90 } }, t * S);
+    dat(95, 0);
+    dat(95, 30);
+    eq([dat(60, 31).cleared, dat(60, 32).cleared, dat(60, 33).cleared], [[], [], ['memory']],
+        'alerts: 95 -> 60 against 90 clears after 2 s below, not 10');
+    dat(95, 40);
+    dat(95, 70);
+    eq([dat(60, 71).cleared, dat(95, 72).cleared, dat(60, 73).cleared, dat(60, 74).cleared, dat(60, 75).cleared], [[], [], [], [], ['memory']],
+        'alerts: a single low reading is not a recovery; the 2 s count again from the next drop');
+    dat(95, 80);
+    dat(95, 110);
+    eq([dat(76, 111).cleared, dat(76, 115).cleared, dat(76, 120).cleared, dat(76, 121).cleared], [[], [], [], ['memory']],
+        'alerts: 76 against 90 (inside the deep line) keeps the 10 s recovery');
+    dat(95, 130);
+    dat(95, 160);
+    eq([dat(75, 161).cleared, dat(75, 163).cleared], [[], ['memory']], 'alerts: exactly 15 points below counts as a clear drop');
+
     // The threshold is read on every update: lowering it below the value starts the run.
     const b = new AlertMonitor({ sustainUs: 30 * S });
     b.update({ memory: { value: 80, threshold: 90 } }, 0);
