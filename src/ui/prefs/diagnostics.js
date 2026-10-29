@@ -14,7 +14,7 @@ import { buildAgentGroup } from './agent.js';
 import { NetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { appInfo } from '../../lib/common/appnames.js';
 import { readSystemState, setPowerProfile, readMachineInfo } from '../../lib/collectors/systemstate.js';
-import { _, fill, N_ } from '../../lib/common/i18n.js';
+import { _, fill, ngettext, N_ } from '../../lib/common/i18n.js';
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 const AREA_TITLES = {
@@ -24,6 +24,10 @@ const AREA_TITLES = {
     network: N_('Network'),
     data: N_('About these readings'),
 };
+// The areas with a tile in the strip; 'data' (facts about the readings) has none.
+const TILE_AREAS = ['cpu', 'memory', 'battery', 'network'];
+const SEVERITY_ORDER = ['warning', 'suggestion', 'info'];
+const SEVERITY_NAMES = { warning: N_('warning'), suggestion: N_('suggestion'), info: N_('note') };
 const SEVERITY_ICONS = {
     warning: 'dialog-warning-symbolic',
     suggestion: 'power-profile-power-saver-symbolic',
@@ -113,6 +117,7 @@ export function readNetDays(path = netUsagePath()) {
  * @param {function(): Promise<object>} [opts.readState] for tests
  * @param {function(string): Promise} [opts.switchProfile] for tests
  * @param {function(Array<string>)} [opts.launch] for tests
+ * @param {?function(string): Gio.Icon} [opts.iconFor] an area's icon (the Settings page's metric icons)
  */
 export function buildDiagnosticsPage(history, {
     readState = () => readSystemState(),
@@ -122,40 +127,75 @@ export function buildDiagnosticsPage(history, {
     settings = null,
     agent: agentOpts = {},
     readMachine = () => readMachineInfo(),
+    iconFor = null,
 } = {}) {
     const page = new Adw.PreferencesPage({ title: _('Diagnostics'), name: 'diagnostics', icon_name: 'dialog-information-symbolic' });
-    // The findings, with Check again and Copy report as icons in the header;
-    // where they come from is the title's tooltip.
-    const found = new Adw.PreferencesGroup({ title: _('Findings') });
+
+    // The area strip: a tile per area with its count of findings, which
+    // filters the list; Check again and Copy report at its end. Where the
+    // findings come from is the strip's tooltip.
+    const overview = new Adw.PreferencesGroup();
+    page.add(overview);
+    const strip = new Gtk.Box({ spacing: 4, css_classes: ['rp-tabs', 'rp-diag-strip'] });
     const basis = _('From the last 7 days of usage tracking and how the machine is set up now, worked out on this computer. Advice about apps and memory needs tracking to be on.');
-    const header = new Gtk.Box({ spacing: 4, valign: Gtk.Align.CENTER });
+    strip.tooltip_text = basis;
+    strip.update_property([Gtk.AccessibleProperty.DESCRIPTION], [basis]);
+    overview.add(strip);
+    const tiles = {};
+    const state = { findings: [], system: null, running: false, gen: 0, filter: null };
+    let filtering = false;
+    for (const area of TILE_AREAS) {
+        const name = _(AREA_TITLES[area]);
+        const tile = new Gtk.ToggleButton({ css_classes: ['rp-tab'], hexpand: true });
+        const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2, halign: Gtk.Align.CENTER });
+        const gicon = iconFor?.(area);
+        if (gicon) box.append(new Gtk.Image({ gicon, pixel_size: 18, css_classes: [`rp-c-${area}`] }));
+        box.append(new Gtk.Label({ label: name, css_classes: ['rp-tab-label'] }));
+        tile.count = new Gtk.Label({ css_classes: ['rp-diag-count', 'numeric'] });
+        box.append(tile.count);
+        tile.set_child(box);
+        tile.area = area;
+        tile.name = name;
+        // Pressed: only this area; pressed again: all of them.
+        tile.connect('toggled', () => {
+            if (filtering) return;
+            filtering = true;
+            try {
+                state.filter = tile.active ? area : null;
+                for (const other of Object.values(tiles)) {
+                    if (other !== tile) other.active = false;
+                    other.update_state([Gtk.AccessibleState.PRESSED], [other.active ? Gtk.AccessibleTristate.TRUE : Gtk.AccessibleTristate.FALSE]);
+                    if (other.active) other.add_css_class(`rp-tint-${other.area}`);
+                    else other.remove_css_class(`rp-tint-${other.area}`);
+                }
+            } finally {
+                filtering = false;
+            }
+            applyFilter();
+        });
+        strip.append(tile);
+        tiles[area] = tile;
+    }
+    const actions = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2, valign: Gtk.Align.CENTER, margin_start: 4 });
     const icon = (name, tooltip) => {
         const button = new Gtk.Button({ icon_name: name, tooltip_text: tooltip, css_classes: ['flat'] });
         button.update_property([Gtk.AccessibleProperty.LABEL], [tooltip]);
-        header.append(button);
+        actions.append(button);
         return button;
     };
-    const info = new Gtk.Image({ icon_name: 'dialog-information-symbolic', tooltip_text: basis, css_classes: ['dim-label'], margin_end: 4 });
-    info.update_property([Gtk.AccessibleProperty.LABEL], [basis]);
-    header.append(info);
     const again = icon('view-refresh-symbolic', _('Check again'));
     const copy = icon('edit-copy-symbolic', _('Copy report'));
-    found.set_header_suffix(header);
-    page.add(found);
-    const nothing = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
-    const nothingRow = new Adw.ActionRow({ title: _('Checking…') });
-    nothing.append(nothingRow);
-    found.add(nothing);
-    const groups = {};
-    const lists = {};
-    for (const area of AREAS) {
-        groups[area] = new Adw.PreferencesGroup({ title: _(AREA_TITLES[area]) });
-        lists[area] = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
-        lists[area].update_property([Gtk.AccessibleProperty.LABEL], [fill(_('Findings: {area}'), { area: _(AREA_TITLES[area]) })]);
-        groups[area].add(lists[area]);
-        page.add(groups[area]);
-    }
-    const state = { findings: [], system: null, running: false, gen: 0 };
+    strip.append(actions);
+
+    // One list, warnings first; a row's area is its icon, its severity its edge.
+    const listGroup = new Adw.PreferencesGroup();
+    page.add(listGroup);
+    const list = new Gtk.ListBox({ selection_mode: Gtk.SelectionMode.NONE, css_classes: ['boxed-list'] });
+    list.update_property([Gtk.AccessibleProperty.LABEL], [_('Findings')]);
+    listGroup.add(list);
+    const nothing = new Adw.ActionRow({ title: _('Checking…') });
+    nothing.add_prefix(new Gtk.Image({ icon_name: 'object-select-symbolic', css_classes: ['rp-finding-ok'] }));
+    const rows = [];
 
     // The report for an agent, from the same figures. Finding titles name
     // apps: there the names are code spans, like everywhere in the report.
@@ -179,8 +219,20 @@ export function buildDiagnosticsPage(history, {
     // behind it open beneath.
     const row = finding => {
         const r = new Adw.ExpanderRow({ title: finding.title, subtitle: estimateShort(finding.estimate) });
+        // Added, not set: css_classes would drop the row's own 'expander',
+        // and themes then paint its header as a plain list (Orchis: white).
+        r.add_css_class('rp-finding-row');
+        r.add_css_class(`rp-edge-${finding.severity}`);
         r.findingId = finding.id;
-        r.add_prefix(new Gtk.Image({ icon_name: SEVERITY_ICONS[finding.severity], css_classes: [`rp-finding-${finding.severity}`] }));
+        r.area = finding.area;
+        r.severity = finding.severity;
+        // The area's own icon and colour; facts about the readings, and an
+        // area without an icon, show the severity's.
+        const gicon = TILE_AREAS.includes(finding.area) ? iconFor?.(finding.area) : null;
+        r.add_prefix(gicon
+            ? new Gtk.Image({ gicon, css_classes: [`rp-c-${finding.area}`] })
+            : new Gtk.Image({ icon_name: SEVERITY_ICONS[finding.severity], css_classes: [`rp-finding-${finding.severity}`] }));
+        r.update_property([Gtk.AccessibleProperty.DESCRIPTION], [fill(_('{area}, {severity}'), { area: _(AREA_TITLES[finding.area]), severity: _(SEVERITY_NAMES[finding.severity]) })]);
         r.detailLabel = new Gtk.Label({
             label: [finding.detail, finding.evidence].filter(Boolean).join('\n'),
             xalign: 0, wrap: true, selectable: true, css_classes: ['dim-label'],
@@ -206,18 +258,36 @@ export function buildDiagnosticsPage(history, {
         return r;
     };
 
+    // Shown or hidden by the area pressed in the strip; the nothing row
+    // only with no advice at all, whatever the filter.
+    const applyFilter = () => {
+        for (const r of rows) r.visible = state.filter === null || r.area === state.filter;
+    };
+
     const render = () => {
-        for (const area of AREAS) {
-            const list = lists[area];
-            list.remove_all();
-            const mine = state.findings.filter(f => f.area === area);
-            for (const finding of mine) list.append(row(finding));
-            groups[area].visible = mine.length > 0;
+        list.remove_all();
+        rows.length = 0;
+        const sorted = [...state.findings].sort((a, b) =>
+            SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || AREAS.indexOf(a.area) - AREAS.indexOf(b.area));
+        for (const finding of sorted) {
+            const r = row(finding);
+            list.append(r);
+            rows.push(r);
         }
         // Only facts about the readings themselves: still nothing to improve.
         const advice = state.findings.some(f => f.area !== 'data' && f.severity !== 'info');
-        nothing.visible = !advice;
-        nothingRow.title = state.system ? _('Nothing to improve') : _('Checking…');
+        nothing.title = state.system ? _('Nothing to improve') : _('Checking…');
+        if (!advice) list.prepend(nothing);
+        for (const tile of Object.values(tiles)) {
+            const mine = state.findings.filter(f => f.area === tile.area && f.severity !== 'info');
+            const warn = mine.some(f => f.severity === 'warning');
+            tile.count.label = mine.length ? String(mine.length) : '✓';
+            tile.count.set_css_classes(['rp-diag-count', 'numeric', mine.length ? (warn ? 'rp-finding-warning' : 'rp-finding-suggestion') : 'rp-finding-ok']);
+            tile.findings = mine.length;
+            const said = mine.length ? fill(ngettext('{area}: {n} finding', '{area}: {n} findings', mine.length), { area: tile.name, n: mine.length }) : fill(_('{area}: nothing found'), { area: tile.name });
+            tile.update_property([Gtk.AccessibleProperty.LABEL], [said]);
+        }
+        applyFilter();
     };
 
     const refresh = async () => {
@@ -277,5 +347,5 @@ export function buildDiagnosticsPage(history, {
         if (copiedId) GLib.source_remove(copiedId);
         copiedId = 0;
     };
-    return { page, lists, groups, nothing, agent, makeReport, state, refresh, copy, dispose };
+    return { page, rows, tiles, list, nothing, agent, makeReport, state, refresh, copy, dispose };
 }
