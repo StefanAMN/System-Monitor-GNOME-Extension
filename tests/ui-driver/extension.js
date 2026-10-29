@@ -56,6 +56,17 @@ async function shot(name) {
 // Real pointer input through the compositor, so anything that swallows or
 // blocks events (grabs, overlapping actors, broken handlers) is exercised.
 let pointer = null;
+/** The pointer resting on an actor's middle, as a person moves it there. */
+async function hoverActor(actor) {
+    if (!pointer) pointer = seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    const [x, y] = actor.get_transformed_position();
+    const [w, h] = actor.get_transformed_size();
+    pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + w / 2 - 3, y + h / 2);
+    await sleep(150);
+    pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + w / 2, y + h / 2);
+    await sleep(200);
+}
+
 async function clickActor(actor) {
     if (!pointer) {
         pointer = seat()
@@ -980,20 +991,70 @@ async function gpuPageFollowsReadings(rp) {
     check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders with a bare reading (${gpuPlaceholders(rp).join(' | ')})`);
     await shot('gpu-bare');
 
-    // Several GPUs (a hybrid laptop): the shown one in the card, every one
-    // listed, a sleeping one said to be asleep.
-    await feed({
-        ...full, key: 'card0', gpus: [{ ...full, key: 'card0' }, { key: 'nvidia0', model: 'NVIDIA RTX 3050', percent: 0, asleep: true },
-            { key: 'card2', model: 'AMD Radeon 780M', percent: 12 }],
-    });
-    const listed = rp._gpuListRows?.map(row => `${row.lbl.text}=${row.val.text}`) ?? [];
-    check(rp._gpuAllCard.visible && listed.length === 3 && /shown above/.test(listed[0]) && listed[1] === 'NVIDIA RTX 3050=asleep' && listed[2] === 'AMD Radeon 780M=12%',
-        `gpu page: the GPUs are listed as ${listed.join(' | ') || 'nothing'}`);
+    // Several GPUs (a hybrid laptop): a card for each, all at once, in an order
+    // that stays; a sleeping one said to be asleep.
+    const dedicated = { ...full, key: 'card0' };
+    const sleeping = { key: 'nvidia0', present: true, brand: 'NVIDIA', model: 'NVIDIA RTX 3050', driver: 'nvidia', percent: 0, memTotal: 0, temp: 0, powerDraw: null, clock: null, maxClock: null, fanSpeed: null, asleep: true };
+    const integrated = { key: 'card2', present: true, brand: 'AMD', model: 'AMD Radeon 780M', driver: 'amdgpu', percent: 12, memTotal: 0, temp: 48, powerDraw: null, clock: 800, maxClock: null, fanSpeed: null };
+    await feed({ ...dedicated, gpus: [dedicated, sleeping, integrated] });
+    const cards = () => rp._gpuCards.map(card => `${card.model.text}=${card.load.text}`).join(' | ');
+    const nvidiaName = full.model;
+    check(rp._gpuCardsBox.visible && cards() === `${nvidiaName}=37% | NVIDIA RTX 3050=asleep | AMD Radeon 780M=12%`, `gpu page: the cards read ${cards()}`);
+    check(!rp._gpuHwCard.visible && !rp._gpuSparkCard.visible && !rp._gpuVramCard.visible && !rp._gpuStatsCard.visible,
+        'gpu page: the one-GPU cards stay beside a card for each GPU');
+    const [first, asleep, last] = rp._gpuCards;
+    const rowsOf = card => ['clock', 'temp', 'fan', 'power', 'vram'].map(key => card.rows[key].row.visible).join();
+    check(rowsOf(first) === 'true,true,true,true,true' && first.rows.power.val.text === '42.5 W' && /\(25%\)$/.test(first.rows.vram.val.text),
+        `gpu page: the first card shows rows ${rowsOf(first)}, power '${first.rows.power.val.text}', memory '${first.rows.vram.val.text}'`);
+    check(rowsOf(last) === 'true,true,false,false,false' && last.rows.clock.val.text === '800 MHz', `gpu page: the last card shows rows ${rowsOf(last)}`);
+    check(!asleep.details.visible && asleep.load.is_mapped(), 'gpu page: a sleeping GPU shows readings');
+    check(first.spark.history === rp._hist['gpu:card0'] && last.spark.history === rp._hist['gpu:card2'] && first.spark.history !== last.spark.history,
+        'gpu page: the cards do not chart their own series');
     check(/NVIDIA RTX 3050: asleep/.test(rp._tooltipTexts.gpu ?? ''), `gpu tooltip with several GPUs: '${rp._tooltipTexts.gpu}'`);
-    check(cutOffLabels(rp._gpuAllCard).length === 0, `gpu page: cut off in the list of GPUs: ${cutOffLabels(rp._gpuAllCard).join(' | ')}`);
+    // A name on several lines pushes what follows down instead of running into it.
+    for (const card of rp._gpuCards) {
+        const [, driverY] = card.driver.get_transformed_position();
+        const [, nextY] = card.loadRow.get_transformed_position();
+        // The boxes may touch by a pixel or two of empty line height; text running into the bar is 10 or more.
+        check(driverY + card.driver.height <= nextY + 3, `gpu page: ${card.model.text}: the driver line ends at ${Math.round(driverY + card.driver.height)}, the next row starts at ${Math.round(nextY)}`);
+    }
+    check(cutOffLabels(rp._gpuCardsBox).length === 0, `gpu page: cut off in the GPU cards: ${cutOffLabels(rp._gpuCardsBox).join(' | ')}`);
+    check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders in the GPU cards (${gpuPlaceholders(rp).join(' | ')})`);
     await shot('gpu-several');
+
+    // Another GPU turns busiest, the sleeping one wakes: the cards stay where they are.
+    const busy = { ...integrated, percent: 80 };
+    const awake = { ...sleeping, asleep: false, percent: 25, driver: 'NVIDIA 550.120' };
+    await feed({ ...busy, gpus: [dedicated, awake, busy] });
+    check(rp._gpuCards[0] === first && rp._gpuCards[2] === last && cards() === `${nvidiaName}=37% | NVIDIA RTX 3050=25% | AMD Radeon 780M=80%`, `gpu page: after a change the cards read ${cards()}`);
+    check(asleep.details.visible, 'gpu page: a woken GPU shows no readings');
+    const newest = hist => hist.get(hist.length - 1);
+    check(newest(rp._hist['gpu:card0']) === 37 && newest(rp._hist['gpu:card2']) === 80 && newest(rp._hist.gpu) === 80,
+        `gpu page: series end at ${newest(rp._hist['gpu:card0'])}, ${newest(rp._hist['gpu:card2'])}, busiest ${newest(rp._hist.gpu)}`);
+
+    // Real pointer: a chart answers it, and the range buttons reach every card's chart.
+    await scrollIntoView(rp, first.spark);
+    await hoverActor(first.spark);
+    check(first.spark._hoverX >= 0, `gpu page: a card's chart ignores the pointer (${first.spark._hoverX})`);
+    await scrollIntoView(rp, rp._rangeButtons.hour);
+    await clickActor(rp._rangeButtons.hour);
+    check(first.spark.history === rp._long.hour['gpu:card0'] && last.spark.history === rp._long.hour['gpu:card2'], 'gpu page: the 1h range left the cards\' charts');
+    await scrollIntoView(rp, rp._rangeButtons.live);
+    await clickActor(rp._rangeButtons.live);
+    check(first.spark.history === rp._hist['gpu:card0'], 'gpu page: the live range left the card\'s chart');
+
+    // The set changes (a dock, a driver loaded late): cards rebuilt, old charts dropped.
+    const charts = rp._sparklines.length;
+    await feed({ ...dedicated, gpus: [dedicated, integrated] });
+    check(rp._gpuCards.length === 2 && rp._sparklines.length === charts - 1, `gpu page: ${rp._gpuCards.length} cards and ${rp._sparklines.length} charts, ${charts} before`);
+    // Past GPU_CHARTS GPUs: a card without a chart.
+    const many = ['a', 'b', 'c', 'd', 'e', 'f'].map(k => ({ ...integrated, key: `extra${k}`, model: `GPU ${k}` }));
+    await feed({ ...many[0], gpus: many });
+    check(rp._gpuCards.length === 6 && rp._gpuHist.size <= 4 && rp._gpuCards[5].spark === null, `gpu page: six GPUs: ${rp._gpuCards.length} cards, ${rp._gpuHist.size} series`);
+
     await feed(full);
-    check(!rp._gpuAllCard.visible, 'gpu page: the list of GPUs stays with one GPU');
+    check(!rp._gpuCardsBox.visible && rp._gpuHwCard.visible && rp._gpuSparkCard.visible && rp._gpuVramCard.visible && rp._gpuStatsCard.visible,
+        'gpu page: one GPU again, its layout is not back');
 
     await feed({ present: false, percent: 0 });
     check(rp._gpuInactiveCard.visible && !rp._gpuHwCard.visible && !rp._gpuSparkCard.visible && !rp._gpuStatsCard.visible,

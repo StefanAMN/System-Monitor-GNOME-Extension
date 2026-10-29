@@ -151,6 +151,9 @@ export default class ResourcePulseExtension extends Extension {
         this._hist = {};
         for (const key of HISTORY_KEYS) this._hist[key] = new RingBuffer(HISTORY_CAPACITY);
         this._histStamp = {};
+        // Every series, HISTORY_KEYS and those of a machine's several GPUs.
+        this._histKeys = [...HISTORY_KEYS];
+        this._gpuHist = new Map();
         // 1 h and 24 h of buckets per key; fixed size, kept across interval changes.
         this._long = {};
         for (const [range, spec] of Object.entries(RANGES)) {
@@ -504,6 +507,8 @@ export default class ResourcePulseExtension extends Extension {
         this._memProcWidgets = null;
         this._hist = null;
         this._histStamp = null;
+        this._histKeys = null;
+        this._gpuHist = null;
         this._sparklines = [];
         this._dskMountRows = null;
         this._netIfaceRows = null;

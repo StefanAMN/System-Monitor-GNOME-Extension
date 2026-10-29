@@ -368,7 +368,8 @@ export class DashboardMethods {
         // ── GPU ──
         if (data.gpu) {
             const gpu = data.gpu;
-            this._updateGpuList(gpu);
+            const several = (gpu.gpus?.length ?? 0) > 1;
+            this._updateGpuCards(gpu.gpus ?? [], tempUnit, useGiB);
             const sc = this._summaryCards?.gpu;
             if (sc) {
                 sc.box.visible = true;
@@ -389,9 +390,9 @@ export class DashboardMethods {
             // Without a GPU only the notice is shown, not cards of placeholders.
             if (this._gpuInactiveCard) {
                 this._gpuInactiveCard.visible = !gpu.present;
-                this._gpuHwCard.visible = gpu.present;
-                this._gpuSparkCard.visible = gpu.present;
-                this._gpuStatsCard.visible = gpu.present;
+                this._gpuHwCard.visible = gpu.present && !several;
+                this._gpuSparkCard.visible = gpu.present && !several;
+                this._gpuStatsCard.visible = gpu.present && !several;
             }
 
             // Update Model / Chip Badge
@@ -401,28 +402,7 @@ export class DashboardMethods {
                 this._gpuDriverDesc.text = fill(_('Driver: {driver}'), { driver: gpu.driver || '' });
             }
 
-            if (this._gpuChipBox) {
-                const brand = (gpu.brand || '').toLowerCase();
-                if (brand.includes('nvidia')) {
-                    this._gpuChipBox.style = 'background-color: #76b900; border-radius: 6px; padding: 6px 10px;';
-                    this._gpuChipLabel1.text = 'NVIDIA';
-                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #223300; font-weight: bold;';
-                    this._gpuChipLabel2.text = 'GEFORCE';
-                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #000000; font-weight: bold;';
-                } else if (brand.includes('amd')) {
-                    this._gpuChipBox.style = 'background-color: #d22630; border-radius: 6px; padding: 6px 10px;';
-                    this._gpuChipLabel1.text = 'AMD';
-                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #f9b8bb; font-weight: 300;';
-                    this._gpuChipLabel2.text = 'RADEON';
-                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #ffffff; font-weight: bold;';
-                } else {
-                    this._gpuChipBox.style = 'background-color: #0e5fa6; border-radius: 6px; padding: 6px 10px;';
-                    this._gpuChipLabel1.text = 'intel';
-                    this._gpuChipLabel1.style = 'font-size: 0.65em; color: #a0c8f0; font-weight: 300;';
-                    this._gpuChipLabel2.text = 'GRAPHICS';
-                    this._gpuChipLabel2.style = 'font-size: 0.85em; color: #ffffff; font-weight: bold;';
-                }
-            }
+            if (this._gpuChipBox) this._styleGpuChip(this._gpuChipBox, this._gpuChipLabel1, this._gpuChipLabel2, gpu.brand);
 
             // Quick Hardware Sub-Stats: only what this GPU reports.
             const readings = gpuReadings(gpu, tempUnit);
@@ -440,7 +420,7 @@ export class DashboardMethods {
 
             // VRAM Card
             if (this._gpuVramCard) {
-                if (gpu.memTotal > 0) {
+                if (gpu.memTotal > 0 && !several) {
                     this._gpuVramCard.visible = true;
                     if (this._gpuVramPctLbl) this._gpuVramPctLbl.text = `${Math.round(gpu.memPercent)}%`;
                     if (this._gpuVramBar) this._gpuVramBar.setPercent(gpu.memPercent);

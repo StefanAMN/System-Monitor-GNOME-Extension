@@ -695,6 +695,26 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
         eq(avg.add(repeated, 8 * S).net.total.rxRate, 2000, 'average: a repeated reading is not counted twice');
     }
     {
+        // Several GPUs: each averaged on its own, the one shown counted once.
+        const avg = new DisplayAverage();
+        const reading = (one, two, shown = 'a') => {
+            const gpus = [{ key: 'a', percent: one, powerDraw: 10 }, { key: 'b', percent: two, powerDraw: null, asleep: two === 0 }];
+            return { gpu: { present: true, ...gpus.find(g => g.key === shown), gpus } };
+        };
+        avg.add(reading(10, 80), 2 * S);
+        avg.add(reading(50, 20), 4 * S);
+        const r = reading(90, 40);
+        const shown = avg.add(r, 6 * S).gpu;
+        eq([shown.percent, shown.gpus[0].percent, shown.gpus[1].percent], [70, 70, 30], 'average: each GPU on its own; the one shown is the same figure');
+        eq([shown.gpus[0].powerDraw, shown.gpus[1].powerDraw], [10, null], 'average: a GPU without a power reading stays without one');
+        eq(r.gpu.gpus[0].percent, 90, 'average: the raw GPU list is not modified (alerts and history use it)');
+        eq(avg.add(r, 8 * S).gpu.gpus[0].percent, 70, 'average: a repeated GPU reading is not counted twice');
+        // The other one shown from now on: its series went on all along.
+        eq(avg.add(reading(90, 40, 'b'), 10 * S).gpu.percent, 35, 'average: the GPU shown can change without starting over');
+        const mid = interpolateReading(reading(0, 20), reading(50, 40), 0.5);
+        eq(mid.gpu.gpus.map(g => g.percent), [25, 30], 'glide: every GPU of the list');
+    }
+    {
         // By the time each reading covers, within the window only.
         const avg = new DisplayAverage();
         const reading = cpu => ({ cpu: { total: cpu, cores: [] } });
