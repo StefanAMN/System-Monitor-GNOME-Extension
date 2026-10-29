@@ -167,6 +167,8 @@ export function drainPoints(ledger, from, to, batteryOnly, step = stepFor(from, 
 // beside it gives its period and values. The box is drawn in the chart (no
 // tooltip delay); from the keyboard Left / Right step through the bars.
 const CHART_LEFT = { drain: 44, bars: 52 };
+// How to zoom: the chart title's tooltip (the page shows no hint text).
+const ZOOM_HINT = () => _('Drag across the chart to zoom in; Ctrl+scroll zooms in and out');
 
 /** The bar under x in a chart `width` wide whose bars start at `left`; -1 outside. */
 export function barAt(x, width, left, count) {
@@ -314,10 +316,7 @@ function paintSelection(area, cr, height, chart) {
  */
 function zoomHeader() {
     const box = new Gtk.Box({ spacing: 8, css_classes: ['rp-zoom-line'] });
-    const label = new Gtk.Label({
-        xalign: 0, hexpand: true, wrap: true, css_classes: ['rp-tile-detail'],
-        tooltip_text: _('Drag across the chart to zoom in; Ctrl+scroll zooms in and out'),
-    });
+    const label = new Gtk.Label({ xalign: 0, hexpand: true, wrap: true, css_classes: ['rp-tile-detail'] });
     const reset = new Gtk.Button({ icon_name: 'zoom-original-symbolic', tooltip_text: _('Reset zoom'), css_classes: ['flat', 'rp-zoom-reset'], valign: Gtk.Align.CENTER });
     reset.update_property([Gtk.AccessibleProperty.LABEL], [_('Reset zoom')]);
     box.append(label);
@@ -330,7 +329,9 @@ function zoomHeader() {
         }
         const name = stepName(points);
         const span = fill(_('{from}–{to}'), { from: axisLabel(points, points[0].t), to: axisLabel(points, points[points.length - 1].t + stepMs(points)) });
-        label.label = chart.view ? fill(_('{span} · {bars}'), { span, bars: name }) : `${name[0].toUpperCase()}${name.slice(1)}`;
+        // Nothing to say until zoomed: the axis shows the period.
+        label.label = chart.view ? fill(_('{span} · {bars}'), { span, bars: name }) : '';
+        box.visible = !!chart.view;
         reset.visible = !!chart.view;
     };
     box.label = label;
@@ -538,8 +539,8 @@ export function componentSpecs(unit = 'C') {
         cpu: {
             title: _('Processor'),
             tiles: [
-                [_('Average load'), t => [pct(t.load), _('of all cores')]],
-                [_('Waiting for the processor'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time')]],
+                [_('Average load'), t => [pct(t.load), '']],
+                [_('Waiting for the processor'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : '']],
                 [_('Above the temperature alert'), t => [hotFor(t.hot), '']],
                 [_('Time recorded'), t => [formatDuration(t.time), '']],
             ],
@@ -554,25 +555,23 @@ export function componentSpecs(unit = 'C') {
                 [_('Average in use'), t => [mib(t.average), t.total ? fill(_('of {total}'), { total: mib(t.total) }) : '']],
                 [_('Highest in use'), t => [mib(t.highest), t.total && t.highest !== null ? fill(_('{percent} of the total'), { percent: pct(t.highest / t.total) }) : '']],
                 [_('Swap in use, at most'), t => [mib(t.swap), t.swapTotal ? fill(_('of {total}'), { total: mib(t.swapTotal) }) : _('no swap')]],
-                [_('Waiting for memory'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time')]],
+                [_('Waiting for memory'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : '']],
             ],
             chart: _('Memory in use'), series: [[_('highest'), 'highest'], [_('average'), 'average']], nested: true, axis: mib,
             app: a => [mib(a.value), fill(_('at most {size}'), { size: mib(a.app.memMaxMiB) })],
             appsTitle: _('Apps by memory'),
-            appsDescription: _('Average over the period'),
         },
         disk: {
             title: _('Disk'),
             tiles: [
                 [_('Read'), t => [bytes(t.read), '']],
                 [_('Written'), t => [bytes(t.written), '']],
-                [_('Waiting for the disk'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : _('of the time')]],
-                [_('Seen per app'), t => [bytes(t.apps), _('estimate')]],
+                [_('Waiting for the disk'), t => [pct(t.waiting), t.waiting === null ? _('not measured') : '']],
+                [_('Seen per app'), t => [bytes(t.apps), '']],
             ],
             chart: _('Disk traffic'), series: [[_('read'), 'read'], [_('written'), 'written']], axis: bytes,
             app: a => [bytes(a.value), fill(_('{read} read · {written} written'), { read: bytes(a.app.diskRead), written: bytes(a.app.diskWritten) })],
             appsTitle: _('Apps by disk traffic'),
-            appsDescription: _('Estimate'),
         },
         network: {
             title: _('Network'),
@@ -590,7 +589,7 @@ export function componentSpecs(unit = 'C') {
             tiles: [
                 [_('Graphics busy'), t => [t.busy === null ? dash : formatDuration(t.busy), '']],
                 [_('Share of the time'), t => [pct(t.share), '']],
-                [_('Graphics energy'), t => [t.energy === null ? _('not measured') : formatWh(t.energy), _('estimate')]],
+                [_('Graphics energy'), t => [t.energy === null ? _('not measured') : formatWh(t.energy), '']],
             ],
             chart: _('Graphics busy'), series: [[_('busy'), 'busy']], axis: x => formatDuration(x),
             app: a => [formatCpu(a.app.gpu / 1000), fill(_('{percent} % of graphics'), { percent: Math.round(a.share * 100) })],
@@ -599,8 +598,8 @@ export function componentSpecs(unit = 'C') {
         thermal: {
             title: _('Temperature'),
             tiles: [
-                [_('Average'), t => [temp(t.average), _('processor')]],
-                [_('Highest'), t => [temp(t.highest), _('processor')]],
+                [_('Average'), t => [temp(t.average), '']],
+                [_('Highest'), t => [temp(t.highest), '']],
                 [_('Above the temperature alert'), t => [hotFor(t.hot), '']],
             ],
             chart: _('Processor temperature'), series: [[_('highest'), 'highest'], [_('average'), 'average']], nested: true, axis: temp,
@@ -809,7 +808,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     // Battery use over the period.
     const chartBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-chart'] });
     const chartHead = new Gtk.Box({ spacing: 12 });
-    chartHead.append(new Gtk.Label({ label: _('Battery use'), xalign: 0, hexpand: true, css_classes: ['rp-tile-label'] }));
+    chartHead.append(new Gtk.Label({ label: _('Battery use'), xalign: 0, hexpand: true, css_classes: ['rp-tile-label'], tooltip_text: ZOOM_HINT() }));
     for (const [text, colour] of [[_('battery'), 'rp-c-battery'], [_('processor'), 'rp-c-cpu']]) {
         const key = new Gtk.Box({ spacing: 4 });
         key.append(new Gtk.Label({ label: '■', css_classes: [colour] }));
@@ -857,7 +856,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
     componentBox.append(tileGrid(rows.componentTiles));
     const barsBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, css_classes: ['rp-chart'] });
     const barsHead = new Gtk.Box({ spacing: 12 });
-    const barsTitle = new Gtk.Label({ xalign: 0, hexpand: true, css_classes: ['rp-tile-label'] });
+    const barsTitle = new Gtk.Label({ xalign: 0, hexpand: true, css_classes: ['rp-tile-label'], tooltip_text: ZOOM_HINT() });
     barsHead.append(barsTitle);
     const legend = [0, 1].map(() => {
         const key = new Gtk.Box({ spacing: 4 });
@@ -926,7 +925,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         componentGroup.visible = component !== 'battery';
         if (component !== 'battery') {
             summary.visible = false;
-            renderComponent(component, startOfHour(period.from(now)), now, tracking);
+            renderComponent(component, startOfHour(period.from(now)), now);
             return;
         }
         appsGroup.title = _('Apps');
@@ -982,16 +981,13 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         if (hidden.length > 0) {
             list.append(new Adw.ActionRow({ title: fill(_('{n} more'), { n: hidden.length }) }));
         }
-        if (shown.length === 0) list.append(emptyRow(tracking));
+        if (shown.length === 0) list.append(emptyRow());
     };
 
-    const emptyRow = tracking => new Adw.ActionRow({
-        title: _('No figures for this period'),
-        subtitle: tracking ? _('They appear as time passes') : _('Switch on tracking to record'),
-    });
+    const emptyRow = () => new Adw.ActionRow({ title: _('No figures for this period') });
 
     /** One component other than the battery, over [from, now]. */
-    const renderComponent = (component, from, now, tracking) => {
+    const renderComponent = (component, from, now) => {
         const spec = specsNow()[component];
         rows.bars.bounds = [from, now];
         const [viewFrom, viewTo] = rows.bars.view ? [rows.bars.view.from, rows.bars.view.to] : rows.bars.bounds;
@@ -1024,12 +1020,12 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         rows.bars.zoomLine.update(rows.bars, view.points);
         barsArea.queue_draw();
         rows.componentEmpty.visible = !view.has;
-        rows.componentEmpty.label = tracking ? _('No figures for this period yet') : _('No figures · switch on tracking to record');
+        rows.componentEmpty.label = _('No figures for this period');
 
         list.remove_all();
         rows.appRows = [];
         appsGroup.title = spec.appsTitle;
-        appsGroup.description = view.apps ? spec.appsDescription ?? '' : '';
+        appsGroup.description = '';
         if (!view.apps) {
             list.append(new Adw.ActionRow({ title: _('No figures per app'), subtitle: spec.noApps }));
             return;
@@ -1041,7 +1037,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         }
         if (view.apps.length > APPS_SHOWN)
             list.append(new Adw.ActionRow({ title: fill(_('{n} more'), { n: view.apps.length - APPS_SHOWN }) }));
-        if (view.apps.length === 0) list.append(emptyRow(tracking));
+        if (view.apps.length === 0) list.append(emptyRow());
     };
 
     const periodChanged = () => {

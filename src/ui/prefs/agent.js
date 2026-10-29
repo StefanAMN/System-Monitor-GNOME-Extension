@@ -52,10 +52,8 @@ export function buildAgentGroup(settings, {
     },
     confirm = confirmDialog,
 } = {}) {
-    const group = new Adw.PreferencesGroup({
-        title: _('Fix with an agent'),
-        description: _('A coding agent reads the findings from report.md and offers fixes.'),
-    });
+    // What is sent, and where, is said in the first-use confirmation.
+    const group = new Adw.PreferencesGroup({ title: _('Fix with an agent') });
 
     // Agent: the presets found on PATH, then a command of the user's own.
     const agents = [...findAgents(which), { id: 'custom', name: _('Custom command') }];

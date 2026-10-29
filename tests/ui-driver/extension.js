@@ -854,7 +854,7 @@ async function prefsWindow(rp) {
     rp._activeTab = 'battery';
     rp._updateTabVisibility();
     await sleep(1500);
-    check(rp._batTopAppLabel.text.includes('tracking is off'), `battery line: '${rp._batTopAppLabel.text}' with tracking off`);
+    check(rp._batTopAppLabel.text.includes('tracking off'), `battery line: '${rp._batTopAppLabel.text}' with tracking off`);
     await scrollIntoView(rp, rp._batTopApp);
     await shot('battery-top-app');
     await clickActor(rp._batTopApp);

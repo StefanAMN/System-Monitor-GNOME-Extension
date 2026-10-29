@@ -84,14 +84,14 @@ export class BatteryPage {
         if (stamp === this._batTopAppStamp) return;
         this._batTopAppStamp = stamp;
         if (!this._tracker) {
-            show(_('Battery use per app: tracking is off. Open the Tracking page to start it.'), false);
+            show(_('Per-app battery use: tracking off'), false);
             return;
         }
         const today = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
         const sum = this._tracker.ledger?.summarize({ from: today, batteryOnly: true });
         const top = sum?.apps.find(a => !a.id.startsWith('@') && a.cpu > 0);
         if (!top) {
-            show(_('Battery use per app: no time on battery recorded today yet.'));
+            show(_('Per-app battery use: none today'));
             return;
         }
         const name = ledgerAppInfo(top.id).name;

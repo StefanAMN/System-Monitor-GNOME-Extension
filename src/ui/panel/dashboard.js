@@ -496,8 +496,8 @@ export class DashboardMethods {
                 // Unprivileged: other users' counters are not readable. Said, not hidden.
                 this._dskProcNote.visible = data.ioDenied > 0;
                 this._dskProcNote.text = fill(ngettext(
-                    'Your processes only: {n} process of another user (a system service) cannot be read without administrator rights.',
-                    'Your processes only: {n} processes of other users (system services) cannot be read without administrator rights.',
+                    'Yours only · {n} system process needs administrator rights',
+                    'Yours only · {n} system processes need administrator rights',
                     data.ioDenied), { n: data.ioDenied });
             }
         }

@@ -217,8 +217,7 @@ export function buildDiagnosticsPage(history, {
         // Only facts about the readings themselves: still nothing to improve.
         const advice = state.findings.some(f => f.area !== 'data' && f.severity !== 'info');
         nothing.visible = !advice;
-        nothingRow.title = state.system ? _('Nothing to improve was found') : _('Checking…');
-        nothingRow.subtitle = history.ledger.buckets.length === 0 ? _('Switch on tracking for advice about apps') : '';
+        nothingRow.title = state.system ? _('Nothing to improve') : _('Checking…');
     };
 
     const refresh = async () => {
