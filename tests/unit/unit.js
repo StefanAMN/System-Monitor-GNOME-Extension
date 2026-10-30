@@ -7,10 +7,10 @@ import System from 'system';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime, formatDuration, batteryStateLabel } from '../../src/lib/common/format.js';
 import { RingBuffer } from '../../src/lib/engine/ringbuffer.js';
 import { RunningStats } from '../../src/lib/engine/stats.js';
-import { METRICS, SETTINGS_SECTIONS, allSettingRows, formatSettingValue, stepSettingValue, pinPositions, togglePinned, movePinned } from '../../src/lib/common/settingsmodel.js';
+import { METRICS, SETTINGS_SECTIONS, POLL_STOPS_MS, allSettingRows, formatSettingValue, nearestStop, stepSettingValue, pinPositions, togglePinned, movePinned } from '../../src/lib/common/settingsmodel.js';
 import { parseStatBlob, cpuPercent, groupByName, ProcessSampler, canEnd, processIdentity, liveMembers, signalProcesses, filterGroups, groupState, reniceProcesses, LOWER_NICE } from '../../src/lib/collectors/process.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
-import { listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
+import { migrateSettings, listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
 import { parseNetDev, counterDelta, NetworkSampler } from '../../src/lib/collectors/network.js';
 import { sessionIdentity, sessionStateText, parseSessionState, currentSessionIdentity } from '../../src/lib/engine/sessiontotals.js';
 import { parseDiskstats, parseMounts, ioUtilization } from '../../src/lib/collectors/disk.js';
@@ -351,23 +351,25 @@ docker0: 1 2 3
 
     // Settings backup: what a file holds, and what of one may be restored.
     const schemaKeys = {
-        'poll-interval': { type: 'i', min: 1, max: 10 }, 'unit-temp': { type: 's', choices: ['C', 'F'] },
+        'poll-interval-ms': { type: 'i', min: 250, max: 30000 }, 'unit-temp': { type: 's', choices: ['C', 'F'] },
         'pinned-metrics': { type: 'as' }, 'compact-label': { type: 'b' }, 'prefs-page': { type: 's' },
     };
-    const saved = JSON.parse(backupText({ 'poll-interval': 3, 'unit-temp': 'F', 'prefs-page': 'tracking' }, new Date(0)));
-    eq([saved.format, saved.version, saved.saved, Object.keys(saved.settings)], ['resource-pulse-settings', 1, '1970-01-01T00:00:00.000Z', ['poll-interval', 'unit-temp']],
+    const saved = JSON.parse(backupText({ 'poll-interval-ms': 3000, 'poll-interval': 3, 'unit-temp': 'F', 'prefs-page': 'tracking' }, new Date(0)));
+    eq([saved.format, saved.version, saved.saved, Object.keys(saved.settings)], ['resource-pulse-settings', 1, '1970-01-01T00:00:00.000Z', ['poll-interval-ms', 'unit-temp']],
         'backup: the file, without the window\'s signals');
     ok(NOT_BACKED_UP.has('action-open-menu') && NOT_BACKED_UP.has('prefs-page'), 'backup: signals are not settings');
     const checked = checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: {
-        'poll-interval': 4, 'unit-temp': 'K', 'pinned-metrics': ['cpu', 3], 'compact-label': true, 'no-such-key': 1, 'prefs-page': 'x', 'poll-interval-x': 2,
+        'poll-interval-ms': 500, 'unit-temp': 'K', 'pinned-metrics': ['cpu', 3], 'compact-label': true, 'no-such-key': 1, 'prefs-page': 'x', 'poll-interval-x': 2,
     } }), schemaKeys);
-    eq(checked.apply, { 'poll-interval': 4, 'compact-label': true }, 'backup: valid values applied');
+    eq(checked.apply, { 'poll-interval-ms': 500, 'compact-label': true }, 'backup: valid values applied');
     eq(checked.rejected.map(r => `${r.key}: ${r.reason}`), ['unit-temp: not one of the choices', 'pinned-metrics: wrong kind of value',
         'no-such-key: not a setting of this version', 'prefs-page: not a setting of this version', 'poll-interval-x: not a setting of this version'],
     'backup: the rest rejected with a reason');
-    eq(checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: { 'poll-interval': 99 } }), schemaKeys).rejected[0].reason,
-        'outside 1–10', 'backup: out of range');
-    eq(checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: { 'poll-interval': 2.5 } }), schemaKeys).rejected[0].reason,
+    eq(checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: { 'poll-interval-ms': 99 } }), schemaKeys).rejected[0].reason,
+        'outside 250–30000', 'backup: out of range');
+    eq(checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: { 'poll-interval': 4 } }), schemaKeys).apply,
+        { 'poll-interval-ms': 4000 }, 'backup: a file with the old whole seconds restores the interval');
+    eq(checkBackup(JSON.stringify({ format: 'resource-pulse-settings', version: 1, settings: { 'poll-interval-ms': 2.5 } }), schemaKeys).rejected[0].reason,
         'wrong kind of value', 'backup: an integer setting takes no fraction');
     for (const [text, why] of [['{', 'not JSON'], ['{"format":"other","settings":{}}', 'other format'], ['{"format":"resource-pulse-settings","version":2,"settings":{}}', 'newer version'],
         ['{"format":"resource-pulse-settings","version":1,"settings":[]}', 'settings not an object']]) {
@@ -555,7 +557,7 @@ docker0: 1 2 3
         const [, offered] = schema.get_key(row.key).get_range().deepUnpack();
         eq(row.choices.map(([value]) => value).sort(), offered.deepUnpack().sort(), `settings model: ${row.key} offers every value the schema allows`);
     }
-    for (const row of rows.filter(r => r.kind === 'number')) {
+    for (const row of rows.filter(r => r.kind === 'number' && !r.stops)) {
         const [kind, limits] = schema.get_key(row.key).get_range().deepUnpack();
         eq([kind, ...limits.deepUnpack()], ['range', row.min, row.max], `settings model: ${row.key} has the schema's range`);
         ok(row.step > 0 && (row.max - row.min) % row.step === 0, `settings model: ${row.key} steps land on both ends of its range`);
@@ -567,11 +569,29 @@ docker0: 1 2 3
 
     const cpuRow = rows.find(r => r.key === 'threshold-cpu');
     const tempRow = rows.find(r => r.key === 'threshold-temp');
-    const pollRow = rows.find(r => r.key === 'poll-interval');
-    eq([formatSettingValue(cpuRow, 90), formatSettingValue(pollRow, 2), formatSettingValue(tempRow, 80), formatSettingValue(tempRow, 80, 'F')],
-        ['90%', '2 s', '80°C', '176°F'], 'settings model: values as shown');
-    eq([stepSettingValue(cpuRow, 90, 1), stepSettingValue(cpuRow, 98, 1), stepSettingValue(cpuRow, 100, 1), stepSettingValue(cpuRow, 52, -1), stepSettingValue(pollRow, 1, -1)],
-        [95, 100, 100, 50, 1], 'settings model: a step clamps to the range, also from an off-grid value');
+    const pollRow = rows.find(r => r.key === 'poll-interval-ms');
+    eq([formatSettingValue(cpuRow, 90), formatSettingValue(pollRow, 2000), formatSettingValue(pollRow, 250), formatSettingValue(pollRow, 1250), formatSettingValue(tempRow, 80), formatSettingValue(tempRow, 80, 'F')],
+        ['90%', '2 s', '250 ms', '1.25 s', '80°C', '176°F'], 'settings model: values as shown');
+    eq([stepSettingValue(cpuRow, 90, 1), stepSettingValue(cpuRow, 98, 1), stepSettingValue(cpuRow, 100, 1), stepSettingValue(cpuRow, 52, -1), stepSettingValue(tempRow, 40, -1)],
+        [95, 100, 100, 50, 40], 'settings model: a step clamps to the range, also from an off-grid value');
+    const pollRange = schema.get_key('poll-interval-ms').get_range().recursiveUnpack()[1];
+    eq([POLL_STOPS_MS[0], POLL_STOPS_MS.at(-1), POLL_STOPS_MS.includes(schema.get_key('poll-interval-ms').get_default_value().get_int32())], [pollRange[0], pollRange[1], true],
+        'update every: the stops span the schema\'s range and hold the default');
+    const ratios = POLL_STOPS_MS.slice(1).map((v, i) => v / POLL_STOPS_MS[i]);
+    const gaps = POLL_STOPS_MS.slice(1).map((v, i) => v - POLL_STOPS_MS[i]);
+    ok(ratios.every(r => r > 1 && r <= 1.5) && gaps.every((g, i) => i === 0 || g >= gaps[i - 1] || gaps[i - 1] <= 1000),
+        `update every: steady ratios, gaps that grow (${gaps})`);
+    eq([nearestStop(POLL_STOPS_MS, 250), nearestStop(POLL_STOPS_MS, 1), nearestStop(POLL_STOPS_MS, 99999), POLL_STOPS_MS[nearestStop(POLL_STOPS_MS, 8000)]], [0, 0, 18, 7000],
+        'update every: the nearest stop');
+    {
+        const stored = new Gio.Settings({ settings_schema: schema, backend: Gio.memory_settings_backend_new() });
+        stored.set_int('poll-interval', 8);
+        migrateSettings(stored);
+        eq([stored.get_int('poll-interval-ms'), stored.get_user_value('poll-interval')], [8000, null], 'update every: an old setting moves over once');
+        stored.set_int('poll-interval-ms', 500);
+        migrateSettings(stored);
+        eq(stored.get_int('poll-interval-ms'), 500, 'update every: and is not moved again');
+    }
     eq(pinPositions(['memory', 'cpu']), { cpu: 2, memory: 1, battery: 0, power: 0, disk: 0, network: 0, thermal: 0, gpu: 0 }, 'pins: positions follow the pinned order');
     eq([togglePinned(['cpu', 'memory'], 'gpu'), togglePinned(['cpu', 'memory'], 'cpu')], [['cpu', 'memory', 'gpu'], ['memory']], 'pins: toggling appends or removes');
     const bar = ['cpu', 'memory', 'battery', 'network'];

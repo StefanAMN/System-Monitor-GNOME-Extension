@@ -225,3 +225,13 @@ export function getSysconf() {
     }
     return sysconfPromise;
 }
+
+/**
+ * Move a setting of the old key (whole seconds) to the one in milliseconds.
+ * @param {Gio.Settings} settings
+ */
+export function migrateSettings(settings) {
+    if (settings.get_user_value('poll-interval') === null) return;
+    settings.set_int('poll-interval-ms', settings.get_int('poll-interval') * 1000);
+    settings.reset('poll-interval');
+}

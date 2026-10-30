@@ -74,7 +74,19 @@ async function main() {
         // No words under the row: what it does is its tooltip.
         ok(widget.title === row.title && !widget.subtitle && widget.tooltip_text === row.detail,
             `${row.key}: title '${widget.title}', subtitle '${widget.subtitle}', tooltip '${widget.tooltip_text}' (wanted the model's detail as the tooltip, no subtitle)`);
-        if (row.kind === 'number') {
+        if (row.stops) {
+            const adj = widget.adjustment;
+            ok(adj.lower === 0 && adj.upper === row.stops.length - 1 && adj.step_increment === 1, `${row.key}: slider over ${adj.lower}..${adj.upper}`);
+            ok(row.stops[widget.value] === settings.get_int(row.key), `${row.key}: at stop ${widget.value} for a stored ${settings.get_int(row.key)}`);
+            widget.value = 0;
+            ok(settings.get_int(row.key) === row.stops[0] && widget.valueLabel.label === '250 ms', `${row.key}: the first stop stored ${settings.get_int(row.key)}, reads ${widget.valueLabel.label}`);
+            widget.value = row.stops.length - 1;
+            ok(settings.get_int(row.key) === 30000 && widget.valueLabel.label === '30 s', `${row.key}: the last stop stored ${settings.get_int(row.key)}, reads ${widget.valueLabel.label}`);
+            settings.set_int(row.key, 8000);
+            ok(row.stops[widget.value] === 7000 && settings.get_int(row.key) === 8000 && widget.valueLabel.label === '8 s',
+                `${row.key}: a stored value between stops is kept and read as it is (${settings.get_int(row.key)}, ${widget.valueLabel.label}, stop ${row.stops[widget.value]})`);
+            settings.reset(row.key);
+        } else if (row.kind === 'number') {
             const adj = widget.adjustment;
             ok(adj.lower === row.min && adj.upper === row.max && adj.step_increment === row.step,
                 `${row.key}: spin range ${adj.lower}..${adj.upper} step ${adj.step_increment}`);
@@ -312,27 +324,27 @@ async function backup() {
     const dir = GLib.dir_make_tmp('rp-prefs-backup-XXXXXX');
     const file = Gio.File.new_for_path(`${dir}/settings.json`);
     const settings = newSettings();
-    settings.set_int('poll-interval', 5);
+    settings.set_int('poll-interval-ms', 5000);
     settings.set_string('unit-temp', 'F');
     settings.set_strv('pinned-metrics', ['gpu', 'cpu']);
     settings.set_string('prefs-page', 'tracking');
     await exportSettings(settings, file);
     const [, saved] = file.load_contents(null);
     const doc = JSON.parse(new TextDecoder().decode(saved));
-    ok(doc.settings['poll-interval'] === 5 && !('prefs-page' in doc.settings), `backup: saved ${JSON.stringify(doc.settings).slice(0, 120)}`);
+    ok(doc.settings['poll-interval-ms'] === 5000 && !('poll-interval' in doc.settings) && !('prefs-page' in doc.settings), `backup: saved ${JSON.stringify(doc.settings).slice(0, 120)}`);
 
     resetSettings(settings);
-    ok(settings.get_int('poll-interval') === 2 && settings.get_string('unit-temp') === 'C' && settings.get_string('prefs-page') === 'tracking',
+    ok(settings.get_int('poll-interval-ms') === 2000 && settings.get_string('unit-temp') === 'C' && settings.get_string('prefs-page') === 'tracking',
         'backup: reset restores the defaults and leaves the window\'s signals');
     const restored = await importSettings(settings, file);
-    ok(settings.get_int('poll-interval') === 5 && settings.get_string('unit-temp') === 'F' && settings.get_strv('pinned-metrics').join() === 'gpu,cpu' &&
+    ok(settings.get_int('poll-interval-ms') === 5000 && settings.get_string('unit-temp') === 'F' && settings.get_strv('pinned-metrics').join() === 'gpu,cpu' &&
         restored.rejected.length === 0, `backup: restored ${restored.applied} settings, rejected ${JSON.stringify(restored.rejected)}`);
 
     GLib.file_set_contents(`${dir}/settings.json`, JSON.stringify({ format: 'resource-pulse-settings', version: 1,
-        settings: { 'poll-interval': 99, 'unit-mem': 'GiB', 'made-up': true } }));
+        settings: { 'poll-interval-ms': 99, 'unit-mem': 'GiB', 'made-up': true } }));
     const partly = await importSettings(settings, file);
-    ok(partly.applied === 1 && settings.get_string('unit-mem') === 'GiB' && settings.get_int('poll-interval') === 5 &&
-        partly.rejected.map(r => r.key).join() === 'poll-interval,made-up', `backup: a file with bad values: ${JSON.stringify(partly)}`);
+    ok(partly.applied === 1 && settings.get_string('unit-mem') === 'GiB' && settings.get_int('poll-interval-ms') === 5000 &&
+        partly.rejected.map(r => r.key).join() === 'poll-interval-ms,made-up', `backup: a file with bad values: ${JSON.stringify(partly)}`);
 
     GLib.file_set_contents(`${dir}/settings.json`, 'not a settings file');
     let refused = null;
@@ -1359,6 +1371,22 @@ async function settingsClicks(window, shown, settings) {
     await act(`PREFS-CHECK DRAG slider-knob ${pointIn(knobOf(), 0.5, 0.5)} ${pointIn(trough, 0.02, 0.5)}`);
     ok(settings.get_int('threshold-cpu') < valueBefore, `slider (pointer): dragging its knob moved it (${valueBefore} -> ${settings.get_int('threshold-cpu')})`);
     settings.reset('threshold-cpu');
+    // Update every: equal distances are equal ratios, so a short drag at the fast end moves little.
+    const pollRowW = shown.rows['poll-interval-ms'];
+    const pollTrough = findAll(pollRowW.scale, w => w.get_css_name() === 'trough')[0];
+    const pollKnob = () => findAll(pollRowW.scale, w => w.get_css_name() === 'slider')[0];
+    await scrollTo(pollRowW);
+    await act(`PREFS-CHECK DRAG poll-knob-low ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, 0.0, 0.5)}`);
+    ok(await until(() => settings.get_int('poll-interval-ms') === 250), `update every (pointer): dragged to the left end, ${settings.get_int('poll-interval-ms')} ms`);
+    await scrollTo(pollRowW);
+    await act(`PREFS-CHECK DRAG poll-knob-next ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, 0.17, 0.5)}`);
+    const lowStep = settings.get_int('poll-interval-ms');
+    ok(lowStep > 250 && lowStep <= 500, `update every (pointer): a sixth of the way along is ${lowStep} ms`);
+    await scrollTo(pollRowW);
+    await act(`PREFS-CHECK DRAG poll-knob-high ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, 1.0, 0.5)}`);
+    ok(await until(() => settings.get_int('poll-interval-ms') === 30000), `update every (pointer): dragged to the right end, ${settings.get_int('poll-interval-ms')} ms`);
+    ok(pollRowW.valueLabel.label === '30 s', `update every (pointer): reads ${pollRowW.valueLabel.label}`);
+    settings.reset('poll-interval-ms');
     // The shortcut row: a real click, then real keys through the compositor.
     const shortcut = shown.rows['panel-shortcut'];
     await scrollTo(shortcut);

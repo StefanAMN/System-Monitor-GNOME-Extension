@@ -9,8 +9,14 @@
     <key name="poll-interval" type="i">
       <range min="1" max="10"/>
       <default>2</default>
+      <summary>Poll Interval (old)</summary>
+      <description>Whole seconds. Replaced by poll-interval-ms; a value here is moved there once and reset.</description>
+    </key>
+    <key name="poll-interval-ms" type="i">
+      <range min="250" max="30000"/>
+      <default>2000</default>
       <summary>Poll Interval</summary>
-      <description>Update interval in seconds (1 to 10).</description>
+      <description>Time between two readings, in milliseconds (250 to 30000).</description>
     </key>
     <key name="unit-temp" type="s">
       <choices>

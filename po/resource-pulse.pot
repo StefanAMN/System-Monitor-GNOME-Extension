@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-30 22:17+0200\n"
+"POT-Creation-Date: 2026-10-30 23:04+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/extension.js:212
+#: src/extension.js:213
 msgid "Resource Pulse panel"
 msgstr ""
 
@@ -152,19 +152,19 @@ msgid ""
 "extension cannot read."
 msgstr ""
 
-#: src/lib/common/backup.js:63
+#: src/lib/common/backup.js:65
 msgid "not a setting of this version"
 msgstr ""
 
-#: src/lib/common/backup.js:64
+#: src/lib/common/backup.js:66
 msgid "wrong kind of value"
 msgstr ""
 
-#: src/lib/common/backup.js:65
+#: src/lib/common/backup.js:67
 msgid "outside {min}–{max}"
 msgstr ""
 
-#: src/lib/common/backup.js:66
+#: src/lib/common/backup.js:68
 msgid "not one of the choices"
 msgstr ""
 
@@ -180,7 +180,7 @@ msgid "{h}h {m}m"
 msgstr ""
 
 #. Translators: how much a chart shows, kept short: "2m", "60s".
-#: src/lib/common/format.js:48 src/ui/panel/polling.js:53
+#: src/lib/common/format.js:48 src/ui/panel/polling.js:55
 msgid "{m}m"
 msgstr ""
 
@@ -246,8 +246,8 @@ msgid "Temp: {temp}"
 msgstr ""
 
 #: src/lib/common/present.js:66 src/lib/common/settingsmodel.js:24
-#: src/lib/common/settingsmodel.js:126 src/ui/panel/constants.js:20
-#: src/ui/panel/constants.js:53 src/ui/panel/dashboard.js:379
+#: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:20
+#: src/ui/panel/constants.js:64 src/ui/panel/dashboard.js:379
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:626
 msgid "GPU"
 msgstr ""
@@ -327,23 +327,23 @@ msgid ""
 "channel). Undo by deleting {path}."
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:111
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:50
+#: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:117
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:61
 #: src/ui/panel/details.js:13 src/ui/panel/details.js:38
 #: src/ui/panel/overview.js:619 src/ui/panel/topbar.js:211
 msgid "CPU"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:95
-#: src/lib/common/settingsmodel.js:116 src/lib/engine/agentreport.js:21
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:51
+#: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:101
+#: src/lib/common/settingsmodel.js:122 src/lib/engine/agentreport.js:21
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:62
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:620
 #: src/ui/prefs/diagnostics.js:24 src/ui/prefs/tracking.js:555
 msgid "Memory"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:17 src/lib/engine/agentreport.js:22
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:59
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:70
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:621
 #: src/ui/prefs/diagnostics.js:25 src/ui/prefs/tracking.js:540
 msgid "Battery"
@@ -373,187 +373,189 @@ msgstr ""
 msgid "Thermal"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:43 src/ui/prefs/rows.js:467
+#: src/lib/common/settingsmodel.js:49 src/ui/prefs/rows.js:481
 msgid "Top bar"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:46
+#: src/lib/common/settingsmodel.js:52
 msgid "Pinned metrics"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:46
+#: src/lib/common/settingsmodel.js:52
 msgid "numbered in top-bar order"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:47
+#: src/lib/common/settingsmodel.js:53
 msgid ""
 "Shown permanently in the top bar. When they do not all fit, the last ones "
 "show only their icon."
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:50
+#: src/lib/common/settingsmodel.js:56
 msgid "Compact (icons only)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:51
+#: src/lib/common/settingsmodel.js:57
 msgid "Hide the values in the top bar and show only the icons"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:54
+#: src/lib/common/settingsmodel.js:60
 msgid "Tooltips"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:55
+#: src/lib/common/settingsmodel.js:61
 msgid "Show details when the pointer rests on a metric in the top bar"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:58
+#: src/lib/common/settingsmodel.js:64
 msgid "Battery shows"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:59
+#: src/lib/common/settingsmodel.js:65
 msgid "What the battery metric displays in the top bar"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:61
+#: src/lib/common/settingsmodel.js:67
 msgid "Percentage (85%)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:62
+#: src/lib/common/settingsmodel.js:68
 msgid "Percentage and time (85% · 2h 15m)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:66
+#: src/lib/common/settingsmodel.js:72
 msgid "Network shows"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:67
+#: src/lib/common/settingsmodel.js:73
 msgid "What the network metric displays in the top bar"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:69
+#: src/lib/common/settingsmodel.js:75
 msgid "Download (↓)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:69
+#: src/lib/common/settingsmodel.js:75
 msgid "↓ Download"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:70
+#: src/lib/common/settingsmodel.js:76
 msgid "Upload (↑)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:70
+#: src/lib/common/settingsmodel.js:76
 msgid "↑ Upload"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:71
+#: src/lib/common/settingsmodel.js:77
 msgid "Download and upload (↓ ↑)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:71
+#: src/lib/common/settingsmodel.js:77
 msgid "↓ ↑ Both"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:78
+#: src/lib/common/settingsmodel.js:84
 msgid "Units and refresh"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:81
+#: src/lib/common/settingsmodel.js:87
 msgid "Update every"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:82
-msgid "Seconds between two readings (1 to 10)"
+#: src/lib/common/settingsmodel.js:88
+msgid ""
+"Time between two readings, 0.25 to 30 seconds. Under 1 second uses "
+"noticeably more processor time"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:86
+#: src/lib/common/settingsmodel.js:92
 msgid "Smooth changes"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:87
+#: src/lib/common/settingsmodel.js:93
 msgid ""
 "Values glide to each new reading over one update; CPU, GPU, network and disk "
 "are lightly averaged"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:90 src/lib/common/settingsmodel.js:121
-#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:52
-#: src/ui/panel/constants.js:81 src/ui/panel/pages/gpu.js:56
+#: src/lib/common/settingsmodel.js:96 src/lib/common/settingsmodel.js:127
+#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:63
+#: src/ui/panel/constants.js:92 src/ui/panel/pages/gpu.js:56
 #: src/ui/panel/pages/gpu.js:118 src/ui/prefs/tracking.js:601
 msgid "Temperature"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:91
+#: src/lib/common/settingsmodel.js:97
 msgid "Unit for every temperature shown"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:92
+#: src/lib/common/settingsmodel.js:98
 msgid "Celsius (°C)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:92
+#: src/lib/common/settingsmodel.js:98
 msgid "Fahrenheit (°F)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:96
+#: src/lib/common/settingsmodel.js:102
 msgid "Decimal gigabytes or binary gibibytes"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:97
+#: src/lib/common/settingsmodel.js:103
 msgid "Gibibytes (GiB)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:97
+#: src/lib/common/settingsmodel.js:103
 msgid "Gigabytes (GB)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:103 src/ui/panel/topbar.js:30
+#: src/lib/common/settingsmodel.js:109 src/ui/panel/topbar.js:30
 msgid "Alerts"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:104
+#: src/lib/common/settingsmodel.js:110
 msgid ""
 "a value that stays above its limit for 30 seconds shows ⚠ in the top bar"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:107
+#: src/lib/common/settingsmodel.js:113
 msgid "Notifications"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:108
+#: src/lib/common/settingsmodel.js:114
 msgid "Also send a notification, at most one per metric every 10 minutes"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:112
+#: src/lib/common/settingsmodel.js:118
 msgid "CPU usage above this is shown as a warning"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:117
+#: src/lib/common/settingsmodel.js:123
 msgid "Memory usage above this is shown as a warning"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:122
+#: src/lib/common/settingsmodel.js:128
 msgid "CPU temperature above this is shown as a warning (stored in °C)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:127
+#: src/lib/common/settingsmodel.js:133
 msgid "GPU usage above this is shown as a warning"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:131
+#: src/lib/common/settingsmodel.js:137
 msgid "Disk space"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:132
+#: src/lib/common/settingsmodel.js:138
 msgid "Space used on / above this is shown as a warning"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:136
+#: src/lib/common/settingsmodel.js:142
 msgid "Low battery"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:137
+#: src/lib/common/settingsmodel.js:143
 msgid "Battery charge at or below this, on battery, is shown as a warning"
 msgstr ""
 
@@ -1157,88 +1159,88 @@ msgstr ""
 msgid "{process} using {cores} cores"
 msgstr ""
 
-#: src/ui/panel/constants.js:50
+#: src/ui/panel/constants.js:61
 msgid "CPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:51
+#: src/ui/panel/constants.js:62
 msgid "Memory is almost full"
 msgstr ""
 
-#: src/ui/panel/constants.js:52
+#: src/ui/panel/constants.js:63
 msgid "The processor is hot"
 msgstr ""
 
-#: src/ui/panel/constants.js:53
+#: src/ui/panel/constants.js:64
 msgid "GPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:54
+#: src/ui/panel/constants.js:65
 msgid "Disk /"
 msgstr ""
 
-#: src/ui/panel/constants.js:54
+#: src/ui/panel/constants.js:65
 msgid "Disk space is running out"
 msgstr ""
 
-#: src/ui/panel/constants.js:58
+#: src/ui/panel/constants.js:69
 msgid "The system is short of memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:58 src/ui/panel/pages/memory.js:29
+#: src/ui/panel/constants.js:69 src/ui/panel/pages/memory.js:29
 #: src/ui/prefs/tracking.js:560
 msgid "Waiting for memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:59
+#: src/ui/panel/constants.js:70
 msgid "The battery is low"
 msgstr ""
 
-#: src/ui/panel/constants.js:61
+#: src/ui/panel/constants.js:72
 msgid "Slowed by heat"
 msgstr ""
 
-#: src/ui/panel/constants.js:61
+#: src/ui/panel/constants.js:72
 msgid "The processor slows down to cool"
 msgstr ""
 
-#: src/ui/panel/constants.js:79
+#: src/ui/panel/constants.js:90
 msgid "Battery charge"
 msgstr ""
 
-#: src/ui/panel/constants.js:79
+#: src/ui/panel/constants.js:90
 msgid "Battery charge rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:79
+#: src/ui/panel/constants.js:90
 msgid "CPU usage"
 msgstr ""
 
-#: src/ui/panel/constants.js:79
+#: src/ui/panel/constants.js:90
 msgid "Memory use"
 msgstr ""
 
-#: src/ui/panel/constants.js:79
+#: src/ui/panel/constants.js:90
 msgid "Power draw"
 msgstr ""
 
-#: src/ui/panel/constants.js:80
+#: src/ui/panel/constants.js:91
 msgid "Disk read rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:80
+#: src/ui/panel/constants.js:91
 msgid "Disk write rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:80
+#: src/ui/panel/constants.js:91
 msgid "Download rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:80
+#: src/ui/panel/constants.js:91
 msgid "Upload rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:81
+#: src/ui/panel/constants.js:92
 msgid "GPU usage"
 msgstr ""
 
@@ -1343,7 +1345,7 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:59 src/ui/panel/polling.js:254
+#: src/ui/panel/details.js:59 src/ui/panel/polling.js:260
 msgid "live"
 msgstr ""
 
@@ -1686,11 +1688,11 @@ msgstr ""
 msgid "Fans"
 msgstr ""
 
-#: src/ui/panel/polling.js:53
+#: src/ui/panel/polling.js:55
 msgid "{s}s"
 msgstr ""
 
-#: src/ui/panel/polling.js:471
+#: src/ui/panel/polling.js:488
 msgid "{chart} over time"
 msgstr ""
 
@@ -1956,7 +1958,7 @@ msgid "Copy report"
 msgstr ""
 
 #: src/ui/prefs/agent.js:198 src/ui/prefs/diagnostics.js:386
-#: src/ui/prefs/rows.js:533
+#: src/ui/prefs/rows.js:547
 msgid "Copied"
 msgstr ""
 
@@ -2046,7 +2048,7 @@ msgid ""
 "panel's size. Battery history is kept."
 msgstr ""
 
-#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:500
+#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:514
 msgid "Reset"
 msgstr ""
 
@@ -2147,7 +2149,7 @@ msgid ""
 "be on."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:213 src/ui/prefs/rows.js:535
+#: src/ui/prefs/diagnostics.js:213 src/ui/prefs/rows.js:549
 msgid "Check again"
 msgstr ""
 
@@ -2217,75 +2219,75 @@ msgstr ""
 msgid "Top bar preview: {items}"
 msgstr ""
 
-#: src/ui/prefs/rows.js:326
+#: src/ui/prefs/rows.js:340
 msgid ""
 "Click, then press the keys that open and close the panel. Esc cancels, "
 "Backspace clears."
 msgstr ""
 
-#: src/ui/prefs/rows.js:326
+#: src/ui/prefs/rows.js:340
 msgid "Shortcut"
 msgstr ""
 
-#: src/ui/prefs/rows.js:327
+#: src/ui/prefs/rows.js:341
 msgid "None"
 msgstr ""
 
-#: src/ui/prefs/rows.js:328 src/ui/prefs/rows.js:329
+#: src/ui/prefs/rows.js:342 src/ui/prefs/rows.js:343
 msgid "Clear shortcut"
 msgstr ""
 
-#: src/ui/prefs/rows.js:339
+#: src/ui/prefs/rows.js:353
 msgid "Press keys…"
 msgstr ""
 
-#: src/ui/prefs/rows.js:467
+#: src/ui/prefs/rows.js:481
 msgid "Readings"
 msgstr ""
 
-#: src/ui/prefs/rows.js:498
+#: src/ui/prefs/rows.js:512
 msgid "Panel"
 msgstr ""
 
-#: src/ui/prefs/rows.js:499
+#: src/ui/prefs/rows.js:513
 msgid "Drag a bottom corner of the panel to resize it."
 msgstr ""
 
-#: src/ui/prefs/rows.js:499
+#: src/ui/prefs/rows.js:513
 msgid "Size"
 msgstr ""
 
-#: src/ui/prefs/rows.js:515
+#: src/ui/prefs/rows.js:529
 msgid "Automatic"
 msgstr ""
 
-#: src/ui/prefs/rows.js:515
+#: src/ui/prefs/rows.js:529
 msgid "{width} × {height}"
 msgstr ""
 
-#: src/ui/prefs/rows.js:521
+#: src/ui/prefs/rows.js:535
 msgid "Troubleshooting"
 msgstr ""
 
-#: src/ui/prefs/rows.js:526
+#: src/ui/prefs/rows.js:540
 msgid "CPU power is not readable"
 msgstr ""
 
-#: src/ui/prefs/rows.js:527
+#: src/ui/prefs/rows.js:541
 msgid "Two commands, with your password; readable by every program after"
 msgstr ""
 
-#: src/ui/prefs/rows.js:528
+#: src/ui/prefs/rows.js:542
 msgid ""
 "Run these two commands in a terminal to make it readable; they ask for your "
 "password."
 msgstr ""
 
-#: src/ui/prefs/rows.js:529
+#: src/ui/prefs/rows.js:543
 msgid "Copy commands"
 msgstr ""
 
-#: src/ui/prefs/rows.js:547
+#: src/ui/prefs/rows.js:561
 msgid "CPU power is now readable"
 msgstr ""
 

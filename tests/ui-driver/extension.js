@@ -314,7 +314,7 @@ async function cycleTabs(rp, pass, tag = null) {
     // Hover readout: every x position, including off-graph ones, must paint cleanly.
     const graph = rp._sparklines.find(g => g.options.showGrid && g.is_mapped());
     check(graph, `pass ${pass}: no detail graph mapped on the cpu tab`);
-    const interval = rp._settings.get_int('poll-interval');
+    const interval = rp._settings.get_int('poll-interval-ms') / 1000;
     const span = interval * 60;
     const spanLabel = span > 60 && span % 60 === 0 ? `${span / 60}m` : `${span}s`;
     check(graph.sampleSeconds === interval && graph.spanLabel === spanLabel,
@@ -332,7 +332,7 @@ async function cycleTabs(rp, pass, tag = null) {
     // 60 s of history at most, however many on-demand polls were fired.
     check(rp._hist.cpu.length >= 3, `pass ${pass}: cpu history not recorded (${rp._hist.cpu.length})`);
     // One sample per 2 s tick since enable, however many on-demand polls were fired.
-    const maxTicks = Math.ceil((GLib.get_monotonic_time() - enabledAt) / (rp._settings.get_int('poll-interval') * 1000000)) + 2;
+    const maxTicks = Math.ceil((GLib.get_monotonic_time() - enabledAt) / (rp._settings.get_int('poll-interval-ms') * 1000)) + 2;
     check(rp._hist.cpu.length <= maxTicks, `pass ${pass}: on-demand polls leaked into history (${rp._hist.cpu.length} > ${maxTicks})`);
     check(rp._hist.cpu.capacity === 60, 'history capacity changed');
     check(rp._dskMountRows?.length > 0, `pass ${pass}: no disk mount rows`);
@@ -611,7 +611,7 @@ async function screenReader(rp) {
         rp._indicator.menu.open();
         rp._activeTab = 'overview';
         rp._updateTabVisibility();
-        await sleep(rp._intervalUs / 1000 + 800);
+        await sleep(rp._glideUs / 1000 + 800);
         await hold();
         let panel = (await a11yTrees('Resource Pulse panel'))['Resource Pulse panel'];
         let nodes = a11yNodes(panel);
@@ -635,7 +635,7 @@ async function screenReader(rp) {
         // the ⋮ named with its process.
         rp._activeTab = 'cpu';
         rp._updateTabVisibility();
-        await sleep(2 * rp._intervalUs / 1000 + 800);
+        await sleep(2 * rp._glideUs / 1000 + 800);
         await hold();
         panel = (await a11yTrees('Resource Pulse panel'))['Resource Pulse panel'];
         nodes = a11yNodes(panel);
@@ -673,7 +673,7 @@ async function screenReader(rp) {
         rp._indicator.menu.open();
         rp._activeTab = 'battery';
         rp._updateTabVisibility();
-        await sleep(rp._intervalUs / 1000 + 800);
+        await sleep(rp._glideUs / 1000 + 800);
         await hold();
         panel = (await a11yTrees('Resource Pulse panel'))['Resource Pulse panel'];
         check(a11yUnnamed(panel).length === 0, `a11y: unnamed on the Battery page: ${a11yUnnamed(panel).join(', ')}`);
@@ -941,7 +941,7 @@ async function gpuPageFollowsReadings(rp) {
     rp._updateTabVisibility();
     // Exact readings on the page: smoothing (tested in smoothGlide) is off here.
     rp._settings.set_boolean('smooth-transitions', false);
-    const wait = rp._settings.get_int('poll-interval') * 1000 + 1500;
+    const wait = rp._settings.get_int('poll-interval-ms') + 1500;
     const feed = async reading => {
         rp._gpu.sample = () => Promise.resolve(reading);
         await sleep(wait);
@@ -1020,7 +1020,7 @@ async function severalBatteries(rp) {
     rp._activeTab = 'battery';
     rp._updateTabVisibility();
     rp._settings.set_boolean('smooth-transitions', false);
-    const wait = rp._settings.get_int('poll-interval') * 1000 + 1500;
+    const wait = rp._settings.get_int('poll-interval-ms') + 1500;
     const each = [
         { name: 'BAT0', percent: 67, state: 'discharging', health: 90, cycleCount: 300 },
         { name: 'BAT1', percent: 50, state: 'discharging', health: 80, cycleCount: 40 },
@@ -1122,7 +1122,7 @@ async function stuckCollector(rp) {
         calls++;
         return new Promise(() => {});
     };
-    const interval = rp._settings.get_int('poll-interval') * 1000;
+    const interval = rp._settings.get_int('poll-interval-ms');
     await sleep(3000 + 3 * interval);
     const idle = (GLib.get_monotonic_time() - rp._lastPollTime) / 1000;
     check(idle < interval + 800, `stuck collector: last poll started ${idle.toFixed(0)} ms ago, polling has stalled`);
@@ -1204,6 +1204,62 @@ async function historyAndUsage(rp) {
 // paused, two known readings are shown; memory (not averaged) passes
 // through in-between values and lands exactly on the reading, CPU lands on
 // the average of the two, and the bars follow.
+/** The shortest and longest intervals: how often it reads, and what follows from it. */
+async function intervalExtremes(rp) {
+    const s = rp._settings;
+    rp._indicator.menu.close();
+    s.set_int('poll-interval-ms', 250);
+    await sleep(500);
+    check(rp._spanLabel === '15s', `interval: a chart at 0.25 s spans ${rp._spanLabel}`);
+    const poll = rp._poll;
+    let ticks = 0;
+    rp._poll = function (tick) {
+        if (tick) ticks++;
+        return poll.call(this, tick);
+    };
+    const start = rp._hist.cpu.length;
+    await sleep(3000);
+    check(ticks >= 10 && ticks <= 13, `interval: ${ticks} ticks in 3 s at 0.25 s`);
+    check(rp._hist.cpu.length >= start + 8, `interval: history went from ${start} to ${rp._hist.cpu.length} in 3 s at 0.25 s`);
+
+    // The process list and the GPU read at most about once a second, whatever the ticks.
+    rp._indicator.menu.open();
+    rp._activeTab = 'cpu';
+    rp._updateTabVisibility();
+    await sleep(1500);
+    const sampleProc = rp._proc.sample;
+    const sampleGpu = rp._gpu.sample;
+    let procReads = 0, gpuReads = 0;
+    rp._proc.sample = function (...args) {
+        procReads++;
+        return sampleProc.apply(this, args);
+    };
+    rp._gpu.sample = function (...args) {
+        gpuReads++;
+        return sampleGpu.apply(this, args);
+    };
+    ticks = 0;
+    await sleep(4000);
+    rp._proc.sample = sampleProc;
+    rp._gpu.sample = sampleGpu;
+    check(ticks >= 12, `interval: only ${ticks} ticks in 4 s with the CPU page open`);
+    check(procReads >= 3 && procReads <= 5, `interval: the process list read ${procReads} times in 4 s`);
+    check(gpuReads >= 3 && gpuReads <= 5, `interval: the GPU read ${gpuReads} times in 4 s`);
+    check(rp._lastData.processes.length > 0, 'interval: a tick between two process reads emptied the list');
+
+    s.set_int('poll-interval-ms', 30000);
+    await sleep(500);
+    check(rp._spanLabel === '30m' && rp._glideUs === 2e6, `interval: at 30 s the chart spans ${rp._spanLabel}, a glide lasts ${rp._glideUs} µs`);
+    ticks = 0;
+    await sleep(2000);
+    check(ticks === 0, `interval: ${ticks} ticks in 2 s at 30 s`);
+    rp._poll = poll;
+    rp._indicator.menu.close();
+    s.reset('poll-interval-ms');
+    await sleep(500);
+    console.log('RP-UITEST interval: 0.25 s and 30 s read at their pace; the costly reads stay at about one a second');
+}
+
 async function smoothGlide(rp) {
     check(rp._settings.get_boolean('smooth-transitions'), 'glide: smooth changes are off by default');
     rp._indicator.menu.open();
@@ -1228,7 +1284,7 @@ async function smoothGlide(rp) {
         rp._smoothPrev = null;
         rp._shownTo = null;
         rp._present(reading(20, 10));
-        await sleep(rp._intervalUs / 1000 + 300);
+        await sleep(rp._glideUs / 1000 + 300);
         check(mem() === 20 && cpu() === 10, `glide: first reading shown as ${mem()} / ${cpu()}`);
         // Screen readers are told the reading, not each frame: one new name
         // when the glide arrives (a11y.js).
@@ -1240,7 +1296,7 @@ async function smoothGlide(rp) {
         const t0 = GLib.get_monotonic_time();
         rp._present(reading(80, 90));
         const seen = [];
-        while (GLib.get_monotonic_time() - t0 < rp._intervalUs - 150000) {
+        while (GLib.get_monotonic_time() - t0 < rp._glideUs - 150000) {
             await sleep(120);
             seen.push(mem());
         }
@@ -1256,7 +1312,7 @@ async function smoothGlide(rp) {
         check(cpu() === 50, `glide: CPU ended at ${cpu()}, not the average 50 of 10 and 90`);
         check(rp._topBarWidgets.memory.label.text === '80%', `glide: top bar memory ends at '${rp._topBarWidgets.memory.label.text}'`);
         check(rp._summaryCards.memory.pbar.pct === 80, `glide: the memory bar ends at ${rp._summaryCards.memory.pbar.pct} %`);
-        console.log(`RP-UITEST glide: memory 20 -> ${seen.join(' ')} -> ${mem()} over ${(rp._intervalUs / 1e6).toFixed(0)} s`);
+        console.log(`RP-UITEST glide: memory 20 -> ${seen.join(' ')} -> ${mem()} over ${(rp._glideUs / 1e6).toFixed(0)} s`);
 
         // Menu closed: no frames at all (the budget is 1 %); the top bar
         // shows the averaged value at once.
@@ -1299,7 +1355,7 @@ async function processSearch(rp) {
         rp._indicator.menu.open();
         rp._activeTab = 'cpu';
         rp._updateTabVisibility();
-        await sleep(2 * rp._intervalUs / 1000 + 800);
+        await sleep(2 * rp._glideUs / 1000 + 800);
         const search = rp._procSearch.cpu;
         check(!shown().includes('rpsearchidle'), `search: the idle process is already among the busiest (${shown().join(', ')})`);
         await scrollIntoView(rp, search.entry);
@@ -1627,7 +1683,7 @@ async function alertsRecover(rp) {
     // Notifications are alertsRaise's to test; here they would leave a
     // banner per scripted alert on screen for the steps after.
     s.set_boolean('alert-notify', false);
-    s.set_int('poll-interval', 1);
+    s.set_int('poll-interval-ms', 1000);
     s.set_strv('pinned-metrics', ['cpu', 'memory', 'disk', 'thermal', 'gpu', 'battery']);
     await sleep(1500);
     const wrap = (obj, change) => {
@@ -1703,7 +1759,7 @@ async function alertsRecover(rp) {
             await sleep(1500);
         }
     } finally {
-        s.reset('poll-interval');
+        s.reset('poll-interval-ms');
         s.reset('pinned-metrics');
         s.reset('alert-notify');
         rp._alerts = new AlertMonitor();
@@ -1848,6 +1904,7 @@ async function run() {
     await processSearch(ext.stateObj);
     await historyAndUsage(ext.stateObj);
     await smoothGlide(ext.stateObj);
+    await intervalExtremes(ext.stateObj);
 
     // Switch the (sandboxed) desktop to light while the extension is live.
     const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });

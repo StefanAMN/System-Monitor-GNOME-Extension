@@ -24,6 +24,11 @@ export const METRICS = [
     { key: 'gpu', name: N_('GPU'), icon: 'video-display-symbolic', bundled: 'rp-gpu', bundledFirst: true },
 ];
 
+// Equal steps of the slider are about equal ratios: fine where a change is
+// felt, wide where it is not. Up to 30 s, so that every minute of the 1 h
+// chart holds a reading and the 30 s alert hold still means two readings.
+export const POLL_STOPS_MS = [250, 300, 400, 500, 600, 750, 1000, 1250, 1500, 2000, 2500, 3000, 4000, 5000, 7000, 10000, 15000, 20000, 30000];
+
 /**
  * Row kinds:
  *   pins    the pinned-metrics list (key is an `as` setting)
@@ -31,7 +36,8 @@ export const METRICS = [
  *   choice  a string with a fixed set of values: choices = [[value, label, longLabel, segment], ...];
  *           segment is the label of its button in the window's segmented control
  *   number  an integer with min / max (the schema's range) and the step of
- *           one click; unit is 's', '%' or 'temp' (stored in °C)
+ *           one click, or stops: the values its slider moves over; unit is
+ *           'ms', '%' or 'temp' (stored in °C)
  * `metric` names the metric a row is about (its icon beside the row).
  * `title` is short enough for the 360 px panel; `detail` is the longer
  * explanation the preferences window has room for. Labels are marked with
@@ -78,9 +84,9 @@ export const SETTINGS_SECTIONS = [
         title: N_('Units and refresh'),
         rows: [
             {
-                key: 'poll-interval', kind: 'number', title: N_('Update every'),
-                detail: N_('Seconds between two readings (1 to 10)'),
-                min: 1, max: 10, step: 1, unit: 's',
+                key: 'poll-interval-ms', kind: 'number', title: N_('Update every'),
+                detail: N_('Time between two readings, 0.25 to 30 seconds. Under 1 second uses noticeably more processor time'),
+                stops: POLL_STOPS_MS, unit: 'ms',
             },
             {
                 key: 'smooth-transitions', kind: 'switch', title: N_('Smooth changes'),
@@ -154,8 +160,23 @@ export function allSettingRows() {
  */
 export function formatSettingValue(row, value, tempUnit = 'C') {
     if (row.unit === 'temp') return formatTemp(value, tempUnit);
-    if (row.unit === 's') return `${value} s`;
+    if (row.unit === 'ms') return value < 1000 ? `${value} ms` : `${value / 1000} s`;
     return `${value}${row.unit ?? ''}`;
+}
+
+/**
+ * The stop closest to a stored value, which need not be one of them (a
+ * restored backup, an old setting of 8 s).
+ * @param {number[]} stops ascending
+ * @param {number} value
+ * @returns {number} its index
+ */
+export function nearestStop(stops, value) {
+    let best = 0;
+    stops.forEach((stop, i) => {
+        if (Math.abs(stop - value) < Math.abs(stops[best] - value)) best = i;
+    });
+    return best;
 }
 
 /**

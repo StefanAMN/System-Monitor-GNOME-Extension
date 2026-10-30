@@ -9,7 +9,7 @@ export const BACKUP_VERSION = 1;
 // Keys that are signals between the window and the panel, not settings.
 // The consent to send an agent the report is this machine's: a settings file
 // from elsewhere must not give it.
-export const NOT_BACKED_UP = new Set(['prefs-page', 'action-open-menu', 'action-flush-history', 'action-clear-history', 'agent-consent']);
+export const NOT_BACKED_UP = new Set(['poll-interval', 'prefs-page', 'action-open-menu', 'action-flush-history', 'action-clear-history', 'agent-consent']);
 
 /** A file's text could not be read as a settings backup at all. */
 export class BackupError extends Error {}
@@ -57,7 +57,9 @@ export function checkBackup(text, schema) {
 
     const apply = {};
     const rejected = [];
-    for (const [name, value] of Object.entries(doc.settings)) {
+    for (let [name, value] of Object.entries(doc.settings)) {
+        // A file saved when the interval was whole seconds.
+        if (name === 'poll-interval' && Number.isInteger(value)) [name, value] = ['poll-interval-ms', value * 1000];
         const key = schema[name];
         let reason = null;
         if (!key || NOT_BACKED_UP.has(name)) reason = _('not a setting of this version');

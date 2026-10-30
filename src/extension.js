@@ -33,7 +33,7 @@ import { currentSessionIdentity, loadSessionState, saveSessionState, sessionStat
 import { HISTORY_CAPACITY, HISTORY_KEYS } from './ui/panel/constants.js';
 import { installMethods } from './ui/panel/mixins.js';
 import { setTranslations, resetTranslations, _ } from './lib/common/i18n.js';
-import { resetUtils } from './lib/common/utils.js';
+import { resetUtils, migrateSettings } from './lib/common/utils.js';
 import { forgetAppInfo } from './lib/common/appnames.js';
 import { SharedMethods } from './ui/panel/shared.js';
 import { SizingMethods } from './ui/panel/sizing.js';
@@ -67,6 +67,7 @@ export default class ResourcePulseExtension extends Extension {
         // Extension has bound the domain (metadata's gettext-domain).
         setTranslations(this.gettext.bind(this), this.ngettext.bind(this));
         this._settings = this.getSettings();
+        migrateSettings(this._settings);
 
         // Samplers
         this._cpu = new CpuSampler();
@@ -336,7 +337,7 @@ export default class ResourcePulseExtension extends Extension {
         this._batFmtId = this._settings.connect('changed::battery-top-format', () => { this._rebuildTopBar(); this._poll(); });
         this._netFmtId = this._settings.connect('changed::network-top-format', () => { this._rebuildTopBar(); this._poll(); });
         this._tooltipsId = this._settings.connect('changed::show-tooltips', () => this._hideTooltip());
-        this._pollId = this._settings.connect('changed::poll-interval', () => this._startPolling());
+        this._pollId = this._settings.connect('changed::poll-interval-ms', () => this._startPolling());
         // The panel size is reset from the preferences window: follow it.
         this._sizeId = this._settings.connect('changed::menu-custom-width', () => this._queueDimensionsUpdate());
         this._sizeHId = this._settings.connect('changed::menu-custom-height', () => this._queueDimensionsUpdate());
