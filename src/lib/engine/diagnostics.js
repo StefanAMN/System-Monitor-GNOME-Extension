@@ -116,7 +116,8 @@ function longestMemoryRun(hours, id) {
  * @param {Array<{day: string, rx: number, tx: number}>} [input.netDays] daily network totals, oldest first
  * @param {function(string): boolean} [input.isApp] whether an id is an app the user starts (not a service)
  * @returns {Array<{id: string, area: string, severity: string, title: string, detail: string,
- *   evidence: string, estimate: ?{watts: number, minutes: ?number}, action: ?object}>}
+ *   evidence: string, estimate: ?{watts: number, minutes: ?number}, action: ?object, app?: string}>}
+ *   app: the app a finding about background work is about, for pausing it or lowering its priority
  *   area is one of AREAS; most important first
  */
 export function diagnose({ battery, all, state, appName = id => id, hours = [], netDays = [], isApp = () => true }) {
@@ -145,6 +146,8 @@ export function diagnose({ battery, all, state, appName = id => id, hours = [], 
                     { percent: Math.round(background * 100), wh: round1(backgroundWh), hours: round1(hoursOnBattery) }),
                 estimate: { watts, minutes },
                 action: null,
+                // Pausing it or lowering its priority acts on this: the panel offers both.
+                app: app.id,
             });
         }
     }
@@ -288,6 +291,7 @@ function cpuFindings({ battery, all, state, appName, named }) {
                 { percent: percent(background), cores: percent(cores), hours: round1(hours) }),
             estimate: all.hasEnergy && app.wh > 0 ? { watts: app.wh * background / hours, minutes: null } : null,
             action: null,
+            app: app.id,
         });
     }
     const system = all.apps.find(a => a.id === '@system');
