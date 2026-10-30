@@ -978,6 +978,11 @@ async function gpuPageFollowsReadings(rp) {
     const [cardX] = rp._gpuHwCard.get_transformed_position();
     const [nameX] = rp._gpuModelName.get_transformed_position();
     check(nameX + rp._gpuModelName.width <= cardX + rp._gpuHwCard.width, 'gpu page: the model name runs past its card');
+    {
+        const [, driverY] = rp._gpuDriverDesc.get_transformed_position();
+        const [, nextY] = rp._gpuHwStatsRow.get_transformed_position();
+        check(driverY + rp._gpuDriverDesc.height <= nextY, `gpu page: the driver line ends at ${Math.round(driverY + rp._gpuDriverDesc.height)}, the row after it starts at ${Math.round(nextY)}`);
+    }
     await shot('gpu-full');
 
     await feed({
@@ -1015,8 +1020,7 @@ async function gpuPageFollowsReadings(rp) {
     for (const card of rp._gpuCards) {
         const [, driverY] = card.driver.get_transformed_position();
         const [, nextY] = card.loadRow.get_transformed_position();
-        // The boxes may touch by a pixel or two of empty line height; text running into the bar is 10 or more.
-        check(driverY + card.driver.height <= nextY + 3, `gpu page: ${card.model.text}: the driver line ends at ${Math.round(driverY + card.driver.height)}, the next row starts at ${Math.round(nextY)}`);
+        check(driverY + card.driver.height <= nextY, `gpu page: ${card.model.text}: the driver line ends at ${Math.round(driverY + card.driver.height)}, the next row starts at ${Math.round(nextY)}`);
     }
     check(cutOffLabels(rp._gpuCardsBox).length === 0, `gpu page: cut off in the GPU cards: ${cutOffLabels(rp._gpuCardsBox).join(' | ')}`);
     check(gpuPlaceholders(rp).length === 0, `gpu page: placeholders in the GPU cards (${gpuPlaceholders(rp).join(' | ')})`);
