@@ -644,6 +644,11 @@ async function fixtureHistory() {
             idle: true,
         });
     }
+    // Battery health: a few days of wear.
+    for (let i = 0; i < 5; i++) {
+        const d = new Date(Date.now() - (4 - i) * 86400e3);
+        ledger.noteHealth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, { health: 88 - i * 0.5, cycles: 210 + i, fullWh: 39.5 - i * 0.2 });
+    }
     await saveLedger(path, ledger);
     return { dir, path, ledger };
 }
@@ -723,6 +728,17 @@ async function batteryPages(styleWindow) {
     r.period.selected = 1; // today: may or may not include the fixture, but must not fail
     r.period.selected = 3;
     ok(r.appRows.length === 4, 'tracking: the 14-day view has the same apps');
+
+    // Battery health on the Battery tab, whatever the period: the figures and the bars.
+    ok(r.healthGroup.visible && r.healthNow.value.label === '86.0 %' && r.healthChange.value.label === '-2.0 %' &&
+        r.healthFull.value.label === '38.7 Wh' && r.healthCycles.value.label === '214',
+    `battery health: ${r.healthNow.value.label}, ${r.healthChange.value.label}, ${r.healthFull.value.label}, ${r.healthCycles.value.label}`);
+    ok(/^since \d{4}-\d{2}-\d{2}$/.test(r.healthChange.detail.label), `battery health: change reads '${r.healthChange.detail.label}'`);
+    ok(r.health.box.visible && r.health.chart.points.length === 5 && r.health.chart.floor === 80 && r.health.hover.details(4).lines[0][2] === '86.0 %',
+        `battery health: chart of ${r.health.chart.points.length} bars from ${r.health.chart.floor}`);
+    r.health.hover.set(4);
+    ok(/health 86\.0 %/.test(r.health.hover.text()), `battery health: a bar reads '${r.health.hover.text()}'`);
+    r.health.hover.set(-1);
 
     await componentChecks(r, window);
 
@@ -865,6 +881,7 @@ async function batteryPages(styleWindow) {
     ok(r.appRows.length === 0, `tracking: did not follow the file within 10 s (${r.appRows.length} rows left)`);
     print(`PREFS-CHECK INFO: the Tracking page followed the file in ${((GLib.get_monotonic_time() - savedAt) / 1000).toFixed(0)} ms`);
     ok(!r.summary.visible, 'tracking: no summary of zeros without figures');
+    ok(!r.healthGroup.visible, 'battery health: nothing shown without entries');
     await saveLedger(path, ledger);
     for (let i = 0; i < 100 && r.appRows.length === 0; i++) await sleep(100);
     ok(r.appRows.length === 4, `tracking: did not pick up the restored file within 10 s (${r.appRows.length} rows)`);
@@ -1046,7 +1063,7 @@ async function componentChecks(r, window) {
         await sleep(100);
         const first = r.componentTiles[0];
         const shown = r.componentTiles.filter(t => t.visible);
-        ok(r.componentGroup.visible && !r.summary.visible && !r.batteryOnly.visible, `components ${component}: its own view, the battery's hidden`);
+        ok(r.componentGroup.visible && !r.summary.visible && !r.batteryOnly.visible && !r.healthGroup.visible, `components ${component}: its own view, the battery's hidden`);
         ok(first.title === want.tile && first.value.label !== '—' && shown.every(t => t.value.label), `components ${component}: '${first.title}' reads '${first.value.label}'`);
         ok(r.bars.box.visible && r.bars.chart.points.some(p => r.bars.chart.series.some(k => p[k] > 0)), `components ${component}: the chart has bars`);
         const ids = r.appRows.map(row => row.appId).join();
@@ -1359,6 +1376,22 @@ async function componentClicks(window, r) {
     // The last 24 hours: hourly bars, the fixture's two hours in the last ones.
     r.period.selected = 0;
     await sleep(600);
+    // Battery health's chart under the real pointer.
+    {
+        const scrolledHealth = findScrolled(window.get_visible_page()).get_vadjustment();
+        const healthArea = r.health.area;
+        const [, top] = healthArea.compute_point(findScrolled(window.get_visible_page()).get_child(), new Graphene.Point().init(0, 0));
+        scrolledHealth.value = Math.min(Math.max(0, scrolledHealth.value + top.y - 60), scrolledHealth.upper - scrolledHealth.page_size);
+        await sleep(500);
+        const count = r.health.chart.points.length;
+        const slot = (healthArea.get_width() - 52) / count;
+        const [, q] = healthArea.compute_point(window, new Graphene.Point().init(52 + slot * (count - 0.5), healthArea.get_height() / 2));
+        const [hx, hy] = window.get_surface_transform();
+        await act(`PREFS-CHECK HOVER health-bar ${Math.round(q.x + hx)} ${Math.round(q.y + hy)}`);
+        ok(r.health.hover.index === count - 1 && /health 86\.0 %/.test(r.health.hover.text()), `battery health (pointer): the last bar under the pointer (${r.health.hover.index}): '${r.health.hover.text()}'`);
+        scrolledHealth.value = 0;
+        await sleep(300);
+    }
     // The battery chart under the real pointer: the bar under it is chosen.
     const area = r.chart.area;
     const scrolled = findScrolled(window.get_visible_page());

@@ -95,6 +95,37 @@ export function zoomAbout(from, to, centre, factor, lo, hi) {
     return clampRange(at - (at - from) * factor, at + (to - at) * factor, lo, hi);
 }
 
+/**
+ * The battery's wear over time, from the ledger's daily entries.
+ * @returns {?{health: number, change: ?number, since: string, cycles: number, fullWh: number,
+ *   points: Array<{t: number, health: number, step: number}>, floor: number}} null with no entry; change
+ *   null with one day; points per day, per week over 8 weeks; floor where the chart's bars start
+ */
+export function healthView(ledger) {
+    const days = ledger.health ?? [];
+    if (days.length === 0) return null;
+    const first = days[0];
+    const last = days[days.length - 1];
+    const every = days.length > 56 ? 7 : 1;
+    // Counted back from today, so the newest reading is always a bar.
+    const shown = days.filter((_d, i) => (days.length - 1 - i) % every === 0);
+    const points = shown.map(e => {
+        const [y, m, d] = e.d.split('-').map(Number);
+        return { t: new Date(y, m - 1, d).getTime(), health: e.h, step: every * 24 * HOUR_MS };
+    });
+    // Wear moves a few points a year: on an axis from 0 the bars would all look the same.
+    const lowest = Math.min(...shown.map(e => e.h));
+    return {
+        health: last.h,
+        change: days.length > 1 ? Math.round((last.h - first.h) * 10) / 10 : null,
+        since: first.d,
+        cycles: last.c,
+        fullWh: last.f,
+        points,
+        floor: Math.max(0, Math.floor((lowest - 5) / 10) * 10),
+    };
+}
+
 /** Apps (not the '@' pseudo apps unless asked) with a figure above 0, largest first. */
 function ranked(apps, value, { withSystem = false } = {}) {
     const list = apps.filter(a => (withSystem || !a.id.startsWith('@')) && value(a) > 0);
