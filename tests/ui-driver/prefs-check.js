@@ -1376,14 +1376,14 @@ async function settingsClicks(window, shown, settings) {
     const pollTrough = findAll(pollRowW.scale, w => w.get_css_name() === 'trough')[0];
     const pollKnob = () => findAll(pollRowW.scale, w => w.get_css_name() === 'slider')[0];
     await scrollTo(pollRowW);
-    await act(`PREFS-CHECK DRAG poll-knob-low ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, 0.0, 0.5)}`);
+    await act(`PREFS-CHECK DRAG poll-knob-low ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, -0.1, 0.5)}`);
     ok(await until(() => settings.get_int('poll-interval-ms') === 250), `update every (pointer): dragged to the left end, ${settings.get_int('poll-interval-ms')} ms`);
     await scrollTo(pollRowW);
     await act(`PREFS-CHECK DRAG poll-knob-next ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, 0.17, 0.5)}`);
     const lowStep = settings.get_int('poll-interval-ms');
     ok(lowStep > 250 && lowStep <= 500, `update every (pointer): a sixth of the way along is ${lowStep} ms`);
     await scrollTo(pollRowW);
-    await act(`PREFS-CHECK DRAG poll-knob-high ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, 1.0, 0.5)}`);
+    await act(`PREFS-CHECK DRAG poll-knob-high ${pointIn(pollKnob(), 0.5, 0.5)} ${pointIn(pollTrough, 1.1, 0.5)}`);
     ok(await until(() => settings.get_int('poll-interval-ms') === 30000), `update every (pointer): dragged to the right end, ${settings.get_int('poll-interval-ms')} ms`);
     ok(pollRowW.valueLabel.label === '30 s', `update every (pointer): reads ${pollRowW.valueLabel.label}`);
     settings.reset('poll-interval-ms');
