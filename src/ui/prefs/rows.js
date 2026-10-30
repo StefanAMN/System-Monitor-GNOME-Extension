@@ -15,7 +15,7 @@ import Graphene from 'gi://Graphene';
 import { METRICS, SETTINGS_SECTIONS, pinPositions, togglePinned, movePinned, formatSettingValue, nearestStop } from '../../lib/common/settingsmodel.js';
 import { formatTemp } from '../../lib/common/format.js';
 import { sanitizeMetricList } from '../../lib/common/present.js';
-import { RAPL_FIX_COMMANDS, raplFixWarning } from '../../lib/common/raplfix.js';
+import { RAPL_FIX_COMMANDS, raplFixWarning } from '../../lib/prefs/raplfix.js';
 import { PowerSampler } from '../../lib/collectors/power.js';
 import { _, N_, fill } from '../../lib/common/i18n.js';
 

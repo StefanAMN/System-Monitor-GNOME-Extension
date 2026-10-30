@@ -1582,3 +1582,23 @@ Owner: track only one GPU, or let the GPU tab show both. Chosen: show them all. 
 **The pause check on CI, cause found (2026-10-31):** "rpendpause is R, the button reads Resume", twice on GNOME 49, once on 50. 453 tries did not repeat it, so ebc5081 made a failure record what it saw, and the next one read `members 3347, pid 3345`: the line was open for rpendother, and rpendother was the one stopped. Pause did what it says. The test held a row found earlier; rows are reused and the two busy processes change places between readings, so that row showed rpendother when it was clicked. Not a bug in the extension. `openActions` now takes a name, finds the row at that moment and checks whom the line opened for, trying again if they changed places as the pointer got there. The recording is gone again.
 
 **The search check on CI:** on a quiet machine an idle loop can be among the five busiest, so "not among the busiest" failed before the search began. Five busy processes now fill the list for that check.
+
+## Codebase review and file moves (2026-10-31)
+
+**Moves (no change in behaviour):** process control left `collectors/process.js`, which now only reads, for `lib/actions/processcontrol.js`. `backup.js`, `agentlaunch.js` and `raplfix.js` left `lib/common/`, which now holds only what both the shell and the preferences window load, for `lib/prefs/`. Comments that sat above the wrong function or described code that no longer exists were moved or removed.
+
+**Sampling overhead:** none; imports and comments only. `processIdentity` reads through `readProcFile`, the same call and the same decoding.
+
+**Open findings, not fixed here:**
+- `canEnd` (`processcontrol.js`): `Xorg` is not in `SESSION_CRITICAL`, so on an X11 session the panel offers Pause and End on the X server. Pause freezes the desktop with no way back from inside it.
+- `CpuSampler`: `coreFreqs` is by position among online CPUs and `cores` by CPU id, so with a core offline the clocks of later cores show on the wrong row.
+- `NetworkSampler.restoreSession`: only counts traffic during the lock if it arrives before the first sample. Measured: 7.9 GB restored first, 0 restored after. `enable()` starts both at once, so the order is a race.
+- `GpuSampler`: no paths for Intel's `xe` driver (`tile0/gt0/...`), so such a GPU reads 0 % always, and the driver reads `i915`. Not run: no such GPU here.
+- `_alertCause`: a CPU and a memory alert close together share one sampler. The second gets no reading, and its `reset()` can clear the first's baseline.
+- `ThermalSampler`: the Thermal tab reads every hwmon sensor, including a sleeping GPU's, which `GpuSampler` takes care not to wake. Not run: no such GPU here.
+- `tests/ui-driver` tracking check: fails on a machine where a real app outruns the burner (seen with a busy desktop app). Passes in a container.
+- shexli on 2026-10-31 reports EGO-M-004 (error) on `shell-version` and EGO-L-003 on the indicator's `destroy` signal, both new since the result recorded in `docs/ego/README.md`.
+
+**Proof:** lint clean; unit 660 passed; prefs-check 323 of 323 under the owner's stylesheet; test-i18n; test-zip ACTIVE with a clean log; test-compat 50 and CI for the UI tests.
+
+**The alert recovery check, local runs:** failed twice in the GNOME 50 container while another project's virtual machines loaded this computer ("⚠ gone after 10.5 s", cpu, then gpu), with the alert's own recovery on time by its readings. The check also required the ⚠ gone, and the machine's readings are live with a 2 s sustain here, so a real alert on another metric could hold it. The check now asks that the ⚠ match the alerts active, and logs them. Passed once after that. The cause is the likely one, not proven: the logs of that run were not kept.

@@ -15,7 +15,7 @@ import { NetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { appInfo } from '../../lib/common/appnames.js';
 import { readSystemState, setPowerProfile, readMachineInfo } from '../../lib/collectors/systemstate.js';
 import { AppUsageSampler } from '../../lib/collectors/appusage.js';
-import { groupState, processIdentity, reniceProcesses, signalProcesses, LOWER_NICE } from '../../lib/collectors/process.js';
+import { groupState, processIdentity, reniceProcesses, signalProcesses, LOWER_NICE } from '../../lib/actions/processcontrol.js';
 import { _, fill, ngettext, N_ } from '../../lib/common/i18n.js';
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;

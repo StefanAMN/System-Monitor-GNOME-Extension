@@ -1,12 +1,12 @@
 // The Settings page's Backup group: the settings saved to a file, restored
-// from one (checked against the schema first, see lib/common/backup.js), or
+// from one (checked against the schema first, see lib/prefs/backup.js), or
 // all reset. GTK side (preferences process).
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 
-import { backupText, checkBackup, BackupError, NOT_BACKED_UP } from '../../lib/common/backup.js';
+import { backupText, checkBackup, BackupError, NOT_BACKED_UP } from '../../lib/prefs/backup.js';
 import { _, fill, ngettext } from '../../lib/common/i18n.js';
 
 /** The schema's keys as checkBackup() reads them: type, and range or choices. */

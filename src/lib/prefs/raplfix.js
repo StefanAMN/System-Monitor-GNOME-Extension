@@ -8,7 +8,7 @@
 // observe CPU package energy at high resolution, which is a known side
 // channel (PLATYPUS, CVE-2020-8694); kernels restrict it to root for that
 // reason. It is opt-in, and raplFixWarning() is shown with the commands.
-import { _, fill } from './i18n.js';
+import { _, fill } from '../common/i18n.js';
 
 const RULE_PATH = '/etc/udev/rules.d/99-powercap-read.rules';
 const RULE = 'SUBSYSTEM=="powercap", ACTION=="add", RUN+="/bin/chmod a+r /sys/class/powercap/%k/energy_uj"';

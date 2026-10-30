@@ -8,7 +8,7 @@ import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
 import Adw from 'gi://Adw';
 
-import { TYPED, CLIPBOARD, findProgram, findTargets, agentArgv, terminalArgv, promptText, LaunchError } from '../../lib/common/agentlaunch.js';
+import { TYPED, CLIPBOARD, findProgram, findTargets, agentArgv, terminalArgv, promptText, LaunchError } from '../../lib/prefs/agentlaunch.js';
 import { _, fill } from '../../lib/common/i18n.js';
 
 export const REPORT_NAME = 'report.md';

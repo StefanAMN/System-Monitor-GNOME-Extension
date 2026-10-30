@@ -1,7 +1,7 @@
 // The settings as a file to keep or move to another machine, and checking
 // such a file before anything is applied. Pure: the preferences window reads
 // and writes the file and the settings; this decides what may be restored.
-import { _, fill } from './i18n.js';
+import { _, fill } from '../common/i18n.js';
 
 export const BACKUP_FORMAT = 'resource-pulse-settings';
 export const BACKUP_VERSION = 1;

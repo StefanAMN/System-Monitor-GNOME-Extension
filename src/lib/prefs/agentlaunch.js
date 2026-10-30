@@ -7,7 +7,7 @@
 // Agents are started in their normal, interactive mode with their own
 // permission prompts; no flag that skips them is ever added.
 import GLib from 'gi://GLib';
-import { _, N_ } from './i18n.js';
+import { _, N_ } from '../common/i18n.js';
 
 // How the prompt reaches the agent, which decides what the user is told.
 export const TYPED = 'typed'; // In its input box, waiting for Enter.

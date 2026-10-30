@@ -16,7 +16,6 @@ import { logOnce } from '../../lib/common/utils.js';
 import { HISTORY_CAPACITY, GPU_CHARTS, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, GPU_EVERY_US, PROCESS_EVERY_US, MIN_GAP_US, GLIDE_MAX_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, SEARCH_ROWS, SPARK_SCALES, CHART_NAMES } from './constants.js';
 
 export class PollingMethods {
-    /** Pinned metrics as stored, minus unknown keys and duplicates. */
     /** Start or stop battery tracking to match the setting. */
     _syncTracking() {
         const wanted = this._settings.get_boolean('battery-tracking');

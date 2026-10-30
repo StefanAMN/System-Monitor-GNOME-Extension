@@ -68,7 +68,9 @@ Result on 2026-10-24 after `fix(shell)` (the three signal disconnects written ou
 
 | Rule | Where | Why it stays |
 |---|---|---|
-| EGO-X-004 synchronous file IO in shell code | `appio.js` 65, `process.js` 186, 199, 352: per-process `/proc/<pid>/stat` and `io` in batches of 32 per idle callback | All `/proc`, in memory, never a disk. The batches replaced asynchronous reads that cost about 20 ms of shell CPU per round with 1.5 ms. Not a rule of the published guidelines. |
+| EGO-X-004 synchronous file IO in shell code | `appio.js` 63, `process.js` 207, 271, 285: per-process `/proc/<pid>/stat` and `io` in batches of 32 per idle callback | All `/proc`, in memory, never a disk. The batches replaced asynchronous reads that cost about 20 ms of shell CPU per round with 1.5 ms. Not a rule of the published guidelines. |
 | EGO-L-002 objects assigned in `enable()` without `.destroy()` | `extension.js`: `_indicatorBox`, `_menuSection`, `_popupStack`, `_scrollView`, `_menuContainer`, `_menuViewport` | Children of `_indicator`; `disable()` destroys `_indicator` (and with it its children and menu), then nulls each reference. |
+
+Result on 2026-10-31: 1 error, 3 warnings on the zip, not yet resolved: EGO-M-004 on `shell-version` (added since: GNOME 51) and EGO-L-003 on the indicator's `destroy` signal (added since: stopping the timers when the shell destroys the panel at shutdown), besides the two above. Check EGO-M-004 with a current shexli before uploading.
 
 Before that change (master 0f78091) it also reported EGO-L-003 for the three settings signals disconnected in a loop, and EGO-X-004 for the two one-off reads at enable.

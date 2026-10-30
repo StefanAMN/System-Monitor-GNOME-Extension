@@ -1,4 +1,3 @@
-import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { getSysconf, noteReadError, logOnce } from '../common/utils.js';
 
@@ -9,8 +8,8 @@ const decoder = new TextDecoder('utf-8', { fatal: false });
 // proc(5) numbers fields from 1 with state as field 3.
 const F_UTIME = 14 - 3;
 const F_STIME = 15 - 3;
-const F_NICE = 19 - 3;
-const F_STARTTIME = 22 - 3;
+export const F_NICE = 19 - 3;
+export const F_STARTTIME = 22 - 3;
 const F_RSS = 24 - 3;
 const MIN_FIELDS = F_RSS + 1;
 
@@ -65,15 +64,6 @@ export function cpuPercent(prev, cur, deltaSeconds, clkTck) {
 }
 
 /**
- * Merge rows that share a name into one row per application-ish group.
- * Costs nothing extra to collect; the kernel truncates comm to 15 bytes, so
- * helpers that rename themselves (e.g. browser content processes) form
- * their own group. Summed RSS counts pages shared between members once per
- * member, so a group's memory here is an upper bound; for the memory list
- * readGroupMemory then replaces it.
- * @param {{comm: string, pid: number, cpu: number, rss: number, rssBytes: number, mem: number}[]} rows
- */
-/**
  * The groups whose name contains `query` (case does not matter); every group
  * when the query is empty. Applied before the top rows are taken, so a search
  * looks at every process, not only the busiest five.
@@ -87,6 +77,15 @@ export function filterGroups(groups, query) {
 
 const isStopped = row => row.state === 'T' || row.state === 't';
 
+/**
+ * Merge rows that share a name into one row per application-ish group.
+ * Costs nothing extra to collect; the kernel truncates comm to 15 bytes, so
+ * helpers that rename themselves (e.g. browser content processes) form
+ * their own group. Summed RSS counts pages shared between members once per
+ * member, so a group's memory here is an upper bound; for the memory list
+ * readGroupMemory then replaces it.
+ * @param {{comm: string, pid: number, cpu: number, rss: number, rssBytes: number, mem: number}[]} rows
+ */
 export function groupByName(rows) {
     const groups = new Map();
     for (const row of rows) {
@@ -141,23 +140,6 @@ function listPids() {
     return pids;
 }
 
-/**
- * Read every /proc/<pid>/stat inside the shell, BATCH files per idle slice,
- * handing each batch to onChunk(text, time) in the same slice so parsing is
- * spread out as well. Measured on 508 processes: ~5 ms CPU per sample in
- * total, versus ~22 ms for spawning `sh` + `cat` and ~53 ms for one async
- * GIO request per file.
- *
- * These are synchronous reads on the main loop, the one exception (approved
- * by the owner, 2026-10-03) to "no synchronous I/O in the shell": procfs
- * files are generated in memory by the kernel and never wait on storage,
- * and each slice is bounded to BATCH files. It covers procfs only: never
- * /sys, never unbounded loops, never files on real filesystems.
- *
- * `time` is the monotonic time the batch was read, so every process's rate
- * uses its own interval. Resolves true when done, false when cancelled.
- * @param {{ id: number }} handle receives the idle source id, for cancellation
- */
 /**
  * Storage bytes from /proc/<pid>/io (read_bytes / write_bytes count what
  * reached the disk, not cache hits).
@@ -240,6 +222,23 @@ export function readGroupMemory(groups, handle, proc = '/proc') {
     });
 }
 
+/**
+ * Read every /proc/<pid>/stat inside the shell, BATCH files per idle slice,
+ * handing each batch to onChunk(text, time) in the same slice so parsing is
+ * spread out as well. Measured on 508 processes: ~5 ms CPU per sample in
+ * total, versus ~22 ms for spawning `sh` + `cat` and ~53 ms for one async
+ * GIO request per file.
+ *
+ * These are synchronous reads on the main loop, the one exception (approved
+ * by the owner, 2026-10-03) to "no synchronous I/O in the shell": procfs
+ * files are generated in memory by the kernel and never wait on storage,
+ * and each slice is bounded to BATCH files. It covers procfs only: never
+ * /sys, never unbounded loops, never files on real filesystems.
+ *
+ * `time` is the monotonic time the batch was read, so every process's rate
+ * uses its own interval. Resolves true when done, false when cancelled.
+ * @param {{ id: number }} handle receives the idle source id, for cancellation
+ */
 function readAllStats(handle, onChunk, withIo = false, ioDenied = null) {
     return new Promise((resolve) => {
         let pids = null;
@@ -424,141 +423,4 @@ export class ProcessSampler {
         this._ioDenied.clear();
         this._prevTime = 0;
     }
-}
-
-// ── Ending processes ─────────────────────────────────────────────────────────
-
-// Ending any of these takes the desktop session down with it. Names as the
-// kernel reports them (comm, at most 15 bytes).
-const SESSION_CRITICAL = new Set([
-    'systemd', 'gnome-shell', 'gnome-session-b', 'gnome-session-c', 'gnome-session-i',
-    'Xwayland', 'dbus-daemon', 'dbus-broker', 'dbus-broker-lau', 'gdm-wayland-ses',
-    'gdm-x-session', 'pipewire', 'wireplumber',
-]);
-
-/**
- * Whether a process group may be offered for ending from the panel.
- * @param {{comm: string, members: {pid: number}[]}} group
- * @param {number} selfPid this shell's pid
- */
-export function canEnd(group, selfPid) {
-    return !SESSION_CRITICAL.has(group.comm) && !group.members.some(m => m.pid === selfPid || m.pid <= 1);
-}
-
-/**
- * Start time, state and owner of a live process, or null once it has exited
- * (a zombie counts as exited: it only waits for its parent to reap it).
- * @param {number} pid
- * @param {string} [proc] procfs root, for tests
- */
-export function processIdentity(pid, proc = '/proc') {
-    let text;
-    let uid;
-    try {
-        // procfs only, one process: generated by the kernel, never blocks.
-        text = decoder.decode(GLib.file_get_contents(`${proc}/${pid}/stat`)[1]);
-        uid = Gio.File.new_for_path(`${proc}/${pid}`).query_info('unix::uid', Gio.FileQueryInfoFlags.NONE, null).get_attribute_uint32('unix::uid');
-    } catch (e) {
-        // Exited: ENOENT, or ESRCH mid-read (reported by GLib as FAILED).
-        if (!e.matches?.(GLib.FileError, GLib.FileError.NOENT) && !e.matches?.(GLib.FileError, GLib.FileError.FAILED) &&
-            !e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
-            noteReadError(e);
-        return null;
-    }
-    const close = text.lastIndexOf(')');
-    const fields = text.slice(close + 2).split(' ');
-    if (fields[0] === 'Z' || fields[0] === 'X') return null;
-    return { start: Number(fields[F_STARTTIME]), state: fields[0], nice: Number(fields[F_NICE]), uid };
-}
-
-// Niceness a lowered process gets: half way to the lowest priority, so
-// what it does still moves; an unprivileged user cannot raise it back.
-export const LOWER_NICE = 10;
-
-/**
- * How a group's own processes run now: stopped (all paused), and the
- * lowest priority among them.
- * @param {{pid: number, start: number}[]} members
- * @param {number} uid
- * @returns {{mine: number[], paused: boolean, nice: number}} paused is false with no member left
- */
-export function groupState(members, uid, proc = '/proc') {
-    const mine = [];
-    let stopped = 0;
-    let nice = -Infinity;
-    for (const m of members) {
-        const id = processIdentity(m.pid, proc);
-        if (!id || id.start !== m.start || id.uid !== uid) continue;
-        mine.push(m.pid);
-        // T: stopped by a signal; t: stopped by a debugger.
-        if (id.state === 'T' || id.state === 't') stopped++;
-        nice = Math.max(nice, id.nice);
-    }
-    return { mine, paused: mine.length > 0 && stopped === mine.length, nice: mine.length ? nice : 0 };
-}
-
-/**
- * Lower the priority of processes with renice(1): an unprivileged user may
- * only raise niceness, never lower it again.
- * @param {number[]} pids
- * @param {number} [nice]
- * @returns {Promise<{ok: boolean, error: string}>}
- */
-export function reniceProcesses(pids, nice = LOWER_NICE) {
-    return runQuiet(['renice', '-n', String(nice), '-p', ...pids.map(String)], pids.length === 0);
-}
-
-function runQuiet(argv, nothing) {
-    return new Promise(resolve => {
-        if (nothing) {
-            resolve({ ok: true, error: '' });
-            return;
-        }
-        let proc;
-        try {
-            proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_PIPE);
-        } catch (e) {
-            resolve({ ok: false, error: e.message });
-            return;
-        }
-        proc.communicate_utf8_async(null, null, (obj, res) => {
-            try {
-                const [, , stderr] = obj.communicate_utf8_finish(res);
-                resolve({ ok: obj.get_successful(), error: (stderr || '').trim() });
-            } catch (e) {
-                resolve({ ok: false, error: e.message });
-            }
-        });
-    });
-}
-
-/**
- * The members still running as the same process (same start time) and owned
- * by `uid`. Others' processes are reported separately, never signalled.
- * @param {{pid: number, start: number}[]} members
- * @param {number} uid
- * @returns {{mine: number[], others: number}}
- */
-export function liveMembers(members, uid, proc = '/proc') {
-    const mine = [];
-    let others = 0;
-    for (const m of members) {
-        const id = processIdentity(m.pid, proc);
-        if (!id || id.start !== m.start) continue;
-        if (id.uid === uid) mine.push(m.pid);
-        else others++;
-    }
-    return { mine, others };
-}
-
-/**
- * Send a signal with kill(1).
- * @param {number[]} pids
- * @param {'TERM'|'KILL'|'STOP'|'CONT'} signal
- * @returns {Promise<{ok: boolean, error: string}>} error is kill's own message
- *   (e.g. "Operation not permitted"); a process that exited in the meantime
- *   makes kill fail too, and the caller checks liveness afterwards anyway.
- */
-export function signalProcesses(pids, signal) {
-    return runQuiet(['kill', '-s', signal, '--', ...pids.map(String)], pids.length === 0);
 }

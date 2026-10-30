@@ -9,7 +9,7 @@ import Pango from 'gi://Pango';
 
 import { ensureActorVisibleInScrollView } from 'resource:///org/gnome/shell/misc/animationUtils.js';
 
-import { canEnd, liveMembers, signalProcesses, groupState, reniceProcesses, LOWER_NICE } from '../../lib/collectors/process.js';
+import { canEnd, liveMembers, signalProcesses, groupState, reniceProcesses, LOWER_NICE } from '../../lib/actions/processcontrol.js';
 import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed } from '../../lib/common/format.js';
 import { PROCESS_ROWS } from './constants.js';

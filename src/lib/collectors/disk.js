@@ -100,14 +100,6 @@ export function ioUtilization(curTicks, prevTicks, elapsedMs) {
     return Math.min(100, ((curTicks - prevTicks) / elapsedMs) * 100);
 }
 
-/**
- * Note on Per-Process Disk I/O:
- * Per-process I/O accounting via /proc/[pid]/io requires elevated (root or CAP_SYS_PTRACEE)
- * permissions on Linux (mode 0400 owned by root). Non-root GNOME extension processes
- * cannot access /proc/[pid]/io for other users' processes without root privileges.
- * Therefore, top per-process Disk I/O breakdown is intentionally omitted to comply with the
- * unprivileged GNOME Shell security model, focusing instead on system-wide physical disk throughput and mounts.
- */
 export class DiskSampler {
     /** @param {string} [proc] /proc, or a fixture in tests */
     constructor(proc = '/proc') {

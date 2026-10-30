@@ -22,8 +22,6 @@ import GLib from 'gi://GLib';
 import { logOnce, noteReadError } from '../common/utils.js';
 import { parseProcIo } from './process.js';
 
-export { parseProcIo };
-
 const BATCH = 32;
 const decoder = new TextDecoder('utf-8', { fatal: false });
 

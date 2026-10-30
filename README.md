@@ -42,7 +42,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   ├── lib/
 │   │   ├── collectors/       # Read the system; raw numbers, no UI (HAL layer)
 │   │   │   ├── cpu.js  memory.js  battery.js  power.js  disk.js  network.js  thermal.js  gpu.js
-│   │   │   ├── process.js     # Per-process CPU / memory / disk I/O; pausing, lowering, ending processes
+│   │   │   ├── process.js     # Per-process CPU / memory / disk I/O
 │   │   │   ├── appio.js       # Disk I/O per app
 │   │   │   ├── machineusage.js  # Whole-machine usage for the tracking history
 │   │   │   ├── throttle.js    # Share of time the processor was slowed down to cool
@@ -61,10 +61,13 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 │   │   │   ├── trackingview.js   # What the Tracking tab shows
 │   │   │   ├── diagnostics.js # Rules for the Diagnostics tab
 │   │   │   └── agentreport.js # The report handed to a coding agent
-│   │   └── common/           # Shared helpers
-│   │       ├── settingsmodel.js  # The user-facing settings, described once
-│   │       ├── present.js     # Pure presentation decisions (n/a, icons, scales, hover)
-│   │       ├── format.js  utils.js  appnames.js  i18n.js
+│   │   ├── common/           # Used by both the shell and the preferences window
+│   │   │   ├── settingsmodel.js  # The user-facing settings, described once
+│   │   │   ├── present.js     # Pure presentation decisions (n/a, icons, scales, hover)
+│   │   │   └── format.js  utils.js  appnames.js  i18n.js
+│   │   ├── actions/          # Change the system when the user asks
+│   │   │   └── processcontrol.js  # Pausing, lowering and ending processes, and what may be offered
+│   │   └── prefs/            # Used only by the preferences window, free of GTK so they can be tested
 │   │       ├── backup.js      # Settings to and from a JSON file
 │   │       ├── agentlaunch.js # Which agents and terminals are installed, how to start them
 │   │       └── raplfix.js     # The commands that make CPU power readable (shown, never run)

@@ -320,7 +320,7 @@ async function main() {
 // on memory-backed settings; the group itself on the Settings page.
 async function backup() {
     const { exportSettings, importSettings, resetSettings, buildBackupGroup } = await import(`file://${root}/ui/prefs/backup.js`);
-    const { BackupError } = await import(`file://${root}/lib/common/backup.js`);
+    const { BackupError } = await import(`file://${root}/lib/prefs/backup.js`);
     const dir = GLib.dir_make_tmp('rp-prefs-backup-XXXXXX');
     const file = Gio.File.new_for_path(`${dir}/settings.json`);
     const settings = newSettings();
@@ -691,7 +691,7 @@ async function batteryPages(styleWindow) {
     // A real process stands in for the running "chat" app, for its finding's Pause and Lower priority.
     const chatProc = Gio.Subprocess.new(['sleep', '600'], Gio.SubprocessFlags.NONE);
     const chatPid = Number(chatProc.get_identifier());
-    const { processIdentity } = await import(`file://${root}/lib/collectors/process.js`);
+    const { processIdentity } = await import(`file://${root}/lib/actions/processcontrol.js`);
     const chatMembers = [{ pid: chatPid, start: processIdentity(chatPid).start }];
     const diagnostics = buildDiagnosticsPage(history, {
         settings,
@@ -1290,7 +1290,7 @@ async function agentSection(window, settings, diagnostics, fake, confirmAnswers)
 /** After the choice: the terminal ran the agent in the agent's folder with the prompt typed, and report.md is there, private. */
 async function checkLaunch(settings, a, fake, how) {
     ok(await until(() => fake.args('claude')), `agent (${how}): the agent was started through the terminal`);
-    const { promptText } = await import(`file://${root}/lib/common/agentlaunch.js`);
+    const { promptText } = await import(`file://${root}/lib/prefs/agentlaunch.js`);
     const prompt = promptText();
     const terminal = fake.args('terminal') ?? [];
     ok(terminal[0] === `--dir=${fake.agentDir}` && terminal[1] === '--' && terminal[2] === 'env' && terminal[3].startsWith(`PATH=${fake.bin}:`) &&
@@ -1527,7 +1527,7 @@ async function findingClicks(window, diagnostics) {
     await act(`PREFS-CHECK CLICK finding ${at(first, 0.4, 0.5 * 56 / Math.max(56, first.get_height()))}`);
     ok(await until(() => first.expanded) && first.detailLabel.get_mapped(), `findings (pointer): clicking it opened its detail (expanded ${first.expanded})`);
     // An app's finding: Pause and Resume with the real pointer.
-    const { processIdentity } = await import(`file://${root}/lib/collectors/process.js`);
+    const { processIdentity } = await import(`file://${root}/lib/actions/processcontrol.js`);
     const chat = diagnostics.rows.find(r => r.findingId === 'background:chat');
     const chatPid = diagnostics.state.apps.get('chat')?.[0]?.pid;
     if (chat?.pauseButton && chatPid) {
@@ -1628,9 +1628,9 @@ async function coverage() {
     window.present();
     // The fixture's app ids are its data; the profile name comes from the
     // system; shell commands are the same in every language.
-    const { RAPL_FIX_COMMANDS } = await import(`file://${root}/lib/common/raplfix.js`);
+    const { RAPL_FIX_COMMANDS } = await import(`file://${root}/lib/prefs/raplfix.js`);
     // Agents and terminals found on this machine go by their product names.
-    const { APP_AGENTS, TERMINAL_AGENTS } = await import(`file://${root}/lib/common/agentlaunch.js`);
+    const { APP_AGENTS, TERMINAL_AGENTS } = await import(`file://${root}/lib/prefs/agentlaunch.js`);
     const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n'), ...APP_AGENTS.map(a => a.name), ...TERMINAL_AGENTS.map(a => a.name)];
     const seen = new Set();
     for (const name of ['settings', 'tracking', 'diagnostics']) {
