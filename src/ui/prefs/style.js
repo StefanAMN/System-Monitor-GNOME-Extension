@@ -140,7 +140,8 @@ window.rp-window button.flat:hover,
 window.rp-window headerbar button:hover { background-color: ${p.button}; }
 window.rp-window windowcontrols button > image { background-color: ${p.button}; }
 window.rp-window windowcontrols button:hover > image { background-color: ${p.buttonHover}; }
-window.rp-window button.suggested-action { background-color: ${ACCENT}; color: #ffffff; }
+window.rp-window button.suggested-action,
+window.rp-window menubutton.suggested-action > button { background-color: ${ACCENT}; color: #ffffff; }
 window.rp-window button.destructive-action {
     background-color: rgba(224, 27, 36, ${dark ? '0.22' : '0.14'});
     color: ${dark ? '#ff7b7b' : '#c01c28'};
@@ -148,7 +149,7 @@ window.rp-window button.destructive-action {
 window.rp-window row spinbutton,
 window.rp-window row spinbutton > text { background-color: transparent; box-shadow: none; }
 window.rp-window entry { background-color: ${p.button}; box-shadow: none; }
-/* Text views (the agent's prompt, the report preview): themes such as
+/* Text views (the report preview): themes such as
    Orchis paint them white whatever the variant. */
 window.rp-window textview,
 window.rp-window textview > text { background-color: ${p.card}; color: ${p.fg}; }

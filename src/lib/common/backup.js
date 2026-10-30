@@ -7,9 +7,9 @@ export const BACKUP_FORMAT = 'resource-pulse-settings';
 export const BACKUP_VERSION = 1;
 
 // Keys that are signals between the window and the panel, not settings.
-// The agent's command and the consent to send it the report are this
-// machine's: a settings file from elsewhere must not set what runs here.
-export const NOT_BACKED_UP = new Set(['prefs-page', 'action-open-menu', 'action-flush-history', 'action-clear-history', 'agent-command', 'agent-consent']);
+// The consent to send an agent the report is this machine's: a settings file
+// from elsewhere must not give it.
+export const NOT_BACKED_UP = new Set(['prefs-page', 'action-open-menu', 'action-flush-history', 'action-clear-history', 'agent-consent']);
 
 /** A file's text could not be read as a settings backup at all. */
 export class BackupError extends Error {}

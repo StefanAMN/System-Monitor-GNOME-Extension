@@ -1460,3 +1460,27 @@ All built and committed. test-i18n passed; `test-overhead 0`: menu closed +0.40 
 - Found on the way: while a line is open the rows keep their order (values still update), or the CPU list's re-sorting would move the buttons under the pointer at every reading. The list scrolls the line into view when it opens: the screenshot showed a row at the panel's bottom edge opening its line out of sight, which no check had caught.
 - Hover: Pause had the keyboard focus from the moment the line opened, and focus used hover's colour, so it looked lit all the time and hovering changed nothing. Opening with the pointer now leaves the focus on ⋮ (Tab still reaches Pause next), and focus is a fainter shade than hover. test-ui checks each button's theme colour at rest and under the real pointer.
 - Proof: test-ui under Orchis-Pink with real clicks and hover: line under its row on the CPU and Memory lists, stays open past readings, moves, closes, in view; prefs-check 310 of 310.
+
+# Agent hand-off: found agents, one button (2026-10-30)
+
+Owner: the diagnostics do not see Claude Code, Codex or Antigravity although they are installed; make the section one button that picks the agent (app or terminal), with the prompt and report automatic and, where possible, the prompt typed and waiting for Enter.
+
+**Cause:** detection used `GLib.find_program_in_path` alone. GNOME Shell's PATH (`/proc/<gnome-shell>/environ`) has no `~/.local/bin` or nvm folder: those come from shell startup files the session never reads. Antigravity (`agy`) was also not in the list at all. Reproduced under that exact PATH: every agent null before, all four found after (`findProgram`).
+
+**Change:** `agentlaunch.js` looks on PATH and then in the usual per-user folders; agents run from their full path with their folder on PATH (`env PATH=…`), since the terminal lacks it too. `agent.js`: one menu button, Apps and Terminal sections of what is installed, nothing to configure. The settings `agent`, `agent-command`, `agent-terminal` and `agent-prompt` are gone; the first-use consent stays, with its Preview.
+
+**How the prompt reaches each agent**, read from the installed versions:
+
+| Agent | Way | Enter needed |
+|---|---|---|
+| Claude Code 2.1.314 | `--prefill` (not in `--help`) | yes |
+| Claude app 4.29 | `claude://code/new?q=&folder=` | yes |
+| Codex Desktop 2026.06.25 | `codex://new?prompt=&path=` | yes |
+| Codex CLI, `agy`, Gemini CLI | prompt argument: none has a way to only type it | no, starts at once |
+| Antigravity 2.0 app, Antigravity IDE | no prompt on opening found: opened, prompt copied | paste, then yes |
+
+Rejected: a pty wrapper typing into the three CLIs. Their first screens (update notice, folder trust) already enable bracketed paste, so the text would be lost in a menu, and it would add a Python dependency.
+
+**Edge cases:** first run in the agent folder shows the agent's own trust question. A future Claude Code that drops `--prefill` would fail in the terminal: the flag is undocumented.
+
+**Proof:** lint clean; `test-unit` 610 passed; `test-ui` passed, also with the owner's `~/.config/gtk-4.0/gtk.css` (`RP_GTK_USER_CSS`), the real pointer opening the menu, picking Claude Code and answering the confirmation, the open menu's colours and contrast read from rendered pixels; `test-i18n` passed. Real launches: `claude --prefill` in a pty shows the text with "Pre-filled prompt · review before pressing Enter" and sends nothing, multi-line too; the Claude and Codex apps were opened on their URLs. Not verified: the prompt showing inside the Claude and Codex windows (not seen on screen); a direct `prefs-check` on the host desktop reported "did not paint" on Settings component and diagnostics renders, none about the agent section.

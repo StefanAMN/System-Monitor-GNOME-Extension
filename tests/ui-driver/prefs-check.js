@@ -423,16 +423,12 @@ const hex = colour => [1, 3, 5].map(i => parseInt(colour.slice(i, i + 2), 16));
 const near = (rgb, colour, tolerance = 14) => hex(colour).every((v, i) => Math.abs(v - rgb[i]) <= tolerance);
 const show = rgb => `rgb(${rgb.slice(0, 3).join(', ')})`;
 
-/**
- * An open dropdown (Adw.ComboRow) in `window`: its current value on the card,
- * its options on the popover's colour, text readable.
- */
-async function dropdownLook(window, combo, variant, p, pageName) {
+/** The agent menu, open: the button in the accent, entries readable on the popover's colour. */
+async function agentMenuLook(window, agent, variant, p) {
     window.present();
-    window.set_visible_page_name(pageName);
+    window.set_visible_page_name('diagnostics');
     await sleep(400);
     const lum = c => (c[0] + c[1] + c[2]) / 3;
-    // The last opaque pixel a widget draws: its text's ink.
     const inkOf = widget => {
         const drawn = widget && render(widget);
         let last = null;
@@ -444,62 +440,42 @@ async function dropdownLook(window, combo, variant, p, pageName) {
         }
         return last;
     };
-
-    // Its current value, in the row: on the card, readable. The
-    // stand-in theme paints every list white, as some themes do (Orchis
-    // exempts this one), which left white boxes behind the values.
     const scrolled = findScrolled(window.get_visible_page());
     const adj = scrolled?.get_vadjustment();
-    const [okTop, top] = scrolled ? combo.compute_point(scrolled.get_child(), new Graphene.Point().init(0, 0)) : [false, null];
-    // (top is where it shows now, so relative to the current scroll)
-    if (adj && okTop) adj.value = Math.min(Math.max(0, adj.value + top.y - 40), adj.upper - adj.page_size);
+    if (adj) adj.value = adj.upper - adj.page_size;
     await sleep(300);
-    const inline = findAll(combo, w => w.get_css_name() === 'listview' && !w.get_ancestor(Gtk.Popover.$gtype))[0];
-    const rowShot = render(window);
-    const [okValue, edge] = inline ? inline.compute_point(window, new Graphene.Point().init(1, inline.get_height() / 2)) : [false, null];
-    const valueBg = okValue && rowShot ? rowShot.at(edge.x, edge.y) : null;
-    ok(valueBg && near(valueBg, p.card), `look (${variant}): a dropdown's current value sits on ${valueBg ? show(valueBg) : 'nothing'}, not the card ${p.card}`);
-    const valueInk = inkOf(inline && findAll(inline, w => w instanceof Gtk.Label)[0]);
-    ok(valueInk && valueBg && Math.abs(lum(valueInk) - lum(valueBg)) > 110,
-        `look (${variant}): a dropdown's current value ${valueInk ? show(valueInk) : 'not drawn'} on ${valueBg ? show(valueBg) : 'nothing'} is not readable`);
+    const shot = render(window);
+    const inner = findAll(agent.menu, w => w instanceof Gtk.ToggleButton)[0];
+    const [okButton, edge] = inner ? inner.compute_point(window, new Graphene.Point().init(4, inner.get_height() / 2)) : [false, null];
+    const buttonBg = okButton && shot ? shot.at(edge.x, edge.y) : null;
+    ok(buttonBg && lum(buttonBg) > 40 && buttonBg[2] > buttonBg[0] + 40, `look (${variant}): the agent button is ${buttonBg ? show(buttonBg) : 'not drawn'}, not the accent`);
 
-    // Open: its options on the popover's colour, text readable.
-    const popover = findAll(combo, w => w instanceof Gtk.Popover)[0];
+    // As with every popover opened from code on GTK 4.18: reopened while it has not drawn.
+    const popover = agent.popover;
     popover.popup();
-    // Rendered from its contents node, which paints the surface: the
-    // popover itself is a native surface and renders nothing this way
-    // on GTK 4.18 (GNOME 48). Waited for until it has drawn with its
-    // options laid out. On GTK 4.18 a popover opened from code (no user
-    // input) in a window that has been up a while is sometimes never
-    // painted, although the compositor configures it and frames tick;
-    // opened again, it paints at once. So it is reopened after each
-    // second without a drawing.
-    let options = [];
-    let option = null;
+    let entry = null;
     let surface = popover;
     let popShot = null;
     for (let waited = 0; waited < 5000 && !popShot; waited += 100) {
         await sleep(100);
-        options = findAll(popover, w => w.get_css_name() === 'row');
-        option = options[1] ?? options[0];
+        entry = [...agent.state.entries.values()][0];
         surface = findAll(popover, w => w.get_css_name() === 'contents')[0] ?? popover;
-        if (popover.get_mapped() && option?.get_width() > 0) popShot = render(surface);
+        if (popover.get_mapped() && entry?.get_width() > 0) popShot = render(surface);
         if (!popShot && waited % 1000 === 900) {
             popover.popdown();
             await sleep(200);
             popover.popup();
         }
     }
-    const [okOption, at] = option ? option.compute_point(surface, new Graphene.Point().init(option.get_width() - 4, option.get_height() / 2)) : [false, null];
-    const listBg = okOption && popShot ? popShot.at(at.x, at.y) : null;
+    const [okEntry, at] = entry ? entry.compute_point(surface, new Graphene.Point().init(entry.get_width() - 4, entry.get_height() / 2)) : [false, null];
+    const listBg = okEntry && popShot ? popShot.at(at.x, at.y) : null;
     ok(listBg && near(listBg, p.popover), listBg
-        ? `look (${variant}): an open dropdown's list is ${show(listBg)}, not ${p.popover}`
-        : `look (${variant}): the dropdown's list was not on screen after 5 s (mapped ${popover.get_mapped()}, ${options.length} options)`);
-    const optionInk = inkOf(option && findAll(option, w => w instanceof Gtk.Label)[0]);
-    ok(optionInk && listBg && Math.abs(lum(optionInk) - lum(listBg)) > 110,
-        `look (${variant}): dropdown text ${optionInk ? show(optionInk) : 'not drawn'} on ${listBg ? show(listBg) : 'no list'} is not readable`);
+        ? `look (${variant}): the open agent menu is ${show(listBg)}, not ${p.popover}`
+        : `look (${variant}): the agent menu was not on screen after 5 s (mapped ${popover.get_mapped()})`);
+    const ink = inkOf(entry && findAll(entry, w => w instanceof Gtk.Label)[0]);
+    ok(ink && listBg && Math.abs(lum(ink) - lum(listBg)) > 110,
+        `look (${variant}): agent menu text ${ink ? show(ink) : 'not drawn'} on ${listBg ? show(listBg) : 'no menu'} is not readable`);
     popover.popdown();
-    // Back to the top, where the next variant's checks look.
     if (adj) adj.value = 0;
     await sleep(200);
 }
@@ -610,9 +586,7 @@ async function renderedLook(shown, battery) {
 
         // The Settings page's own parts, as rendered.
         await settingsPartsLook(window, shown, variant, p);
-        // An open dropdown: the Settings and Tracking pages have none left,
-        // so the agent's (the same widget as every dropdown in the window).
-        await dropdownLook(battery.window, battery.diagnostics.agent.agentRow, variant, p, 'diagnostics');
+        await agentMenuLook(battery.window, battery.diagnostics.agent, variant, p);
         window.present();
         await sleep(300);
     }
@@ -713,7 +687,10 @@ async function batteryPages(styleWindow) {
         agent: {
             dir: fake.agentDir,
             which: fake.which,
+            find: fake.which,
+            findApp: fake.findApp,
             spawn: fake.spawn,
+            openApp: fake.openApp,
             // Driven by the shell (linger), the real dialog is clicked with the
             // pointer; alone, the answers are given here.
             ...(driven ? {} : { confirm: () => Promise.resolve(confirmAnswers.shift() ?? 'cancel') }),
@@ -1170,7 +1147,7 @@ function fakeAgentBin() {
     const record = name => `pwd > "$RP_FAKE_DIR/${name}-cwd"; printf '%s\\0' "$@" > "$RP_FAKE_DIR/${name}-args"`;
     script('xdg-terminal-exec', `${record('terminal')}\nwhile [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"`);
     script('claude', record('claude'));
-    script('fake-agent', record('custom'));
+    const opened = [];
     const read = name => {
         try {
             const [, bytes] = GLib.file_get_contents(`${base}/${name}`);
@@ -1191,10 +1168,13 @@ function fakeAgentBin() {
             launcher.setenv('RP_FAKE_DIR', base, true);
             return launcher.spawnv(argv);
         },
+        findApp: id => (['com.anthropic.Claude.desktop', 'antigravity.desktop'].includes(id) ? { id } : null),
+        opened,
+        openApp: (app, uri) => opened.push({ id: app.id, uri }),
         args: name => read(`${name}-args`)?.split('\0').slice(0, -1) ?? null,
         cwd: name => read(`${name}-cwd`)?.trim() ?? null,
         clear: () => {
-            for (const name of ['terminal', 'claude', 'custom'])
+            for (const name of ['terminal', 'claude'])
                 for (const what of ['args', 'cwd']) if (GLib.file_test(`${base}/${name}-${what}`, GLib.FileTest.EXISTS)) GLib.unlink(`${base}/${name}-${what}`);
         },
         remove: () => GLib.spawn_command_line_sync(`rm -rf ${GLib.shell_quote(base)}`),
@@ -1247,73 +1227,70 @@ async function until(cond, ms = 5000) {
     return cond();
 }
 
-/** The agent section: rows, preview, consent, the launch, a hostile custom command. */
+/** The agent section: the menu, consent, the launch of a terminal agent and of apps. */
 async function agentSection(window, settings, diagnostics, fake, confirmAnswers) {
     const a = diagnostics.agent;
     ok(a, 'agent: the Diagnostics page has the agent section when it has the settings');
-    const names = [];
-    for (let i = 0; i < a.agentRow.model.get_n_items(); i++) names.push(a.agentRow.model.get_string(i));
-    ok(names.join() === 'Claude Code,Custom command', `agent: offered ${names.join()} (only the installed one, and a custom command)`);
-    ok(a.open.label === 'Open Claude Code' && !a.commandRow.visible, `agent: '${a.open.label}', no command row for a preset`);
-    ok(a.promptView.buffer.text.includes('report.md') && settings.get_string('agent-prompt') === '', 'agent: the built-in prompt is shown and not stored');
+    ok(a.menu.label === 'Fix with an agent', `agent: one button, '${a.menu.label}'`);
+    ok([...a.state.entries.keys()].join() === 'claude-app,antigravity-app,claude', `agent: offered ${[...a.state.entries.keys()].join()} (only what is installed, apps first)`);
 
     const report = await diagnostics.makeReport();
     ok(report.startsWith('# Resource Pulse report') && report.includes('### Memory') && report.includes('`swapping`') && report.includes('| `chat` | `chat` |'),
         'agent: the report has the findings by area and the apps');
     if (driven) return;
 
-    a.preview.emit('clicked');
+    // Cancelled first: nothing is written or started, and no consent is kept.
+    confirmAnswers.push('cancel');
+    a.state.entries.get('claude').emit('clicked');
+    await sleep(500);
+    ok(!fake.args('terminal') && settings.get_strv('agent-consent').length === 0 && !GLib.file_test(`${fake.agentDir}/report.md`, GLib.FileTest.EXISTS),
+        'agent: cancelling starts nothing, writes nothing, keeps no consent');
+    confirmAnswers.push('preview');
+    a.state.entries.get('claude').emit('clicked');
     ok(await until(() => a.state.preview), 'agent: Preview report shows the report');
     ok(a.state.preview?.reportView.buffer.text === report.replace(/^# Resource Pulse report, [^\n]*/, a.state.preview.reportView.buffer.text.split('\n')[0]),
         'agent: the preview is the report that will be sent');
     a.state.preview?.force_close();
-
-    // Cancelled first: nothing is written or started, and no consent is kept.
-    confirmAnswers.push('cancel');
-    a.open.emit('clicked');
-    await sleep(500);
-    ok(!fake.args('terminal') && settings.get_strv('agent-consent').length === 0 && !GLib.file_test(`${fake.agentDir}/report.md`, GLib.FileTest.EXISTS),
-        'agent: cancelling starts nothing, writes nothing, keeps no consent');
     confirmAnswers.push('open');
-    a.open.emit('clicked');
+    a.state.entries.get('claude').emit('clicked');
     await checkLaunch(settings, a, fake, 'the button');
 
-    // A custom command is split, never run by a shell.
-    fake.clear();
-    a.agentRow.selected = 1;
-    ok(a.commandRow.visible && settings.get_string('agent') === 'custom', 'agent: a custom command shows its row');
-    settings.set_string('agent-command', 'fake-agent --flag "$(touch PWNED)" ; --prompt={prompt}');
-    settings.set_strv('agent-consent', ['claude', 'custom']);
-    a.open.emit('clicked');
-    ok(await until(() => fake.args('custom')), 'agent: the custom command was started');
-    const custom = fake.args('custom') ?? [];
-    ok(custom[0] === '--flag' && custom[1] === '$(touch PWNED)' && custom[2] === ';' && custom[3] === `--prompt=${a.promptView.buffer.text}`,
-        `agent: the custom command's arguments arrive literally (${JSON.stringify(custom.slice(0, 3))})`);
-    ok(!GLib.file_test(`${fake.agentDir}/PWNED`, GLib.FileTest.EXISTS) && !GLib.file_test(`${GLib.get_current_dir()}/PWNED`, GLib.FileTest.EXISTS),
-        'agent: nothing in the command was run by a shell');
-    settings.set_string('agent-command', 'not-installed-agent {prompt}');
-    a.open.emit('clicked');
-    await sleep(300);
-    ok(a.status.visible && a.status.label.includes('"not-installed-agent" was not found'), `agent: a missing program is reported ('${a.status.label}')`);
-    a.agentRow.selected = 0;
-    settings.reset('agent-command');
+    // The app opens on its own URL with the prompt typed, in the agent's folder.
+    confirmAnswers.push('open');
+    a.state.entries.get('claude-app').emit('clicked');
+    ok(await until(() => fake.opened.length === 1), 'agent: the Claude app was opened');
+    const url = GLib.Uri.parse(fake.opened[0]?.uri ?? 'x:', GLib.UriFlags.NONE);
+    const query = GLib.Uri.parse_params(url.get_query(), -1, '&', GLib.UriParamsFlags.NONE);
+    ok(url.get_scheme() === 'claude' && query.q?.includes('report.md') && query.folder === fake.agentDir,
+        `agent: the Claude app got ${fake.opened[0]?.uri?.slice(0, 60)}`);
+    ok(a.status.label.includes('Press Enter'), `agent: status '${a.status.label}'`);
+
+    // An app that takes no prompt: opened, with the prompt and the report's full path copied.
+    confirmAnswers.push('open');
+    a.state.entries.get('antigravity-app').emit('clicked');
+    ok(await until(() => fake.opened.length === 2), 'agent: the Antigravity app was opened');
+    ok(fake.opened[1]?.uri === null && a.status.label.includes('Paste it'), `agent: no URL, status '${a.status.label}'`);
+    const copied = await new Promise(resolve => a.menu.get_clipboard().read_text_async(null, (c, res) => resolve(c.read_text_finish(res))));
+    ok(copied?.includes(`report.md is ${fake.agentDir}/report.md`), 'agent: the copied prompt names the report by its full path');
 }
 
-/** After the open button: the terminal ran the agent in the agent's folder with the prompt, and report.md is there, private. */
+/** After the choice: the terminal ran the agent in the agent's folder with the prompt typed, and report.md is there, private. */
 async function checkLaunch(settings, a, fake, how) {
     ok(await until(() => fake.args('claude')), `agent (${how}): the agent was started through the terminal`);
-    const prompt = a.promptView.buffer.text;
+    const { promptText } = await import(`file://${root}/lib/common/agentlaunch.js`);
+    const prompt = promptText();
     const terminal = fake.args('terminal') ?? [];
-    ok(terminal.join('\n') === [`--dir=${fake.agentDir}`, '--', 'claude', prompt].join('\n'),
-        `agent (${how}): the terminal got ${JSON.stringify(terminal.slice(0, 3))}`);
-    ok(JSON.stringify(fake.args('claude')) === JSON.stringify([prompt]) && fake.cwd('claude') === fake.agentDir,
-        `agent (${how}): the agent got the prompt as one argument, in ${fake.cwd('claude')}`);
+    ok(terminal[0] === `--dir=${fake.agentDir}` && terminal[1] === '--' && terminal[2] === 'env' && terminal[3].startsWith(`PATH=${fake.bin}:`) &&
+        terminal.slice(4).join('\n') === [`${fake.bin}/claude`, '--prefill', prompt].join('\n'),
+    `agent (${how}): the terminal got ${JSON.stringify(terminal.slice(0, 5))}`);
+    ok(JSON.stringify(fake.args('claude')) === JSON.stringify(['--prefill', prompt]) && fake.cwd('claude') === fake.agentDir,
+        `agent (${how}): the agent got the prompt to type as one argument, in ${fake.cwd('claude')}`);
     ok(settings.get_strv('agent-consent').includes('claude'), `agent (${how}): the consent is kept for this agent`);
     const info = Gio.File.new_for_path(`${fake.agentDir}/report.md`).query_info('unix::mode', Gio.FileQueryInfoFlags.NONE, null);
     const dirInfo = Gio.File.new_for_path(fake.agentDir).query_info('unix::mode', Gio.FileQueryInfoFlags.NONE, null);
     ok((info.get_attribute_uint32('unix::mode') & 0o777) === 0o600 && (dirInfo.get_attribute_uint32('unix::mode') & 0o777) === 0o700,
         `agent (${how}): report.md is private (${(info.get_attribute_uint32('unix::mode') & 0o777).toString(8)}, folder ${(dirInfo.get_attribute_uint32('unix::mode') & 0o777).toString(8)})`);
-    ok(a.status.label.startsWith('Started in a terminal'), `agent (${how}): status '${a.status.label}'`);
+    ok(a.status.label.includes('Press Enter'), `agent (${how}): status '${a.status.label}'`);
 }
 
 /**
@@ -1558,12 +1535,15 @@ async function agentClicks(window, settings, diagnostics, fake) {
     fake.clear();
     settings.set_strv('agent-consent', []);
 
-    await clickAt(a.preview, 'preview');
-    ok(await until(() => a.state.preview), 'agent (pointer): Preview report opened the report');
-    a.state.preview?.force_close();
-    await sleep(600);
-
-    await clickAt(a.open, 'open');
+    await clickAt(findAll(a.menu, w => w instanceof Gtk.ToggleButton)[0], 'agent-menu');
+    ok(await until(() => a.popover.get_mapped()), 'agent (pointer): the button opens the menu');
+    await sleep(400);
+    // The menu is a surface of its own, placed relative to the window's.
+    const entry = a.state.entries.get('claude');
+    const [, q] = entry.compute_point(a.popover, new Graphene.Point().init(entry.get_width() / 2, entry.get_height() / 2));
+    const [px, py] = a.popover.get_surface_transform();
+    const surface = a.popover.get_surface();
+    await act(`PREFS-CHECK CLICK agent-entry ${Math.round(surface.get_position_x() + px + q.x)} ${Math.round(surface.get_position_y() + py + q.y)}`);
     let dialog = null;
     ok(await until(() => (dialog = findAll(window, w => w instanceof Adw.AlertDialog)[0])), 'agent (pointer): the first hand-off asks first');
     if (!dialog) return;
@@ -1621,9 +1601,8 @@ async function coverage() {
     // system; shell commands are the same in every language.
     const { RAPL_FIX_COMMANDS } = await import(`file://${root}/lib/common/raplfix.js`);
     // Agents and terminals found on this machine go by their product names.
-    const { AGENTS, TERMINALS } = await import(`file://${root}/lib/common/agentlaunch.js`);
-    const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n'), ...AGENTS.map(a => a.name), 'Ptyxis', 'kitty'];
-    ok(TERMINALS.some(t => t.name === 'Ptyxis'), 'coverage: the terminal names left out are the ones offered');
+    const { APP_AGENTS, TERMINAL_AGENTS } = await import(`file://${root}/lib/common/agentlaunch.js`);
+    const data = ['chat', 'editor', 'performance', ...RAPL_FIX_COMMANDS.split('\n'), ...APP_AGENTS.map(a => a.name), ...TERMINAL_AGENTS.map(a => a.name)];
     const seen = new Set();
     for (const name of ['settings', 'tracking', 'diagnostics']) {
         window.set_visible_page_name(name);
