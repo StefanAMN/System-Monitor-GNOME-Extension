@@ -1731,10 +1731,15 @@ async function alertsRaise(rp) {
         check(/^CPU \d+ % for \d+ min — sh( ×\d+)? using [\d.]+ cores$/.test(note.body ?? ''), `alerts: notification body '${note.body}' does not name the burner`);
 
         if (!pointer) await clickActor(rp._dangerBox).catch(() => {});
-        const [x, y] = rp._dangerBox.get_transformed_position();
-        const [w, h] = rp._dangerBox.get_transformed_size();
-        pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + w / 2, y + h / 2);
-        await sleep(600);
+        // A value changing width can refit a full top bar, which moves the ⚠ out
+        // from under the pointer (seen: 29 px within a second). A person aims again.
+        for (let aim = 0; aim < 5; aim++) {
+            const [x, y] = rp._dangerBox.get_transformed_position();
+            const [w, h] = rp._dangerBox.get_transformed_size();
+            pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + w / 2, y + h / 2);
+            await sleep(600);
+            if (rp._dangerBox.get_transformed_position()[0] === x) break;
+        }
         check(rp._tooltip?.visible && /^CPU \d+ % for \d+ min — sh( ×\d+)? using [\d.]+ cores$/.test(rp._tooltip.text), `alerts: ⚠ tooltip is '${rp._tooltip?.text}'`);
         await shot('alert-topbar');
         pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
