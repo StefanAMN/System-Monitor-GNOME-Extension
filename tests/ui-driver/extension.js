@@ -1555,7 +1555,7 @@ async function endProcesses(rp) {
         await openActions(comm);
         await clickBar(bar().confirm);
     };
-    const { processIdentity } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/collectors/process.js`);
+    const { processIdentity } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/actions/processcontrol.js`);
     try {
         rp._indicator.menu.open();
         rp._activeTab = 'cpu';
@@ -1829,17 +1829,21 @@ async function alertsRecover(rp) {
                 const dropped = GLib.get_monotonic_time();
                 const shown = [];
                 let clearedAt = null;
+                let others = [];
                 for (let i = 0; i < 60; i++) {
                     await sleep(250);
                     shown.push(rp._topBarWidgets[c.label ?? 'memory']?.label?.text);
-                    if (!rp._dangerBox.visible && !red(c.label) && !rp._alerts.isActive(c.key)) {
+                    // The machine's own readings are live: the ⚠ may stay for a
+                    // real alert on another metric (a hot processor, 2 s here).
+                    others = rp._alerts.active().map(a => a.key);
+                    if (rp._dangerBox.visible === (others.length > 0) && !red(c.label) && !rp._alerts.isActive(c.key)) {
                         clearedAt = GLib.get_monotonic_time();
                         break;
                     }
                 }
                 const after = clearedAt === null ? null : (clearedAt - dropped) / 1e6;
                 const text = [...new Set(shown)].join(' ');
-                console.log(`RP-UITEST alerts recover ${c.key}: ${c.high} -> ${c.low} (limit ${c.limit}${c.near ? ', near the limit' : ''}); ⚠ ${after === null ? 'still shown after 15 s' : `gone after ${after.toFixed(1)} s`}; top bar showed ${text}`);
+                console.log(`RP-UITEST alerts recover ${c.key}: ${c.high} -> ${c.low} (limit ${c.limit}${c.near ? ', near the limit' : ''}); others in alert: ${others.join(' ') || 'none'}; ⚠ ${after === null ? 'still shown after 15 s' : `gone after ${after.toFixed(1)} s`}; top bar showed ${text}`);
                 // A clear drop (DEEP_DROP or more below) clears after
                 // DEEP_RECOVER_US plus a poll or two; a value near the limit
                 // keeps the RECOVER_US hold.
