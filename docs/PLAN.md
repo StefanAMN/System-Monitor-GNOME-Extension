@@ -1421,3 +1421,13 @@ prefs-check (counts and their colours per tile, filter by API, order by severity
 - Cause, introduced by this redesign: the rows were built with `css_classes` in the AdwExpanderRow constructor, which replaced the row's own `expander` class; without it no expander rule applied and Orchis's plain `list { background-color: #FFFFFF }` painted the header. Found by rendering each node of a row (the header `list` painted white). Fix: add_css_class.
 - The edge check had passed because it looked only at the coloured edge. New checks: every finding row keeps `expander`; a finding's title against the card behind it, by rendered pixels, in dark and light. With the bug put back both fail (dark: rgb(228, 230, 235) on rgb(255, 255, 255)); with the fix test-ui passes under Orchis-Pink and under the stand-in theme.
 - Lesson recorded in CLAUDE.md.
+
+## Five features (2026-10-30)
+
+Owner: "build all 5": (1) pause / lower priority for processes, (2) those actions on the Diagnostics app findings, (3) low-battery and thermal-throttling alerts, (4) battery health over time, (5) a keyboard shortcut to open the panel. All unprivileged, under the 1 % budget, nothing EGO forbids.
+
+### 1. Pause, resume, lower priority (done)
+- The row's button (⋮, was ✕) opens the line under the list: the process, then Pause or Resume, Lower priority (renice to 10; hidden once lowered, as a user cannot raise it back) and End…, which asks as before (then Force quit).
+- HAL (process.js): `groupState()` (own members, all stopped, highest niceness), `reniceProcesses()` (renice(1)), `signalProcesses()` with STOP / CONT; `parseStatBlob` keeps the state, and a group whose members are all stopped is `paused`.
+- A paused group uses no CPU, so by CPU it would drop out of the list it is resumed from: paused groups come first in the CPU list, with a pause icon. Read from /proc each sample, so a pause outlives a screen lock (which disables the extension) and Ctrl+Z in a terminal shows too.
+- Proof: unit (state parsing, paused groups, a real child stopped / continued / reniced, raising it back refused: 580 passed); test-ui with real clicks: Pause stops it (state T) and pins it first with the pause icon, Resume continues it, Lower priority sets niceness 10 and is not offered again; the End / Force quit / Cancel flows through the new line.

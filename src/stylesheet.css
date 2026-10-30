@@ -659,7 +659,7 @@
 
 /* ── Ending processes ─────────────────────────────────────────────────────── */
 .rp-end-button { border-radius: 6px; padding: 4px; }
-.rp-end-button:hover, .rp-end-button:focus { background-color: rgba(224, 27, 36, 0.25); }
+.rp-end-button:hover, .rp-end-button:focus { background-color: rgba(53, 132, 228, 0.3); }
 .rp-end-confirm {
     background-color: rgba(224, 27, 36, 0.85);
     color: #ffffff;
@@ -669,9 +669,9 @@
     font-weight: bold;
 }
 .rp-end-confirm:hover, .rp-end-confirm:focus { background-color: #e01b24; }
-.rp-end-cancel { border-radius: 20px; padding: 4px 12px; font-size: 0.8em; }
-.rp-end-cancel:focus { background-color: rgba(53, 132, 228, 0.3); }
-.rp-light .rp-end-button:hover, .rp-light .rp-end-button:focus { background-color: rgba(224, 27, 36, 0.15); }
+.rp-end-cancel, .rp-proc-action { border-radius: 20px; padding: 4px 12px; font-size: 0.8em; }
+.rp-end-cancel:focus, .rp-proc-action:focus, .rp-proc-action:hover { background-color: rgba(53, 132, 228, 0.3); }
+.rp-light .rp-end-button:hover, .rp-light .rp-end-button:focus { background-color: rgba(53, 132, 228, 0.18); }
 
 /* ── Chart range (detail header) ──────────────────────────────────────────── */
 .rp-range-box { border-radius: 99px; padding: 2px; spacing: 2px; }
