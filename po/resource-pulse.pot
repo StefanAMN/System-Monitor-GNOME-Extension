@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-29 22:22+0200\n"
+"POT-Creation-Date: 2026-10-30 14:38+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/extension.js:208
+#: src/extension.js:212
 msgid "Resource Pulse panel"
 msgstr ""
 
@@ -269,7 +269,7 @@ msgstr ""
 
 #: src/lib/common/present.js:66 src/lib/common/settingsmodel.js:24
 #: src/lib/common/settingsmodel.js:126 src/ui/panel/constants.js:20
-#: src/ui/panel/constants.js:51 src/ui/panel/dashboard.js:379
+#: src/ui/panel/constants.js:53 src/ui/panel/dashboard.js:379
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:626
 msgid "GPU"
 msgstr ""
@@ -350,7 +350,7 @@ msgid ""
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:111
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:48
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:50
 #: src/ui/panel/details.js:13 src/ui/panel/details.js:38
 #: src/ui/panel/overview.js:619 src/ui/panel/topbar.js:211
 msgid "CPU"
@@ -358,16 +358,16 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:95
 #: src/lib/common/settingsmodel.js:116 src/lib/engine/agentreport.js:21
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:49
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:51
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:620
-#: src/ui/prefs/diagnostics.js:22 src/ui/prefs/tracking.js:553
+#: src/ui/prefs/diagnostics.js:24 src/ui/prefs/tracking.js:555
 msgid "Memory"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:17 src/lib/engine/agentreport.js:22
-#: src/ui/panel/constants.js:19 src/ui/panel/details.js:13
-#: src/ui/panel/overview.js:621 src/ui/prefs/diagnostics.js:23
-#: src/ui/prefs/tracking.js:538
+#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:59
+#: src/ui/panel/details.js:13 src/ui/panel/overview.js:621
+#: src/ui/prefs/diagnostics.js:25 src/ui/prefs/tracking.js:540
 msgid "Battery"
 msgstr ""
 
@@ -379,14 +379,14 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:19 src/ui/panel/constants.js:20
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:622
-#: src/ui/prefs/tracking.js:565
+#: src/ui/prefs/tracking.js:567
 msgid "Disk"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:20 src/lib/engine/agentreport.js:23
 #: src/lib/engine/agentreport.js:173 src/ui/panel/constants.js:20
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:623
-#: src/ui/prefs/diagnostics.js:24 src/ui/prefs/tracking.js:577
+#: src/ui/prefs/diagnostics.js:26 src/ui/prefs/tracking.js:579
 msgid "Network"
 msgstr ""
 
@@ -395,7 +395,7 @@ msgstr ""
 msgid "Thermal"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:43 src/ui/prefs/rows.js:390
+#: src/lib/common/settingsmodel.js:43 src/ui/prefs/rows.js:467
 msgid "Top bar"
 msgstr ""
 
@@ -500,9 +500,9 @@ msgid ""
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:90 src/lib/common/settingsmodel.js:121
-#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:50
-#: src/ui/panel/constants.js:76 src/ui/panel/pages/gpu.js:56
-#: src/ui/panel/pages/gpu.js:118 src/ui/prefs/tracking.js:599
+#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:52
+#: src/ui/panel/constants.js:81 src/ui/panel/pages/gpu.js:56
+#: src/ui/panel/pages/gpu.js:118 src/ui/prefs/tracking.js:601
 msgid "Temperature"
 msgstr ""
 
@@ -571,12 +571,20 @@ msgstr ""
 msgid "Space used on / above this is shown as a warning"
 msgstr ""
 
+#: src/lib/common/settingsmodel.js:136
+msgid "Low battery"
+msgstr ""
+
+#: src/lib/common/settingsmodel.js:137
+msgid "Battery charge at or below this, on battery, is shown as a warning"
+msgstr ""
+
 #: src/lib/engine/agentreport.js:20 src/lib/engine/agentreport.js:132
-#: src/ui/prefs/diagnostics.js:21 src/ui/prefs/tracking.js:540
+#: src/ui/prefs/diagnostics.js:23 src/ui/prefs/tracking.js:542
 msgid "Processor"
 msgstr ""
 
-#: src/lib/engine/agentreport.js:24 src/ui/prefs/diagnostics.js:25
+#: src/lib/engine/agentreport.js:24 src/ui/prefs/diagnostics.js:27
 msgid "About these readings"
 msgstr ""
 
@@ -645,7 +653,7 @@ msgstr ""
 msgid "Processor energy counters: not readable by this user"
 msgstr ""
 
-#: src/lib/engine/agentreport.js:106 src/ui/prefs/diagnostics.js:194
+#: src/lib/engine/agentreport.js:106 src/ui/prefs/diagnostics.js:221
 msgid "Findings"
 msgstr ""
 
@@ -669,9 +677,9 @@ msgstr ""
 msgid "{minutes} min more per full charge"
 msgstr ""
 
-#: src/lib/engine/agentreport.js:130 src/ui/prefs/tracking.js:584
-#: src/ui/prefs/tracking.js:606 src/ui/prefs/tracking.js:899
-#: src/ui/prefs/tracking.js:931
+#: src/lib/engine/agentreport.js:130 src/ui/prefs/tracking.js:586
+#: src/ui/prefs/tracking.js:608 src/ui/prefs/tracking.js:901
+#: src/ui/prefs/tracking.js:973
 msgid "Apps"
 msgstr ""
 
@@ -742,12 +750,12 @@ msgid "Memory in use (max)"
 msgstr ""
 
 #: src/lib/engine/agentreport.js:163 src/lib/engine/agentreport.js:179
-#: src/ui/prefs/tracking.js:579
+#: src/ui/prefs/tracking.js:581
 msgid "Received"
 msgstr ""
 
 #: src/lib/engine/agentreport.js:163 src/lib/engine/agentreport.js:179
-#: src/ui/prefs/tracking.js:580
+#: src/ui/prefs/tracking.js:582
 msgid "Sent"
 msgstr ""
 
@@ -784,347 +792,347 @@ msgid ""
 msgstr ""
 
 #. Translators: an alert, such as "CPU 97 % for 3 min".
-#: src/lib/engine/alerts.js:151
+#: src/lib/engine/alerts.js:162
 msgid "{name} {value} for {minutes} min"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:142
+#: src/lib/engine/diagnostics.js:143
 msgid "{app} works in the background"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:143
+#: src/lib/engine/diagnostics.js:144
 msgid ""
 "Quit it when you are not using it, or check its settings for background "
 "activity."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:144
+#: src/lib/engine/diagnostics.js:145
 #, javascript-format
 msgid ""
 "{percent} % of its CPU time on battery was without focus: about {wh} Wh over "
 "{hours} h on battery."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:158
+#: src/lib/engine/diagnostics.js:161
 msgid "Performance power mode on battery"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:159
+#: src/lib/engine/diagnostics.js:162
 msgid ""
 "Balanced mode keeps the processor from running at its highest clocks when "
 "nothing needs them."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:160
+#: src/lib/engine/diagnostics.js:163
 msgid "The power mode is \"performance\" and the machine runs on battery."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:162
+#: src/lib/engine/diagnostics.js:165
 msgid "Switch to Balanced"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:170
+#: src/lib/engine/diagnostics.js:173
 msgid "Screen brightness is high"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:171
+#: src/lib/engine/diagnostics.js:174
 msgid ""
 "The display is often the largest single consumer of a laptop. Its use cannot "
 "be measured here, so no saving is estimated."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:172
+#: src/lib/engine/diagnostics.js:175
 msgid "The backlight is at {percent} %."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:182
+#: src/lib/engine/diagnostics.js:185
 msgid "The processor runs hot on battery"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:183
+#: src/lib/engine/diagnostics.js:186
 msgid ""
 "Heat means power: look at the apps at the top of the list, and keep the air "
 "vents free."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:184
+#: src/lib/engine/diagnostics.js:187
 #, javascript-format
 msgid ""
 "{percent} % of the time on battery the CPU was above the temperature alert."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:198
+#: src/lib/engine/diagnostics.js:201 src/ui/prefs/tracking.js:910
 msgid "Battery health"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:198
+#: src/lib/engine/diagnostics.js:201
 msgid "The battery is worn"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:200
+#: src/lib/engine/diagnostics.js:203
 msgid ""
 "It holds noticeably less than when new; runtime per charge is shorter by the "
 "same amount."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:201
+#: src/lib/engine/diagnostics.js:204
 msgid "Capacity is within the normal range for its age."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:203
+#: src/lib/engine/diagnostics.js:206
 #, javascript-format
 msgid ""
 "It holds {percent} % of its design capacity after {cycles} charge cycles."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:204
+#: src/lib/engine/diagnostics.js:207
 #, javascript-format
 msgid "It holds {percent} % of its design capacity."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:214
+#: src/lib/engine/diagnostics.js:217
 msgid "Limit charging to about 80 %"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:215
+#: src/lib/engine/diagnostics.js:218
 msgid ""
 "Keeping a battery full wears it faster. This battery supports a charge "
 "limit: turn on \"Preserve Battery Health\" in Settings › Power."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:216
+#: src/lib/engine/diagnostics.js:219
 msgid "The battery supports a charge limit and it is off."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:218
+#: src/lib/engine/diagnostics.js:221
 msgid "Open Power Settings"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:226
+#: src/lib/engine/diagnostics.js:229
 msgid "Mostly plugged in"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:227
+#: src/lib/engine/diagnostics.js:230
 msgid ""
 "This battery has no charge limit. Kept at 100 % on the charger it wears "
 "faster; unplugging now and then, or running between about 20 and 80 %, helps "
 "it last."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:228
+#: src/lib/engine/diagnostics.js:231
 #, javascript-format
 msgid "{percent} % of the tracked time was on the charger."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:241
+#: src/lib/engine/diagnostics.js:244
 msgid "Power readings are not available"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:242
+#: src/lib/engine/diagnostics.js:245
 msgid ""
 "Apps are ranked by CPU time only. Enabling CPU power readings "
 "(Troubleshooting) gives energy figures."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:243
+#: src/lib/engine/diagnostics.js:246
 msgid "The CPU energy counters cannot be read by this user."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:257
+#: src/lib/engine/diagnostics.js:260
 msgid "Memory and network are not in the history yet"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:258
+#: src/lib/engine/diagnostics.js:261
 msgid ""
 "They are recorded from this version on; their findings appear after an hour "
 "or more of tracking."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:259
+#: src/lib/engine/diagnostics.js:262
 msgid "The tracked hours hold no memory figures."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:285
+#: src/lib/engine/diagnostics.js:288
 msgid "{app} keeps the processor busy in the background"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:286
+#: src/lib/engine/diagnostics.js:289
 msgid ""
 "Quit it when you are not using it, or look in its settings for background "
 "work (sync, indexing, updates)."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:287
+#: src/lib/engine/diagnostics.js:290
 #, javascript-format
 msgid ""
 "{percent} % of its processor time was without focus: on average {cores} % of "
 "one core over {hours} h tracked."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:302
+#: src/lib/engine/diagnostics.js:306
 msgid "System services use a large share of the processor"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:303
+#: src/lib/engine/diagnostics.js:307
 msgid ""
 "These run outside your session (updates, indexing, backups, drivers). "
 "\"systemd-cgtop\" shows which one."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:304
+#: src/lib/engine/diagnostics.js:308
 #, javascript-format
 msgid ""
 "{percent} % of all processor time, on average {cores} % of one core over "
 "{hours} h tracked."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:318
+#: src/lib/engine/diagnostics.js:322
 msgid "Programs often wait for the processor"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:319
+#: src/lib/engine/diagnostics.js:323
 msgid ""
 "More work is asked of the processor than it can do at once, so everything "
 "feels slower. The apps at the top of the list are the place to start."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:320
+#: src/lib/engine/diagnostics.js:324
 #, javascript-format
 msgid ""
 "In {percent} % of the tracked time at least one program was waiting for the "
 "processor."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:334
+#: src/lib/engine/diagnostics.js:338
 msgid "The processor runs hot"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:334
+#: src/lib/engine/diagnostics.js:338
 msgid "The processor runs hot on the charger"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:335
+#: src/lib/engine/diagnostics.js:339
 msgid ""
 "Heat means the processor works hard or cannot cool: look at the apps at the "
 "top of the list, and keep the air vents free."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:337
+#: src/lib/engine/diagnostics.js:341
 #, javascript-format
 msgid ""
 "{percent} % of the time on the charger the CPU was above the temperature "
 "alert."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:338
+#: src/lib/engine/diagnostics.js:342
 #, javascript-format
 msgid ""
 "{percent} % of the tracked time the CPU was above the temperature alert."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:369
+#: src/lib/engine/diagnostics.js:373
 msgid "{app} holds a lot of memory while unused"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:370
+#: src/lib/engine/diagnostics.js:374
 msgid ""
 "Quitting it, or closing the tabs and documents it keeps open, gives the "
 "memory back to the apps you use."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:371
+#: src/lib/engine/diagnostics.js:375
 msgid "On average {size} in {hours} hours in which it was never in front."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:388
+#: src/lib/engine/diagnostics.js:392
 msgid "{app} keeps growing in memory"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:389
+#: src/lib/engine/diagnostics.js:393
 msgid ""
 "Memory that only grows while an app runs can be a leak. Restarting it gives "
 "the memory back; if it grows again, an update or a bug report may help."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:390
+#: src/lib/engine/diagnostics.js:394
 msgid ""
 "From {from} to {to} over {hours} hours in a row, higher in {rising} of them."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:406
+#: src/lib/engine/diagnostics.js:410
 msgid "The machine swaps"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:407
+#: src/lib/engine/diagnostics.js:411
 msgid ""
 "Memory is moved to disk and back because there is not enough of it, which "
 "slows everything down. Quit apps that hold a lot of memory."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:408
+#: src/lib/engine/diagnostics.js:412
 msgid ""
 "{amount} moved to and from swap per hour on average; swap in use reached "
 "{used}."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:421
+#: src/lib/engine/diagnostics.js:425
 msgid "Memory is often nearly full"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:422
+#: src/lib/engine/diagnostics.js:426
 msgid ""
 "With little memory left the system swaps and drops cached files, and apps "
 "slow down. Quit the apps that hold the most."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:423
+#: src/lib/engine/diagnostics.js:427
 msgid "More than {percent} % was in use in {hours} of the tracked hours."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:436
+#: src/lib/engine/diagnostics.js:440
 msgid "Programs wait for memory"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:437
+#: src/lib/engine/diagnostics.js:441
 msgid ""
 "The kernel had to free memory before programs could go on: the clearest sign "
 "that memory is short."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:438
+#: src/lib/engine/diagnostics.js:442
 #, javascript-format
 msgid ""
 "In {percent} % of the tracked time at least one program was waiting for "
 "memory."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:463
+#: src/lib/engine/diagnostics.js:467
 msgid "A day with far more traffic than usual"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:464
+#: src/lib/engine/diagnostics.js:468
 msgid ""
 "A large update, a backup or a sync can explain it. If none ran, look at "
 "which apps were busy that day on the Tracking page."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:465
+#: src/lib/engine/diagnostics.js:469
 msgid ""
 "On {day} the machine moved {total}, {factor} times a usual day ({usual})."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:479
+#: src/lib/engine/diagnostics.js:483
 msgid "Data moves while you are away"
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:480
+#: src/lib/engine/diagnostics.js:484
 msgid ""
 "Something uploads or downloads while nobody uses the machine: sync, backups, "
 "updates, or an app left playing. Which program it is cannot be read without "
 "administrator rights (\"sudo nethogs\" shows it)."
 msgstr ""
 
-#: src/lib/engine/diagnostics.js:481
+#: src/lib/engine/diagnostics.js:485
 msgid ""
 "{total} over {hours} h without input ({sent} of it sent), about {rate}/s."
 msgstr ""
@@ -1150,97 +1158,109 @@ msgstr ""
 msgid "{metric} {value}, opens {metric} details"
 msgstr ""
 
-#: src/ui/panel/alerts.js:54
+#: src/ui/panel/alerts.js:56
 #, javascript-format
 msgid "{name} {percent} % full"
 msgstr ""
 
-#: src/ui/panel/alerts.js:56
+#: src/ui/panel/alerts.js:58
 msgid "{free} free"
 msgstr ""
 
-#: src/ui/panel/alerts.js:69
+#: src/ui/panel/alerts.js:71
 msgid "No alerts"
 msgstr ""
 
-#: src/ui/panel/alerts.js:115
+#: src/ui/panel/alerts.js:117
 msgid "{process} using {memory}"
 msgstr ""
 
-#: src/ui/panel/alerts.js:116
+#: src/ui/panel/alerts.js:118
 msgid "{process} using {cores} cores"
 msgstr ""
 
-#: src/ui/panel/constants.js:48
+#: src/ui/panel/constants.js:50
 msgid "CPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:49
+#: src/ui/panel/constants.js:51
 msgid "Memory is almost full"
 msgstr ""
 
-#: src/ui/panel/constants.js:50
+#: src/ui/panel/constants.js:52
 msgid "The processor is hot"
 msgstr ""
 
-#: src/ui/panel/constants.js:51
+#: src/ui/panel/constants.js:53
 msgid "GPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:52
+#: src/ui/panel/constants.js:54
 msgid "Disk /"
 msgstr ""
 
-#: src/ui/panel/constants.js:52
+#: src/ui/panel/constants.js:54
 msgid "Disk space is running out"
 msgstr ""
 
-#: src/ui/panel/constants.js:56
+#: src/ui/panel/constants.js:58
 msgid "The system is short of memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:56 src/ui/panel/pages/memory.js:29
-#: src/ui/prefs/tracking.js:558
+#: src/ui/panel/constants.js:58 src/ui/panel/pages/memory.js:29
+#: src/ui/prefs/tracking.js:560
 msgid "Waiting for memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:74
+#: src/ui/panel/constants.js:59
+msgid "The battery is low"
+msgstr ""
+
+#: src/ui/panel/constants.js:61
+msgid "Slowed by heat"
+msgstr ""
+
+#: src/ui/panel/constants.js:61
+msgid "The processor slows down to cool"
+msgstr ""
+
+#: src/ui/panel/constants.js:79
 msgid "Battery charge"
 msgstr ""
 
-#: src/ui/panel/constants.js:74
+#: src/ui/panel/constants.js:79
 msgid "Battery charge rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:74
+#: src/ui/panel/constants.js:79
 msgid "CPU usage"
 msgstr ""
 
-#: src/ui/panel/constants.js:74
+#: src/ui/panel/constants.js:79
 msgid "Memory use"
 msgstr ""
 
-#: src/ui/panel/constants.js:74
+#: src/ui/panel/constants.js:79
 msgid "Power draw"
 msgstr ""
 
-#: src/ui/panel/constants.js:75
+#: src/ui/panel/constants.js:80
 msgid "Disk read rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:75
+#: src/ui/panel/constants.js:80
 msgid "Disk write rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:75
+#: src/ui/panel/constants.js:80
 msgid "Download rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:75
+#: src/ui/panel/constants.js:80
 msgid "Upload rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:76
+#: src/ui/panel/constants.js:81
 msgid "GPU usage"
 msgstr ""
 
@@ -1406,7 +1426,7 @@ msgstr ""
 msgid "Time Estimate"
 msgstr ""
 
-#: src/ui/panel/pages/battery.js:37
+#: src/ui/panel/pages/battery.js:37 src/ui/prefs/tracking.js:914
 msgid "Health"
 msgstr ""
 
@@ -1692,97 +1712,137 @@ msgstr ""
 msgid "{s}s"
 msgstr ""
 
-#: src/ui/panel/polling.js:467
+#: src/ui/panel/polling.js:471
 msgid "{chart} over time"
 msgstr ""
 
-#: src/ui/panel/processes.js:18
+#: src/ui/panel/processes.js:19
 msgid "{process}, {value} CPU, opens System Monitor"
 msgstr ""
 
-#: src/ui/panel/processes.js:18
+#: src/ui/panel/processes.js:19
 msgid "{process}, {value} disk, opens System Monitor"
 msgstr ""
 
-#: src/ui/panel/processes.js:18
+#: src/ui/panel/processes.js:19
 msgid "{process}, {value} memory, opens System Monitor"
 msgstr ""
 
-#: src/ui/panel/processes.js:45
+#: src/ui/panel/processes.js:46
 msgid "Filter by name"
 msgstr ""
 
-#: src/ui/panel/processes.js:46
+#: src/ui/panel/processes.js:47
 msgid "Filter the processes by name"
 msgstr ""
 
-#: src/ui/panel/processes.js:79 src/ui/panel/processes.js:120
+#: src/ui/panel/processes.js:80 src/ui/panel/processes.js:140
+#: src/ui/prefs/diagnostics.js:296 src/ui/prefs/diagnostics.js:303
+msgid "Pause"
+msgstr ""
+
+#: src/ui/panel/processes.js:81 src/ui/panel/processes.js:142
+#: src/ui/prefs/diagnostics.js:306
+msgid "Lower priority"
+msgstr ""
+
+#: src/ui/panel/processes.js:82 src/ui/panel/processes.js:212
 msgid "End"
 msgstr ""
 
-#: src/ui/panel/processes.js:80 src/ui/panel/processes.js:120
-#: src/ui/panel/processes.js:152 src/ui/prefs/agent.js:213
-#: src/ui/prefs/backup.js:141 src/ui/prefs/tracking.js:770
+#: src/ui/panel/processes.js:83 src/ui/panel/processes.js:212
+#: src/ui/panel/processes.js:241 src/ui/prefs/agent.js:213
+#: src/ui/prefs/backup.js:141 src/ui/prefs/tracking.js:772
 msgid "Cancel"
 msgstr ""
 
-#: src/ui/panel/processes.js:118
-msgid "End all {n} {process} processes? Unsaved work in them may be lost."
+#: src/ui/panel/processes.js:140 src/ui/prefs/diagnostics.js:296
+#: src/ui/prefs/diagnostics.js:303
+msgid "Resume"
 msgstr ""
 
-#: src/ui/panel/processes.js:119
-msgid "End {process}? Unsaved work in it may be lost."
+#: src/ui/panel/processes.js:143
+msgid "End…"
 msgstr ""
 
-#: src/ui/panel/processes.js:133
-msgid "{process} belongs to another user and cannot be ended from here."
-msgstr ""
-
-#: src/ui/panel/processes.js:134 src/ui/panel/processes.js:156
+#: src/ui/panel/processes.js:144 src/ui/panel/processes.js:156
+#: src/ui/panel/processes.js:245
 msgid "Close"
 msgstr ""
 
-#: src/ui/panel/processes.js:134
+#: src/ui/panel/processes.js:155
+msgid "{process} belongs to another user and cannot be ended from here."
+msgstr ""
+
+#: src/ui/panel/processes.js:156
 msgid "{process} has already exited."
 msgstr ""
 
-#: src/ui/panel/processes.js:138
+#: src/ui/panel/processes.js:183
+msgid "{process} paused"
+msgstr ""
+
+#: src/ui/panel/processes.js:183
+msgid "{process} resumed"
+msgstr ""
+
+#: src/ui/panel/processes.js:184 src/ui/panel/processes.js:201
+msgid "{process} could not be changed{error}"
+msgstr ""
+
+#: src/ui/panel/processes.js:200
+msgid "{process}: lower priority"
+msgstr ""
+
+#: src/ui/panel/processes.js:210
+msgid "End all {n} {process} processes? Unsaved work in them may be lost."
+msgstr ""
+
+#: src/ui/panel/processes.js:211
+msgid "End {process}? Unsaved work in it may be lost."
+msgstr ""
+
+#: src/ui/panel/processes.js:227
 msgid "Asking {process} to quit…"
 msgstr ""
 
-#: src/ui/panel/processes.js:138
+#: src/ui/panel/processes.js:227
 msgid "Forcing {process} to quit…"
 msgstr ""
 
-#: src/ui/panel/processes.js:146
+#: src/ui/panel/processes.js:235
 msgid "{process} ended."
 msgstr ""
 
-#: src/ui/panel/processes.js:150
+#: src/ui/panel/processes.js:239
 msgid ""
 "{left} of {all} {process} did not quit{error}. Force quit loses unsaved work."
 msgstr ""
 
-#: src/ui/panel/processes.js:152
+#: src/ui/panel/processes.js:241
 msgid "Force quit"
 msgstr ""
 
-#: src/ui/panel/processes.js:156
+#: src/ui/panel/processes.js:245
 msgid "{left} {process} could not be ended{error}."
 msgstr ""
 
-#: src/ui/panel/processes.js:203
-msgid "End process"
+#: src/ui/panel/processes.js:293
+msgid "Process actions"
 msgstr ""
 
-#: src/ui/panel/processes.js:261
+#: src/ui/panel/processes.js:353
 msgid "{process}, {n} process"
 msgid_plural "{process}, {n} processes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/panel/processes.js:268
-msgid "End {process}"
+#: src/ui/panel/processes.js:354
+msgid "{process}, paused"
+msgstr ""
+
+#: src/ui/panel/processes.js:361
+msgid "Actions for {process}"
 msgstr ""
 
 #: src/ui/panel/sizing.js:142
@@ -1977,13 +2037,13 @@ msgstr ""
 msgid "Report"
 msgstr ""
 
-#: src/ui/prefs/agent.js:231 src/ui/prefs/diagnostics.js:187
-#: src/ui/prefs/diagnostics.js:332
+#: src/ui/prefs/agent.js:231 src/ui/prefs/diagnostics.js:214
+#: src/ui/prefs/diagnostics.js:391
 msgid "Copy report"
 msgstr ""
 
-#: src/ui/prefs/agent.js:234 src/ui/prefs/diagnostics.js:327
-#: src/ui/prefs/rows.js:454
+#: src/ui/prefs/agent.js:234 src/ui/prefs/diagnostics.js:386
+#: src/ui/prefs/rows.js:533
 msgid "Copied"
 msgstr ""
 
@@ -2073,7 +2133,7 @@ msgid ""
 "panel's size. Battery history is kept."
 msgstr ""
 
-#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:423
+#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:500
 msgid "Reset"
 msgstr ""
 
@@ -2081,130 +2141,134 @@ msgstr ""
 msgid "All settings were reset."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:30
+#: src/ui/prefs/diagnostics.js:32
 msgid "note"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:30
+#: src/ui/prefs/diagnostics.js:32
 msgid "suggestion"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:30
+#: src/ui/prefs/diagnostics.js:32
 msgid "warning"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:42
+#: src/ui/prefs/diagnostics.js:44
 msgid "Saves about {watts} W, about {minutes} min more per full charge."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:43
+#: src/ui/prefs/diagnostics.js:45
 msgid "Saves about {watts} W."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:51
+#: src/ui/prefs/diagnostics.js:53
 msgid "≈{watts} W · +{minutes} min per charge"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:52
+#: src/ui/prefs/diagnostics.js:54
 msgid "≈{watts} W"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:63
+#: src/ui/prefs/diagnostics.js:65
 msgid "Resource Pulse diagnostics, {time} UTC"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:67
+#: src/ui/prefs/diagnostics.js:69
 msgid "on AC"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:67
+#: src/ui/prefs/diagnostics.js:69
 msgid "on battery"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:68
+#: src/ui/prefs/diagnostics.js:70
 msgid "power profile {profile}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:69
+#: src/ui/prefs/diagnostics.js:71
 msgid "backlight {percent} %"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:72
+#: src/ui/prefs/diagnostics.js:74
 #, javascript-format
 msgid "battery holds {percent} % of its design capacity after {cycles} cycles"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:73
+#: src/ui/prefs/diagnostics.js:75
 #, javascript-format
 msgid "battery holds {percent} % of its design capacity"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:75
+#: src/ui/prefs/diagnostics.js:77
 msgid "charge limit {limit}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:76
+#: src/ui/prefs/diagnostics.js:78
 msgid "processor energy not readable"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:78
+#: src/ui/prefs/diagnostics.js:80
 msgid "System: {state}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:78
+#: src/ui/prefs/diagnostics.js:80
 msgid "unknown"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:80
+#: src/ui/prefs/diagnostics.js:82
 msgid "System: not read yet"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:91
+#: src/ui/prefs/diagnostics.js:93
 msgid "No findings."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:132
+#: src/ui/prefs/diagnostics.js:158
 msgid "Diagnostics"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:140
+#: src/ui/prefs/diagnostics.js:166
 msgid ""
 "From the last 7 days of usage tracking and how the machine is set up now, "
 "worked out on this computer. Advice about apps and memory needs tracking to "
 "be on."
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:186 src/ui/prefs/rows.js:456
+#: src/ui/prefs/diagnostics.js:213 src/ui/prefs/rows.js:535
 msgid "Check again"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:196 src/ui/prefs/diagnostics.js:275
+#: src/ui/prefs/diagnostics.js:223 src/ui/prefs/diagnostics.js:331
 msgid "Checking…"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:231
+#: src/ui/prefs/diagnostics.js:262
 msgid "{area}, {severity}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:247
+#: src/ui/prefs/diagnostics.js:278 src/ui/prefs/diagnostics.js:293
 msgid "Could not do it: {error}"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:275
+#: src/ui/prefs/diagnostics.js:292
+msgid "it is no longer running"
+msgstr ""
+
+#: src/ui/prefs/diagnostics.js:331
 msgid "Nothing to improve"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:283
+#: src/ui/prefs/diagnostics.js:339
 msgid "{area}: nothing found"
 msgstr ""
 
-#: src/ui/prefs/diagnostics.js:283
+#: src/ui/prefs/diagnostics.js:339
 msgid "{area}: {n} finding"
 msgid_plural "{area}: {n} findings"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/prefs/diagnostics.js:310
+#: src/ui/prefs/diagnostics.js:369
 msgid "The check failed"
 msgstr ""
 
@@ -2240,53 +2304,75 @@ msgstr ""
 msgid "Top bar preview: {items}"
 msgstr ""
 
-#: src/ui/prefs/rows.js:390
+#: src/ui/prefs/rows.js:326
+msgid ""
+"Click, then press the keys that open and close the panel. Esc cancels, "
+"Backspace clears."
+msgstr ""
+
+#: src/ui/prefs/rows.js:326
+msgid "Shortcut"
+msgstr ""
+
+#: src/ui/prefs/rows.js:327
+msgid "None"
+msgstr ""
+
+#: src/ui/prefs/rows.js:328 src/ui/prefs/rows.js:329
+msgid "Clear shortcut"
+msgstr ""
+
+#: src/ui/prefs/rows.js:339
+msgid "Press keys…"
+msgstr ""
+
+#: src/ui/prefs/rows.js:467
 msgid "Readings"
 msgstr ""
 
-#: src/ui/prefs/rows.js:421
+#: src/ui/prefs/rows.js:498
 msgid "Panel"
 msgstr ""
 
-#: src/ui/prefs/rows.js:422
+#: src/ui/prefs/rows.js:499
 msgid "Drag a bottom corner of the panel to resize it."
 msgstr ""
 
-#: src/ui/prefs/rows.js:422
+#: src/ui/prefs/rows.js:499
 msgid "Size"
 msgstr ""
 
-#: src/ui/prefs/rows.js:436
+#: src/ui/prefs/rows.js:515
 msgid "Automatic"
 msgstr ""
 
-#: src/ui/prefs/rows.js:436
+#: src/ui/prefs/rows.js:515
 msgid "{width} × {height}"
 msgstr ""
 
-#: src/ui/prefs/rows.js:442
+#: src/ui/prefs/rows.js:521
 msgid "Troubleshooting"
 msgstr ""
 
-#: src/ui/prefs/rows.js:447
+#: src/ui/prefs/rows.js:526
 msgid "CPU power is not readable"
 msgstr ""
 
-#: src/ui/prefs/rows.js:448
+#: src/ui/prefs/rows.js:527
 msgid "Two commands, with your password; readable by every program after"
 msgstr ""
 
-#: src/ui/prefs/rows.js:449
+#: src/ui/prefs/rows.js:528
 msgid ""
 "Run these two commands in a terminal to make it readable; they ask for your "
 "password."
 msgstr ""
 
-#: src/ui/prefs/rows.js:450
+#: src/ui/prefs/rows.js:529
 msgid "Copy commands"
 msgstr ""
 
-#: src/ui/prefs/rows.js:468
+#: src/ui/prefs/rows.js:547
 msgid "CPU power is now readable"
 msgstr ""
 
@@ -2354,382 +2440,407 @@ msgstr ""
 msgid "{span} · {bars}"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:526
+#: src/ui/prefs/tracking.js:528
 msgid "never"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:542
+#: src/ui/prefs/tracking.js:544
 msgid "Average load"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:543
+#: src/ui/prefs/tracking.js:545
 msgid "Waiting for the processor"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:543 src/ui/prefs/tracking.js:558
-#: src/ui/prefs/tracking.js:569 src/ui/prefs/tracking.js:592
-#: src/ui/prefs/tracking.js:948 src/ui/prefs/tracking.js:950
+#: src/ui/prefs/tracking.js:545 src/ui/prefs/tracking.js:560
+#: src/ui/prefs/tracking.js:571 src/ui/prefs/tracking.js:594
+#: src/ui/prefs/tracking.js:990 src/ui/prefs/tracking.js:992
 msgid "not measured"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:544 src/ui/prefs/tracking.js:603
+#: src/ui/prefs/tracking.js:546 src/ui/prefs/tracking.js:605
 msgid "Above the temperature alert"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:545 src/ui/prefs/tracking.js:941
+#: src/ui/prefs/tracking.js:547 src/ui/prefs/tracking.js:983
 msgid "Time recorded"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:547
+#: src/ui/prefs/tracking.js:549
 msgid "Processor load"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:547
+#: src/ui/prefs/tracking.js:549
 msgid "load"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:549 src/ui/prefs/tracking.js:636
+#: src/ui/prefs/tracking.js:551 src/ui/prefs/tracking.js:638
 #, javascript-format
 msgid "{percent} % background"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:550
+#: src/ui/prefs/tracking.js:552
 msgid "Apps by processor time"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:555
+#: src/ui/prefs/tracking.js:557
 msgid "Average in use"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:555 src/ui/prefs/tracking.js:557
+#: src/ui/prefs/tracking.js:557 src/ui/prefs/tracking.js:559
 msgid "of {total}"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:556
+#: src/ui/prefs/tracking.js:558
 msgid "Highest in use"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:556
+#: src/ui/prefs/tracking.js:558
 msgid "{percent} of the total"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:557
+#: src/ui/prefs/tracking.js:559
 msgid "Swap in use, at most"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:557
+#: src/ui/prefs/tracking.js:559
 msgid "no swap"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:560
+#: src/ui/prefs/tracking.js:562
 msgid "Memory in use"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:560 src/ui/prefs/tracking.js:605
+#: src/ui/prefs/tracking.js:562 src/ui/prefs/tracking.js:607
 msgid "average"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:560 src/ui/prefs/tracking.js:605
+#: src/ui/prefs/tracking.js:562 src/ui/prefs/tracking.js:607
 msgid "highest"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:561
+#: src/ui/prefs/tracking.js:563
 msgid "at most {size}"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:562
+#: src/ui/prefs/tracking.js:564
 msgid "Apps by memory"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:567
+#: src/ui/prefs/tracking.js:569
 msgid "Read"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:568
+#: src/ui/prefs/tracking.js:570
 msgid "Written"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:569
+#: src/ui/prefs/tracking.js:571
 msgid "Waiting for the disk"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:570
+#: src/ui/prefs/tracking.js:572
 msgid "Seen per app"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:572
+#: src/ui/prefs/tracking.js:574
 msgid "Disk traffic"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:572
+#: src/ui/prefs/tracking.js:574
 msgid "read"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:572
+#: src/ui/prefs/tracking.js:574
 msgid "written"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:573
+#: src/ui/prefs/tracking.js:575
 msgid "{read} read · {written} written"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:574
+#: src/ui/prefs/tracking.js:576
 msgid "Apps by disk traffic"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:581
+#: src/ui/prefs/tracking.js:583
 msgid "While you were away"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:581
+#: src/ui/prefs/tracking.js:583
 msgid "over {time}"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:583
+#: src/ui/prefs/tracking.js:585
 msgid "Network traffic"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:583
+#: src/ui/prefs/tracking.js:585
 msgid "received"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:583
+#: src/ui/prefs/tracking.js:585
 msgid "sent"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:585
+#: src/ui/prefs/tracking.js:587
 msgid "Needs administrator rights"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:588
+#: src/ui/prefs/tracking.js:590
 msgid "Graphics"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:590 src/ui/prefs/tracking.js:594
+#: src/ui/prefs/tracking.js:592 src/ui/prefs/tracking.js:596
 msgid "Graphics busy"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:591
+#: src/ui/prefs/tracking.js:593
 msgid "Share of the time"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:592
+#: src/ui/prefs/tracking.js:594
 msgid "Graphics energy"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:594
+#: src/ui/prefs/tracking.js:596
 msgid "busy"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:595
+#: src/ui/prefs/tracking.js:597
 #, javascript-format
 msgid "{percent} % of graphics"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:596
+#: src/ui/prefs/tracking.js:598
 msgid "Apps by graphics time"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:601
+#: src/ui/prefs/tracking.js:603
 msgid "Average"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:602
+#: src/ui/prefs/tracking.js:604
 msgid "Highest"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:605
+#: src/ui/prefs/tracking.js:607
 msgid "Processor temperature"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:607
+#: src/ui/prefs/tracking.js:609
 msgid "See Processor for the apps that kept it busy"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:634
+#: src/ui/prefs/tracking.js:636
 msgid "{time} CPU"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:635
+#: src/ui/prefs/tracking.js:637
 msgid "{time} GPU"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:697
+#: src/ui/prefs/tracking.js:699
 msgid "Component"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:743
+#: src/ui/prefs/tracking.js:745
 msgid "Tracking"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:750 src/ui/prefs/tracking.js:760
+#: src/ui/prefs/tracking.js:752 src/ui/prefs/tracking.js:762
 msgid "Usage tracking"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:751
+#: src/ui/prefs/tracking.js:753
 msgid ""
 "Records which apps use the processor, memory, disk and graphics, and how "
 "much the network moves and how warm the processor runs, every {seconds} "
-"seconds while you are logged in. Kept for {days} days, on this computer only."
+"seconds while you are logged in. Kept for {days} days, and the battery's "
+"health for {years} years, on this computer only."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:756 src/ui/prefs/tracking.js:757
+#: src/ui/prefs/tracking.js:758 src/ui/prefs/tracking.js:759
 msgid "Clear history…"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:767
+#: src/ui/prefs/tracking.js:769
 msgid "Clear the battery history?"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:768
+#: src/ui/prefs/tracking.js:770
 msgid ""
 "All recorded figures are deleted. Tracking goes on if it is switched on."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:771
+#: src/ui/prefs/tracking.js:773
 msgid "Clear"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:792
+#: src/ui/prefs/tracking.js:794
 msgid "Period"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:796
+#: src/ui/prefs/tracking.js:798
 msgid "Leave out the time on the charger"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:796
+#: src/ui/prefs/tracking.js:798
 msgid "On battery"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:803
+#: src/ui/prefs/tracking.js:805
 msgid "A full charge lasts"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:803
+#: src/ui/prefs/tracking.js:805
 msgid "Average drain"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:803
+#: src/ui/prefs/tracking.js:805
 msgid "Battery used"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:803 src/ui/prefs/tracking.js:941
+#: src/ui/prefs/tracking.js:805 src/ui/prefs/tracking.js:983
 msgid "Time on battery"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:811
+#: src/ui/prefs/tracking.js:813
 msgid "Battery use"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:812 src/ui/prefs/tracking.js:824
+#: src/ui/prefs/tracking.js:814 src/ui/prefs/tracking.js:826
 msgid "battery"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:812 src/ui/prefs/tracking.js:824
+#: src/ui/prefs/tracking.js:814 src/ui/prefs/tracking.js:826
 msgid "processor"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:821
+#: src/ui/prefs/tracking.js:823
 msgid ""
 "Battery use over time; Left and Right step through the bars, plus and minus "
 "zoom, 0 shows the whole period"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:839
+#: src/ui/prefs/tracking.js:841
 msgid ""
 "Processor energy is shared among apps by the processor time each used: an "
 "estimate."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:839
+#: src/ui/prefs/tracking.js:841
 msgid "Processor, shared among apps"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:840
+#: src/ui/prefs/tracking.js:842
 msgid ""
 "The integrated graphics part, shared by graphics time where the machine "
 "reports it."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:840
+#: src/ui/prefs/tracking.js:842
 msgid "of which graphics"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:841
+#: src/ui/prefs/tracking.js:843
 msgid "Processor idle and platform"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:842
+#: src/ui/prefs/tracking.js:844
 msgid "Display, radios and the rest"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:842
+#: src/ui/prefs/tracking.js:844
 msgid ""
 "The display, radios and the rest of the machine cannot be measured per app."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:843
+#: src/ui/prefs/tracking.js:845
 msgid "Not shared among apps: extensions pause while the screen is locked."
 msgstr ""
 
-#: src/ui/prefs/tracking.js:843
+#: src/ui/prefs/tracking.js:845
 msgid "While locked or asleep"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:873
+#: src/ui/prefs/tracking.js:875
 msgid ""
 "Use over time; Left and Right step through the bars, plus and minus zoom, 0 "
 "shows the whole period"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:915
-msgid "Problem: {problem}"
+#: src/ui/prefs/tracking.js:914
+msgid "Change"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:916
-msgid "Off"
+#: src/ui/prefs/tracking.js:914
+msgid "Charge cycles"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:916
-msgid "Off · history kept"
-msgstr ""
-
-#: src/ui/prefs/tracking.js:917
-msgid "Recording · first figures within a minute"
+#: src/ui/prefs/tracking.js:914
+msgid "Full charge holds"
 msgstr ""
 
 #: src/ui/prefs/tracking.js:919
-msgid "Recording · {time}"
+msgid "Battery health over time; Left and Right step through the bars"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:920
-msgid "Recording · {time} · no power readings"
+#: src/ui/prefs/tracking.js:923
+msgid "health"
 msgstr ""
 
 #: src/ui/prefs/tracking.js:938
+msgid "since {date}"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:956
+msgid "Problem: {problem}"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:957
+msgid "Off"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:957
+msgid "Off · history kept"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:958
+msgid "Recording · first figures within a minute"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:960
+msgid "Recording · {time}"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:961
+msgid "Recording · {time} · no power readings"
+msgstr ""
+
+#: src/ui/prefs/tracking.js:980
 #, javascript-format
 msgid "{percent} % of use"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:940
+#: src/ui/prefs/tracking.js:982
 #, javascript-format
 msgid "{percent} % of a full charge"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:949
+#: src/ui/prefs/tracking.js:991
 msgid "no power readings"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:982 src/ui/prefs/tracking.js:1039
+#: src/ui/prefs/tracking.js:1024 src/ui/prefs/tracking.js:1081
 msgid "{n} more"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:987 src/ui/prefs/tracking.js:1023
+#: src/ui/prefs/tracking.js:1029 src/ui/prefs/tracking.js:1065
 msgid "No figures for this period"
 msgstr ""
 
-#: src/ui/prefs/tracking.js:1030
+#: src/ui/prefs/tracking.js:1072
 msgid "No figures per app"
 msgstr ""
 
