@@ -51,7 +51,7 @@ export class DiskPage {
         this._dskProcNote.clutter_text.line_wrap = true;
         ioCard.add_child(this._dskProcNote);
         this._dskProcEnd = this._buildEndBar();
-        ioCard.add_child(this._dskProcEnd.box);
+        this._dskProcList.add_child(this._dskProcEnd.box);
         box.add_child(ioCard);
 
         // Filesystem Mounts Card

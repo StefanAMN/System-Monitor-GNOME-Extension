@@ -7,6 +7,8 @@ import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import Pango from 'gi://Pango';
 
+import { ensureActorVisibleInScrollView } from 'resource:///org/gnome/shell/misc/animationUtils.js';
+
 import { canEnd, liveMembers, signalProcesses, groupState, reniceProcesses, LOWER_NICE } from '../../lib/collectors/process.js';
 import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed } from '../../lib/common/format.js';
@@ -16,7 +18,7 @@ import { _, fill, ngettext, N_, translated } from '../../lib/common/i18n.js';
 import { VERTICAL } from './compat.js';
 
 // How a row's value is read out, by list: "firefox, 12% CPU".
-const SPOKEN_MODE = translated({ cpu: N_('{process}, {value} CPU, opens System Monitor'), memory: N_('{process}, {value} memory, opens System Monitor'), disk: N_('{process}, {value} disk, opens System Monitor') });
+const SPOKEN_MODE = translated({ cpu: N_('{process}, {value} CPU'), memory: N_('{process}, {value} memory'), disk: N_('{process}, {value} disk') });
 
 export class ProcessesMethods {
     /** A timer that disable() ends early (resolving false), so no flow outlives the session. */
@@ -50,6 +52,9 @@ export class ProcessesMethods {
         noMatch.clutter_text.line_wrap = true;
         entry.clutter_text.connect('text-changed', () => {
             this._procFilters[mode] = entry.text;
+            // Another list: an open action line belonged to the old one.
+            const bar = this._actionBar(mode);
+            if (bar?.box.visible) this._hideEndBar(bar);
             // The matches now, not at the next tick (not when the menu
             // closing empties the field).
             if (this._menuOpen) this._poll();
@@ -67,12 +72,25 @@ export class ProcessesMethods {
             entry.text = '';
             noMatch.visible = false;
         }
+        // Closing the panel closes the action lines too.
+        for (const mode of ['cpu', 'memory', 'disk']) {
+            const bar = this._actionBar(mode);
+            if (bar?.box.visible) this._hideEndBar(bar);
+        }
     }
 
-    /** The action line under a process list: what to do with a process, then the confirmation to end it. */
+    _actionBar(mode) {
+        return { cpu: this._procEnd, memory: this._memProcEnd, disk: this._dskProcEnd }[mode];
+    }
+
+    /**
+     * The action line of a process list, placed under the row it is for: what
+     * to do with the process, then the confirmation to end it. Added to the
+     * list itself (_placeEndBar moves it).
+     */
     _buildEndBar() {
-        // The message on its own (wrapping) line, the buttons under it.
-        const box = new St.BoxLayout({ visible: false, ...VERTICAL, style: 'spacing: 6px; padding-top: 8px;' });
+        // A message on its own (wrapping) line, the buttons under it.
+        const box = new St.BoxLayout({ visible: false, ...VERTICAL, style_class: 'rp-proc-bar' });
         const label = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em;', x_expand: true });
         label.clutter_text.line_wrap = true;
         label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
@@ -96,7 +114,11 @@ export class ProcessesMethods {
         lower.connect('clicked', () => {
             if (bar.step === 'menu') this._lowerGroup(bar);
         });
-        cancel.connect('clicked', () => this._hideEndBar(bar));
+        cancel.connect('clicked', () => {
+            // Not ending it after all: back to what can be done with it.
+            if (bar.step === 'confirm' || bar.step === 'force') this._showMenu(bar);
+            else this._hideEndBar(bar);
+        });
         for (const b of [pause, lower, confirm, cancel]) this._addClickAnimations(b);
         return bar;
     }
@@ -105,11 +127,15 @@ export class ProcessesMethods {
         bar.run++;
         bar.step = 'idle';
         bar.target = null;
+        bar.frozen = null;
         bar.box.visible = false;
+        // The list goes back to its order now, not at the next tick.
+        if (this._menuOpen) this._poll();
     }
 
     _showEndBar(bar, text, { confirm = null, cancel = null, pause = null, lower = null } = {}) {
         bar.label.text = text;
+        bar.label.visible = !!text;
         bar.pause.visible = !!pause;
         if (pause) bar.pause.label = pause;
         bar.lower.visible = !!lower;
@@ -122,12 +148,43 @@ export class ProcessesMethods {
     }
 
     /**
-     * The row's button: what to do with the process. The group is copied, so
-     * later re-sorting cannot change the target.
+     * The row's button: opens the line under that row; pressed again it
+     * closes it, on another row it moves there. While the line is open the
+     * rows keep their order (their values still update), or the buttons
+     * would move under the pointer with every reading. The group is copied,
+     * so later re-sorting cannot change the target.
      */
-    _askAction(bar, group) {
+    _toggleActions(bar, group, widgetsKey, container) {
+        if (bar.box.visible && bar.target?.comm === group.comm) {
+            this._hideEndBar(bar);
+            return;
+        }
         bar.run++;
+        bar.widgetsKey = widgetsKey;
+        bar.list = container;
+        bar.frozen = this[widgetsKey].filter(w => w.item.visible && w.group).map(w => w.group);
         bar.target = { comm: group.comm, count: group.count, members: group.members.map(m => ({ ...m })) };
+        this._showMenu(bar);
+        this._placeEndBar(bar);
+        this._revealEndBar(bar);
+    }
+
+    /** A row at the panel's bottom edge would open its line out of sight. */
+    async _revealEndBar(bar) {
+        const run = bar.run;
+        // Laid out first: until then the line has no place to scroll to.
+        if (!(await this._wait(50)) || run !== bar.run || !bar.box.visible || !this._scrollView) return;
+        ensureActorVisibleInScrollView(this._scrollView, bar.box);
+    }
+
+    /** The line right under its process's row. */
+    _placeEndBar(bar) {
+        const row = this[bar.widgetsKey]?.find(w => w.item.visible && w.group?.comm === bar.target?.comm);
+        if (row) bar.list.set_child_above_sibling(bar.box, row.item);
+    }
+
+    /** What can be done with the process; `note` when the last try failed. */
+    _showMenu(bar, note = '') {
         const { mine, paused, nice } = groupState(bar.target.members, this._uid);
         if (mine.length === 0) {
             this._noneLeft(bar);
@@ -135,15 +192,21 @@ export class ProcessesMethods {
         }
         bar.step = 'menu';
         bar.paused = paused;
-        const name = group.count > 1 ? `${group.comm} ×${group.count}` : group.comm;
-        this._showEndBar(bar, name, {
+        this._showEndBar(bar, note, {
             pause: paused ? _('Resume') : _('Pause'),
-            // Lowered already: an unprivileged user cannot lower it further usefully, nor raise it back.
+            // Lowered already: an unprivileged user cannot raise it back.
             lower: nice < LOWER_NICE ? _('Lower priority') : null,
             confirm: _('End…'),
-            cancel: _('Close'),
         });
-        bar.pause.grab_key_focus();
+    }
+
+    /** The row shows a change now, not at the next reading. */
+    _markPaused(bar, paused) {
+        for (const w of this[bar.widgetsKey] ?? []) {
+            if (w.group?.comm !== bar.target?.comm) continue;
+            w.group.paused = paused;
+            w.icon.icon_name = paused ? 'media-playback-pause-symbolic' : 'application-x-executable-symbolic';
+        }
     }
 
     /** No process of the group is left that is ours to act on. */
@@ -156,16 +219,7 @@ export class ProcessesMethods {
             : fill(_('{process} has already exited.'), { process: comm }), { cancel: _('Close') });
     }
 
-    /** Briefly say what happened, then close the line. */
-    async _actionDone(bar, run, text) {
-        bar.step = 'done';
-        this._showEndBar(bar, text);
-        // The list shows the change (the pause icon, a paused group first) now.
-        if (this._menuOpen) this._poll();
-        if (await this._wait(2500) && run === bar.run) this._hideEndBar(bar);
-    }
-
-    /** Stop (SIGSTOP) or continue (SIGCONT) the group's own processes. */
+    /** Stop (SIGSTOP) or continue (SIGCONT) the group's own processes; the line stays open. */
     async _pauseGroup(bar, pause) {
         const run = ++bar.run;
         const { comm } = bar.target;
@@ -176,15 +230,14 @@ export class ProcessesMethods {
         }
         bar.step = 'waiting';
         const sent = await signalProcesses(mine, pause ? 'STOP' : 'CONT');
-        if (run !== bar.run) return;
+        // The kernel stops a running process at its next chance.
+        if (!(await this._wait(100)) || run !== bar.run) return;
         const now = groupState(bar.target.members, this._uid);
-        const ok = pause ? now.paused : !now.paused;
-        await this._actionDone(bar, run, ok
-            ? fill(pause ? _('{process} paused') : _('{process} resumed'), { process: comm })
-            : fill(_('{process} could not be changed{error}'), { process: comm, error: sent.error ? ` (${sent.error})` : '' }));
+        this._markPaused(bar, now.paused);
+        this._showMenu(bar, now.paused === pause ? '' : fill(_('{process} could not be changed{error}'), { process: comm, error: sent.error ? ` (${sent.error})` : '' }));
     }
 
-    /** Lower the priority of the group's own processes (niceness LOWER_NICE). */
+    /** Lower the priority of the group's own processes (niceness LOWER_NICE); the line stays open. */
     async _lowerGroup(bar) {
         const run = ++bar.run;
         const { comm } = bar.target;
@@ -196,9 +249,7 @@ export class ProcessesMethods {
         bar.step = 'waiting';
         const sent = await reniceProcesses(mine);
         if (run !== bar.run) return;
-        await this._actionDone(bar, run, sent.ok
-            ? fill(_('{process}: lower priority'), { process: comm })
-            : fill(_('{process} could not be changed{error}'), { process: comm, error: sent.error ? ` (${sent.error})` : '' }));
+        this._showMenu(bar, sent.ok ? '' : fill(_('{process} could not be changed{error}'), { process: comm, error: sent.error ? ` (${sent.error})` : '' }));
     }
 
     /** Ending: ask first. */
@@ -252,6 +303,15 @@ export class ProcessesMethods {
         if (!container) return;
         if (!this[targetWidgetsKey]) this[targetWidgetsKey] = [];
 
+        // An open action line holds the rows in their order, with fresh values
+        // where the reading has them.
+        const bar = this._actionBar(mode);
+        if (bar?.frozen) {
+            const fresh = new Map(processes.map(p => [p.comm, p]));
+            processes = bar.frozen.map(old => fresh.get(old.comm) ?? (mode === 'disk' ? { ...old, ioRate: 0 } : old));
+            bar.frozen = processes;
+        }
+
         // All rows are built on first use and never rebuilt: a list whose
         // length changes from poll to poll (the Disk page shows only active
         // processes) hides the spare rows, so its actor count stays fixed.
@@ -262,8 +322,6 @@ export class ProcessesMethods {
                     style: 'padding: 6px 8px; spacing: 8px; border-radius: 8px;',
                     style_class: 'resource-pulse-process-item',
                     y_align: Clutter.ActorAlign.CENTER,
-                    reactive: true,
-                    can_focus: true,
                     accessible_role: Atk.Role.LIST_ITEM
                 });
 
@@ -296,30 +354,10 @@ export class ProcessesMethods {
                 });
                 const widgets = { nameLbl, statLbl, pbar, endBtn, icon, group: null };
                 endBtn.connect('clicked', () => {
-                    if (widgets.group) this._askAction({ cpu: this._procEnd, memory: this._memProcEnd, disk: this._dskProcEnd }[mode], widgets.group);
+                    if (widgets.group) this._toggleActions(this._actionBar(mode), widgets.group, targetWidgetsKey, container);
                 });
 
                 item.add_child(endBtn);
-
-                // A press on the ✕ is its own: the row neither opens System
-                // Monitor nor plays its press animation, which shrinks the
-                // row about its centre and would move the ✕ away from under
-                // the pointer before the release (losing the click).
-                const onEnd = event => endBtn.contains(global.stage.get_event_actor(event));
-                const open = () => {
-                    this._launchSystemMonitor('processes');
-                    this._indicator.menu.close();
-                    return Clutter.EVENT_STOP;
-                };
-                item.connect('button-press-event', (actor, event) => (onEnd(event) ? Clutter.EVENT_PROPAGATE : open()));
-                // From the keyboard too, as the overview cards do.
-                item.connect('key-press-event', (actor, event) => {
-                    const sym = event.get_key_symbol();
-                    if (sym !== Clutter.KEY_Return && sym !== Clutter.KEY_KP_Enter && sym !== Clutter.KEY_space)
-                        return Clutter.EVENT_PROPAGATE;
-                    return open();
-                });
-                this._addClickAnimations(item, onEnd);
 
                 container.add_child(item);
                 widgets.item = item;
@@ -360,5 +398,6 @@ export class ProcessesMethods {
             w.endBtn.can_focus = endable;
             w.endBtn.accessible_name = endable ? fill(_('Actions for {process}'), { process: who }) : '';
         });
+        if (bar?.box.visible) this._placeEndBar(bar);
     }
 }

@@ -49,7 +49,7 @@ export class MemoryPage {
         memProcCard.add_child(this._memProcList);
         memProcCard.add_child(memSearch.noMatch);
         this._memProcEnd = this._buildEndBar();
-        memProcCard.add_child(this._memProcEnd.box);
+        this._memProcList.add_child(this._memProcEnd.box);
         box.add_child(memProcCard);
 
         return box;

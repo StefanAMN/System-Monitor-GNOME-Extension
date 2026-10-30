@@ -491,7 +491,7 @@ export class DashboardMethods {
                 search.noMatch.visible = filter !== '' && rows.length === 0;
                 if (search.noMatch.visible) search.noMatch.text = fill(_('No process matches “{text}”.'), { text: filter });
             }
-            if (this._activeTab === 'disk' && this._dskProcIdle && fresh) this._dskProcIdle.visible = rows.length === 0 && !filter;
+            if (this._activeTab === 'disk' && this._dskProcIdle && fresh) this._dskProcIdle.visible = rows.length === 0 && !filter && !this._dskProcEnd.box.visible;
             if (this._activeTab === 'disk' && this._dskProcNote && fresh) {
                 // Unprivileged: other users' counters are not readable. Said, not hidden.
                 this._dskProcNote.visible = data.ioDenied > 0;
