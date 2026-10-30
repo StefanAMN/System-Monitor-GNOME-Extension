@@ -166,6 +166,34 @@ async function main() {
     ok(rows['threshold-cpu'].knobOnly.wheel.emit('scroll', 0, -3) === true && settings.get_int('threshold-cpu') === wheelBefore,
         'slider: the wheel over it is taken before the slider and leaves the value alone');
 
+    // The shortcut: nothing by default; a plain letter or a lone modifier is no
+    // shortcut, Esc cancels, Backspace and the clear button clear.
+    const sc = rows['panel-shortcut'];
+    const press = (keyval, state = 0) => sc.keys.emit('key-pressed', keyval, 0, state);
+    const CTRL_ALT = Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK;
+    const stored = () => settings.get_strv('panel-shortcut').join();
+    ok(stored() === '' && sc.label.accelerator === '' && !sc.clear.visible && !sc.subtitle, `shortcut: none by default ('${stored()}')`);
+    sc.emit('activated');
+    ok(sc.listening && sc.subtitle === 'Press keys…', `shortcut: activating it listens ('${sc.subtitle}')`);
+    press(Gdk.KEY_a);
+    press(Gdk.KEY_a, Gdk.ModifierType.SHIFT_MASK);
+    press(Gdk.KEY_Control_L, Gdk.ModifierType.CONTROL_MASK);
+    ok(sc.listening && stored() === '', `shortcut: a plain letter, Shift+letter and a lone modifier are refused ('${stored()}')`);
+    press(Gdk.KEY_Escape);
+    ok(!sc.listening && stored() === '' && !sc.subtitle, 'shortcut: Esc cancels');
+    ok(!press(Gdk.KEY_k, CTRL_ALT) && stored() === '', 'shortcut: keys are left alone when not listening');
+    sc.emit('activated');
+    press(Gdk.KEY_K, CTRL_ALT);
+    ok(stored() === '<Control><Alt>k' && !sc.listening && sc.label.accelerator === '<Control><Alt>k' && sc.clear.visible, `shortcut: stored '${stored()}', shown '${sc.label.accelerator}'`);
+    sc.emit('activated');
+    press(Gdk.KEY_BackSpace);
+    ok(stored() === '' && !sc.clear.visible, `shortcut: Backspace clears ('${stored()}')`);
+    sc.emit('activated');
+    press(Gdk.KEY_F9);
+    ok(stored() === 'F9', `shortcut: a function key alone is enough ('${stored()}')`);
+    sc.clear.emit('clicked');
+    ok(stored() === '', 'shortcut: the clear button clears');
+
     const size = rows['panel-size'];
     ok(size.subtitle === 'Automatic' && !size.resetButton.sensitive, `panel size: '${size.subtitle}' by default`);
     settings.set_int('menu-custom-width', 420);
@@ -1354,6 +1382,15 @@ async function settingsClicks(window, shown, settings) {
     await act(`PREFS-CHECK DRAG slider-knob ${pointIn(knobOf(), 0.5, 0.5)} ${pointIn(trough, 0.02, 0.5)}`);
     ok(settings.get_int('threshold-cpu') < valueBefore, `slider (pointer): dragging its knob moved it (${valueBefore} -> ${settings.get_int('threshold-cpu')})`);
     settings.reset('threshold-cpu');
+    // The shortcut row: a real click, then real keys through the compositor.
+    const shortcut = shown.rows['panel-shortcut'];
+    await scrollTo(shortcut);
+    await act(`PREFS-CHECK CLICK shortcut-row ${pointIn(shortcut, 0.3, 0.5)}`);
+    ok(await until(() => shortcut.listening), 'shortcut (pointer): clicking the row listens');
+    await act('PREFS-CHECK KEY shortcut-keys Control_L,Alt_L,k');
+    ok(await until(() => settings.get_strv('panel-shortcut').join() === '<Control><Alt>k'), `shortcut (keys): stored '${settings.get_strv('panel-shortcut').join()}'`);
+    settings.reset('panel-shortcut');
+    await sleep(200);
     const fahrenheit = shown.rows['unit-temp'].buttons[1];
     await scrollTo(fahrenheit);
     await act(`PREFS-CHECK CLICK segment-f ${pointAt(fahrenheit)}`);

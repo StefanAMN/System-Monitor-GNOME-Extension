@@ -301,6 +301,83 @@ function sliderRow(row, settings, iconFor) {
     return widget;
 }
 
+/**
+ * The stored name of a key press as a shortcut, or null when it cannot be
+ * one: a modifier alone, or a plain key that typing needs (a shortcut takes
+ * Ctrl, Alt or Super, except the function keys).
+ * @param {number} keyval
+ * @param {Gdk.ModifierType} state
+ * @returns {?string} e.g. '<Super><Alt>m'
+ */
+export function shortcutName(keyval, state) {
+    const mods = state & Gtk.accelerator_get_default_mod_mask();
+    const key = Gdk.keyval_to_lower(keyval);
+    if (!Gtk.accelerator_valid(key, mods)) return null;
+    const held = mods & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.SUPER_MASK);
+    if (!held && !(key >= Gdk.KEY_F1 && key <= Gdk.KEY_F35)) return null;
+    return Gtk.accelerator_name(key, mods);
+}
+
+/**
+ * The panel's shortcut: the combination, a clear button; activating the row
+ * listens for the next combination (Esc cancels, Backspace clears).
+ */
+function shortcutRow(settings) {
+    const widget = explain(new Adw.ActionRow({ title: _('Shortcut'), activatable: true }), _('Click, then press the keys that open and close the panel. Esc cancels, Backspace clears.'));
+    const label = new Gtk.ShortcutLabel({ disabled_text: _('None'), valign: Gtk.Align.CENTER });
+    const clear = new Gtk.Button({ icon_name: 'edit-clear-symbolic', tooltip_text: _('Clear shortcut'), css_classes: ['flat'], valign: Gtk.Align.CENTER });
+    clear.update_property([Gtk.AccessibleProperty.LABEL], [_('Clear shortcut')]);
+    widget.add_suffix(label);
+    widget.add_suffix(clear);
+    widget.label = label;
+    widget.clear = clear;
+    widget.listening = false;
+    const show = () => {
+        const [current = ''] = settings.get_strv('panel-shortcut');
+        label.accelerator = current;
+        clear.visible = current !== '';
+        widget.subtitle = widget.listening ? _('Press keys…') : '';
+    };
+    const listen = on => {
+        widget.listening = on;
+        show();
+    };
+    const store = value => {
+        settings.set_strv('panel-shortcut', value ? [value] : []);
+        listen(false);
+    };
+    clear.connect('clicked', () => store(null));
+    widget.connect('activated', () => {
+        listen(true);
+        widget.grab_focus();
+    });
+    const keys = new Gtk.EventControllerKey({ propagation_phase: Gtk.PropagationPhase.CAPTURE });
+    keys.connect('key-pressed', (_c, keyval, _code, state) => {
+        if (!widget.listening) return false;
+        const mods = state & Gtk.accelerator_get_default_mod_mask();
+        if (keyval === Gdk.KEY_Escape && !mods) listen(false);
+        else if (keyval === Gdk.KEY_BackSpace && !mods) store(null);
+        else {
+            const name = shortcutName(keyval, state);
+            // A modifier alone, or a plain letter: keep listening.
+            if (name) store(name);
+        }
+        return true;
+    });
+    widget.add_controller(keys);
+    // Clicking elsewhere stops listening.
+    const focus = new Gtk.EventControllerFocus();
+    focus.connect('leave', () => {
+        if (widget.listening) listen(false);
+    });
+    widget.add_controller(focus);
+    widget.keys = keys;
+    const changedId = settings.connect('changed::panel-shortcut', show);
+    widget.dispose = () => settings.disconnect(changedId);
+    show();
+    return widget;
+}
+
 export function buildPreferences(page, settings, power = new PowerSampler(), iconFor = null) {
     const rows = {};
     const pinRows = {};
@@ -429,6 +506,8 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     panelGroup.add(sizeRow);
     rows['panel-size'] = sizeRow;
     rows['panel-size'].resetButton = resetButton;
+    rows['panel-shortcut'] = shortcutRow(settings);
+    panelGroup.add(rows['panel-shortcut']);
     followers.push(() => {
         const w = settings.get_int('menu-custom-width');
         const h = settings.get_int('menu-custom-height');
@@ -475,5 +554,11 @@ export function buildPreferences(page, settings, power = new PowerSampler(), ico
     checkButton.connect('clicked', probe);
     probe();
 
-    return { rows, pinRows, powerGroup, dispose: () => settings.disconnect(changedId) };
+    return {
+        rows, pinRows, powerGroup,
+        dispose: () => {
+            rows['panel-shortcut'].dispose();
+            settings.disconnect(changedId);
+        },
+    };
 }
