@@ -25,6 +25,7 @@ import { findAgents, findTerminals, agentArgv, customArgv, terminalArgv, promptT
 import { batteryFromProperties, readBacklight, readMachineInfo } from '../../src/lib/collectors/systemstate.js';
 import { appInfo } from '../../src/lib/common/appnames.js';
 import { AlertMonitor, alertReadings, alertLine } from '../../src/lib/engine/alerts.js';
+import { ThrottleSampler } from '../../src/lib/collectors/throttle.js';
 import { parsePressure, PressureSampler } from '../../src/lib/collectors/pressure.js';
 import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler } from '../../src/lib/collectors/machineusage.js';
 import { parseProcIo, AppIoSampler } from '../../src/lib/collectors/appio.js';
@@ -742,6 +743,16 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     dat(95, 160);
     eq([dat(75, 161).cleared, dat(75, 163).cleared], [[], ['memory']], 'alerts: exactly 15 points below counts as a clear drop');
 
+    // A reading in danger below its threshold (the battery's charge).
+    const lo = new AlertMonitor({ sustainUs: 30 * S, recoverUs: 10 * S, hysteresis: 5 });
+    const bat = (value, t) => lo.update({ battery: { value, threshold: 15, below: true } }, t * S);
+    eq([bat(14, 0).raised, bat(15, 29).raised, bat(12, 30).raised], [[], [], ['battery']], 'alerts (below): raised after 30 s at or under the threshold');
+    eq(lo.active()[0].value, 12, 'alerts (below): the value kept is the charge itself, not mirrored');
+    eq([bat(18, 31).cleared, bat(25, 40).cleared, bat(25, 49).cleared, bat(25, 50).cleared], [[], [], [], ['battery']], 'alerts (below): 18 is inside the band; 25 for 10 s clears');
+    bat(10, 60);
+    bat(10, 90);
+    eq([bat(40, 91).cleared, bat(40, 93).cleared], [[], ['battery']], 'alerts (below): a clear rise (plugged in and charged) clears after 2 s');
+
     // The threshold is read on every update: lowering it below the value starts the run.
     const b = new AlertMonitor({ sustainUs: 30 * S });
     b.update({ memory: { value: 80, threshold: 90 } }, 0);
@@ -749,6 +760,12 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     eq(b.update({ memory: { value: 80, threshold: 75 } }, 31 * S).raised, ['memory'], 'alerts: a lowered threshold applies');
 
     const unavailable = thm => !(thm.sensors?.length > 0);
+    // The battery only while it runs on battery; throttling only where reported.
+    const lim = { cpu: 90, memory: 90, thermal: 80, gpu: 95, disk: 95, pressure: 20, battery: 15, throttle: 20 };
+    const onBat = alertReadings({ bat: { present: true, state: 'discharging', percent: 12 }, throttle: { percent: 35 } }, lim, unavailable);
+    eq([onBat.battery, onBat.throttle], [{ value: 12, threshold: 15, below: true }, { value: 35, threshold: 20 }], 'alerts: battery (below) and throttling readings');
+    const plugged = alertReadings({ bat: { present: true, state: 'charging', percent: 5 }, throttle: null }, lim, unavailable);
+    eq([plugged.battery, plugged.throttle], [null, null], 'alerts: no battery reading while charging, none for throttling where not reported');
     const limits = { cpu: 90, memory: 90, thermal: 80, gpu: 95, disk: 95, pressure: 10 };
     const r = alertReadings({
         cpu: { total: 50 }, mem: { total: 8e9, percent: 60 },
@@ -769,6 +786,52 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
 const loop = new GLib.MainLoop(null, false);
 const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => (r(), GLib.SOURCE_REMOVE)));
 (async () => {
+    // ── thermal throttling: the share of time slowed down, from a fixture sysfs ──
+    {
+        const root = GLib.dir_make_tmp('rp-cpu-XXXXXX');
+        const made = [];
+        const put = (path, text) => {
+            GLib.mkdir_with_parents(GLib.path_get_dirname(`${root}/${path}`), 0o755);
+            GLib.file_set_contents(`${root}/${path}`, text);
+            made.push(path);
+        };
+        // Two packages; cpu1 shares package 0 with cpu0 and is not read twice.
+        for (const [cpu, pkg] of [[0, 0], [1, 0], [2, 1]]) {
+            put(`cpu${cpu}/thermal_throttle/package_throttle_total_time_ms`, '1000\n');
+            put(`cpu${cpu}/topology/physical_package_id`, `${pkg}\n`);
+        }
+        put('cpu3/topology/physical_package_id', '1\n'); // no counter: skipped
+        const ts = new ThrottleSampler(root);
+        eq(await ts.sample(), null, 'throttle: the first reading only sets the baseline');
+        const wait = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+            r();
+            return GLib.SOURCE_REMOVE;
+        }));
+        await wait(1000);
+        // Package 0 throttled 300 ms of about 1000, package 1 none: the busiest counts.
+        GLib.file_set_contents(`${root}/cpu0/thermal_throttle/package_throttle_total_time_ms`, '1300\n');
+        const r = await ts.sample();
+        ok(r && r.percent > 20 && r.percent < 31, `throttle: 300 ms throttled in about a second reads ${r?.percent?.toFixed(1)} %`);
+        await wait(200);
+        GLib.file_set_contents(`${root}/cpu0/thermal_throttle/package_throttle_total_time_ms`, '5\n');
+        eq((await ts.sample())?.percent, 0, 'throttle: a counter that went backwards counts 0');
+        const none = GLib.dir_make_tmp('rp-cpu-none-XXXXXX');
+        GLib.mkdir_with_parents(`${none}/cpu0`, 0o755);
+        const amd = new ThrottleSampler(none);
+        eq([await amd.sample(), await amd.sample()], [null, null], 'throttle: a processor without the counter reads null, never 0');
+        GLib.rmdir(`${none}/cpu0`);
+        GLib.rmdir(none);
+        for (const path of made.reverse()) GLib.unlink(`${root}/${path}`);
+        for (const cpu of [0, 1, 2]) {
+            GLib.rmdir(`${root}/cpu${cpu}/thermal_throttle`);
+            GLib.rmdir(`${root}/cpu${cpu}/topology`);
+            GLib.rmdir(`${root}/cpu${cpu}`);
+        }
+        GLib.rmdir(`${root}/cpu3/topology`);
+        GLib.rmdir(`${root}/cpu3`);
+        GLib.rmdir(root);
+    }
+
     // ── pausing and lowering a real process (a child of this test) ──
     {
         const child = Gio.Subprocess.new(['sleep', '30'], Gio.SubprocessFlags.NONE);

@@ -1510,7 +1510,7 @@ async function alertsRecover(rp) {
     // banner per scripted alert on screen for the steps after.
     s.set_boolean('alert-notify', false);
     s.set_int('poll-interval', 1);
-    s.set_strv('pinned-metrics', ['cpu', 'memory', 'disk', 'thermal', 'gpu']);
+    s.set_strv('pinned-metrics', ['cpu', 'memory', 'disk', 'thermal', 'gpu', 'battery']);
     await sleep(1500);
     const wrap = (obj, change) => {
         const sample = obj.sample;
@@ -1534,6 +1534,12 @@ async function alertsRecover(rp) {
             script: v => wrap(rp._thm, t => ({ ...t, packageTemp: v() })) },
         { key: 'gpu', label: 'gpu', limit: s.get_int('threshold-gpu'), high: 99, low: 50,
             script: v => wrap(rp._gpu, g => ({ ...g, present: true, percent: v(), gpus: [{ ...(g.gpus?.[0] ?? {}), percent: v(), asleep: false }] })) },
+        // In danger below its limit: 8 % on battery against 15 %, then charged to 60 %.
+        { key: 'battery', label: 'battery', limit: s.get_int('threshold-battery'), high: 8, low: 60, below: true,
+            script: v => wrap(rp._bat, b => ({ ...b, present: true, state: 'discharging', percent: v() })) },
+        // Slowed down to cool: the ⚠ only, as the temperature may be under its limit.
+        { key: 'throttle', label: null, limit: 20, high: 60, low: 0,
+            script: v => wrap(rp._throttle, () => ({ percent: v() })) },
         // Waiting for memory: the ⚠ only; the memory value is not over its limit.
         { key: 'pressure', label: null, limit: 20, high: 40, low: 1,
             script: v => wrap(rp._psi, p => ({ ...(p ?? { cpu: { some: 0 }, io: { some: 0 } }), memory: { some: v(), full: 0 } })) },
@@ -1569,7 +1575,8 @@ async function alertsRecover(rp) {
                 // DEEP_RECOVER_US plus a poll or two; a value near the limit
                 // keeps the RECOVER_US hold.
                 const [least, most] = c.near ? [RECOVER_US / 1e6 - 1, RECOVER_US / 1e6 + 3] : [0, DEEP_RECOVER_US / 1e6 + 2.5];
-                check(c.near ? c.limit - c.low < DEEP_DROP : c.limit - c.low >= DEEP_DROP, `alerts recover ${c.key}: case ${c.low} is not ${c.near ? 'near' : 'far below'} the limit ${c.limit}`);
+                const distance = c.below ? c.low - c.limit : c.limit - c.low;
+                check(c.near ? distance < DEEP_DROP : distance >= DEEP_DROP, `alerts recover ${c.key}: case ${c.low} is not ${c.near ? 'near' : 'far from'} the limit ${c.limit}`);
                 check(after !== null && after >= least && after <= most,
                     `alerts recover ${c.key}: ⚠ ${after === null ? 'still shown 15 s' : `gone after ${after.toFixed(1)} s`} when the value dropped from ${c.high} to ${c.low} (limit ${c.limit}); wanted ${least}-${most} s; active ${rp._alerts.isActive(c.key)}, ⚠ ${rp._dangerBox.visible}, red ${red(c.label)}, alert value ${rp._alerts.active().find(a => a.key === c.key)?.value}`);
             } finally {

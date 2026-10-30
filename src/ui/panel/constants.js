@@ -42,6 +42,8 @@ export const SEARCH_ROWS = 10;
 // Share of time (PSI "some", 10 s average) in which programs waited for
 // memory that raises an alert: well past the occasional reclaim stall.
 export const PRESSURE_LIMIT = 20;
+// The processor slowed down to cool this share of the time, for 30 s: an alert.
+export const THROTTLE_LIMIT = 20;
 // Panel page, the top-bar value painted red, and wording per alert.
 // Ids and labels together, so the labels (N_) are translated where read.
 export const ALERTS = {
@@ -54,6 +56,9 @@ export const ALERTS = {
     // memory value is not painted red, as its percentage can be far from its
     // limit (a 29 % value in red read as a false warning).
     pressure: { tab: 'memory', value: null, name: N_('Waiting for memory'), title: N_('The system is short of memory') },
+    battery: { tab: 'battery', value: 'battery', name: N_('Battery'), title: N_('The battery is low') },
+    // Slowed down to cool: the temperature itself may be under its limit, so no value turns red.
+    throttle: { tab: 'thermal', value: null, name: N_('Slowed by heat'), title: N_('The processor slows down to cool') },
 };
 export const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 

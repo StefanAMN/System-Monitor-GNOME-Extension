@@ -391,6 +391,10 @@ export class PollingMethods {
             const psi = await this._guarded('pressure', deadline, () => this._psi.sample(), this._lastPsi ?? null);
             if (gen !== this._gen) return;
             this._lastPsi = psi;
+            // One small file per processor package: how much of the time it was slowed to cool.
+            const throttle = await this._guarded('throttle', deadline, () => this._throttle.sample(), this._lastThrottle ?? null);
+            if (gen !== this._gen) return;
+            this._lastThrottle = throttle;
 
             const pwr = need.pwr
                 ? await this._guarded('power', deadline, () => this._pwr.sample(bat), last.pwr)
@@ -433,7 +437,7 @@ export class PollingMethods {
 
             if (need.net) this._countNetUsage(net, now);
 
-            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, processes, procSort, procFilter, ioDenied };
+            const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, throttle, processes, procSort, procFilter, ioDenied };
             if (tick || this._recordPending) {
                 this._recordHistory(data, shown, now);
                 this._recordLong(data, need, now);

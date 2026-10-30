@@ -36,9 +36,10 @@ export class AlertMonitor {
 
     /**
      * Feed one set of readings.
-     * @param {Object<string, ?{value: number, threshold: number}>} readings
+     * @param {Object<string, ?{value: number, threshold: number, below?: boolean}>} readings
      *   null (or a non-finite value) means the metric cannot be read now: it
-     *   never alerts and an active alert on it clears.
+     *   never alerts and an active alert on it clears. `below`: the value is in
+     *   danger at or under its threshold (the battery's charge), not over it.
      * @param {number} now monotonic µs
      * @returns {{raised: string[], cleared: string[]}} changes since the last call
      */
@@ -59,9 +60,13 @@ export class AlertMonitor {
                 }
                 continue;
             }
-            const { value, threshold } = reading;
-            s.value = value;
-            s.threshold = threshold;
+            // A reading in danger below its threshold is compared mirrored:
+            // the same rules then hold for both directions.
+            const sign = reading.below ? -1 : 1;
+            const value = sign * reading.value;
+            const threshold = sign * reading.threshold;
+            s.value = reading.value;
+            s.threshold = reading.threshold;
             if (!s.active) {
                 s.aboveSince = value >= threshold ? (s.aboveSince ?? now) : null;
                 if (s.aboveSince !== null && now - s.aboveSince >= this._sustainUs) {
@@ -118,12 +123,12 @@ export class AlertMonitor {
 
 /**
  * The readings the alerts watch, from one poll's data.
- * @param {object} data the poll snapshot (cpu, mem, thm, gpu, dsk, psi)
- * @param {object} limits thresholds: cpu, memory, thermal (°C), gpu, disk, pressure
+ * @param {object} data the poll snapshot (cpu, mem, thm, gpu, dsk, psi, bat, throttle)
+ * @param {object} limits thresholds: cpu, memory, thermal (°C), gpu, disk, pressure, battery (%), throttle (% of the time)
  * @param {function(object): boolean} thermalUnavailable
  */
 export function alertReadings(data, limits, thermalUnavailable) {
-    const reading = (ok, value, threshold) => ok ? { value, threshold } : null;
+    const reading = (ok, value, threshold, below = false) => (ok ? { value, threshold, ...(below ? { below } : {}) } : null);
     const root = data.dsk?.mounts?.[0];
     return {
         cpu: reading(!!data.cpu, data.cpu?.total, limits.cpu),
@@ -135,6 +140,12 @@ export function alertReadings(data, limits, thermalUnavailable) {
         // The share of time some program waited for memory: the same figure
         // the Memory page shows.
         pressure: reading(Number.isFinite(data.psi?.memory?.some), data.psi?.memory?.some, limits.pressure),
+        // The charge, only while it runs on battery: plugged in, it cannot run out.
+        battery: reading(!!data.bat?.present && data.bat.state === 'discharging' && Number.isFinite(data.bat.percent) && Number.isFinite(limits.battery),
+            data.bat?.percent, limits.battery, true),
+        // The share of time the processor was slowed down to cool; not read on
+        // processors that do not report it (AMD).
+        throttle: reading(Number.isFinite(data.throttle?.percent) && Number.isFinite(limits.throttle), data.throttle?.percent, limits.throttle),
     };
 }
 
