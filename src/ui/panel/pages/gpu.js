@@ -26,12 +26,15 @@ export class GpuPage {
             x_expand: true
         });
 
-        const hwTop = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
+        // No y_align on this row: a non-filling row is sized as if the name
+        // were on one line, and a name that wraps runs into what follows.
+        const hwTop = new St.BoxLayout({ style: 'spacing: 12px;' });
 
         // Brand Chip Badge
         this._gpuChipBox = new St.BoxLayout({
             style: 'background-color: #107c41; border-radius: 6px; padding: 6px 10px;',
-            ...VERTICAL
+            ...VERTICAL,
+            y_align: Clutter.ActorAlign.START
         });
         this._gpuChipLabel1 = new St.Label({ text: 'GEFORCE', style: 'font-size: 0.65em; color: #a0f0c8; font-weight: 300;' });
         this._gpuChipLabel2 = new St.Label({ text: 'RTX', style: 'font-size: 0.9em; color: #ffffff; font-weight: bold;' });
@@ -173,8 +176,8 @@ export class GpuPage {
     _newGpuCard(g) {
         const box = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL, x_expand: true });
 
-        const top = new St.BoxLayout({ style: 'spacing: 12px;', y_align: Clutter.ActorAlign.CENTER });
-        const chip = new St.BoxLayout({ ...VERTICAL });
+        const top = new St.BoxLayout({ style: 'spacing: 12px;' });
+        const chip = new St.BoxLayout({ ...VERTICAL, y_align: Clutter.ActorAlign.START });
         const line1 = new St.Label();
         const line2 = new St.Label();
         chip.add_child(line1);
@@ -190,8 +193,6 @@ export class GpuPage {
         top.add_child(desc);
         box.add_child(top);
 
-        // Beside the bar, not the name: next to a name that wraps, St measures
-        // the row too short and the driver line runs into what follows.
         const loadRow = new St.BoxLayout({ style: 'margin-top: 8px; spacing: 10px;', x_expand: true });
         const bar = new ProgressBar(6, 0.2, 0.82, 0.48);
         bar.y_align = Clutter.ActorAlign.CENTER;
