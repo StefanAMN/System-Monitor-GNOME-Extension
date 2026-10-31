@@ -71,6 +71,9 @@ export const ALERTS = {
     // Slowed down to cool: the temperature itself may be under its limit, so no value turns red.
     throttle: { tab: 'thermal', value: null, name: N_('Slowed by heat'), title: N_('The processor slows down to cool') },
 };
+// GPUs with a chart of their own on a machine with several (their series are
+// allocated when they appear, so this bounds the memory).
+export const GPU_CHARTS = 4;
 export const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 
 export const WATT_SCALE = { autoScale: true, maxVal: 10, formatValue: v => `${v < 10 ? v.toFixed(1) : Math.round(v)}W` };

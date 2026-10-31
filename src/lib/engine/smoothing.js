@@ -91,14 +91,18 @@ export class DisplayAverage {
                 out.cpu.cores = data.cpu.cores.map((value, i) => this._mean(v, `core${i}`, value, fresh, now));
         }
         if (data.gpu?.present) {
-            // Per card: the one shown can change.
+            // Per card: the one shown can change, and the GPU page shows them all.
             const fresh = data.gpu !== raw.gpu;
             const key = data.gpu.key ?? '';
-            out.gpu = {
-                ...data.gpu,
-                percent: this._mean(v, `gpu${key}`, data.gpu.percent, fresh, now),
-                powerDraw: this._mean(v, `gpuPower${key}`, data.gpu.powerDraw, fresh, now),
-            };
+            const averaged = (g, add) => ({
+                ...g,
+                percent: this._mean(v, `gpu${g.key ?? ''}`, g.percent, add, now),
+                powerDraw: this._mean(v, `gpuPower${g.key ?? ''}`, g.powerDraw, add, now),
+            });
+            const gpus = data.gpu.gpus?.map(g => averaged(g, fresh));
+            // The one shown is one of those: its reading counts once.
+            out.gpu = averaged(data.gpu, fresh && !gpus?.some(g => g.key === key));
+            if (gpus) out.gpu.gpus = gpus;
         }
         if (data.pwr) {
             const fresh = data.pwr !== raw.pwr;

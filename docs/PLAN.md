@@ -1555,3 +1555,20 @@ Owner: values go up and down oddly (power 4 W to 6 W and back within seconds); t
 **Choices from measurement** (100 s of real power at 2 s; direction reversals): raw 27; weight 0.5: 25; weight 0.25: 17; 10 s average: 13; 20 s: 11; 10 s in whole watts: 7. Updating only on a change of at least 0.5 W or 10 %: 25, with bigger jumps.
 
 **Proof:** lint clean; test-unit 654 passed, including the real power figures above (reversals at least halved, a real rise visible within 10 s); test-ui and test-i18n passed, the panel's power values checked as whole watts. test-overhead: menu closed +0.30 %, overview +3.63 %, CPU tab +2.27 %, within the earlier runs' spread. The top-bar label keeps room for two digits (`99W`), about what `9.9W` took. Not run: power on battery (UPower's figure), a GPU reporting its own power.
+
+# Every GPU on the GPU tab at once (2026-10-31)
+
+Owner: track only one GPU, or let the GPU tab show both. Chosen: show them all. Tracking one would hide a real load (a game on the dedicated GPU while the integrated one drives the screen) and would need a setting to say which.
+
+**Problem:** the page's main card and its chart followed the busiest GPU, so with two GPUs the model, memory and temperature changed under the reader, and one chart joined two GPUs' loads into one line.
+
+**Change:**
+- Interface: with two or more GPUs the page shows one card per GPU, in the collector's order (NVIDIA, then card0, card1), which never reorders: chip, model, driver, load and bar, its own chart, and only the readings it reports. A sleeping GPU reads "asleep" with nothing else. The single-GPU layout is unchanged. The All GPUs card is gone: these cards replace it.
+- Engine: one ring buffer and two bucket series per GPU, allocated once when a machine turns out to have several, at most `GPU_CHARTS` (4) so memory stays bounded; a further GPU has its card without a chart. Nothing is allocated on a single-GPU machine and nothing is kept on disk. `DisplayAverage` averages each GPU's load and power (one series per GPU, also when it is the one shown), and the glide already descends into `gpus`.
+- Unchanged: the top bar, the overview card and the `gpu` series hold one number, the busiest awake GPU (`pickShownGpu`); the tooltip lists the others; the alert watches the busiest. The HAL is untouched: it already read every GPU each sample, so no extra reads.
+
+**Sampling overhead:** none added with the panel closed (cards update only while the GPU tab is open). One more ring-buffer push and bucket add per GPU per reading on machines with several.
+
+**Edge cases:** a GPU going to sleep or waking keeps its card and chart; the set changing (a dock, a driver loaded late) rebuilds the cards and drops their charts from the redraw list; a fifth GPU has no chart; partial readings leave rows out rather than show placeholders.
+
+**Proof:** unit (averages per GPU, no reading counted twice, the order stays); test-ui through the real poll on two and three GPUs: one card each in order, no main card, values and rows per GPU, no cut-off text, each chart on its own series, the 1 h range through a real click and a chart's readout through real pointer motion, back to one layout on one GPU; prefs and panel on GNOME 46 to 51 in CI. Not run: a real machine with two GPUs (none here), AMD or NVIDIA on real hardware.

@@ -5,14 +5,15 @@ import Shell from 'gi://Shell';
 
 import { BatteryTracker } from '../../lib/engine/batterytracker.js';
 import { powerReadout, thermalUnavailable } from '../../lib/common/present.js';
-import { RANGES } from '../../lib/engine/longhistory.js';
+import { RANGES, BucketSeries } from '../../lib/engine/longhistory.js';
+import { RingBuffer } from '../../lib/engine/ringbuffer.js';
 import { DisplayAverage, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
 import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
 import { Sparkline } from './widgets.js';
 import { formatTemp } from '../../lib/common/format.js';
 import { _, fill } from '../../lib/common/i18n.js';
 import { logOnce } from '../../lib/common/utils.js';
-import { HISTORY_CAPACITY, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, GPU_EVERY_US, PROCESS_EVERY_US, MIN_GAP_US, GLIDE_MAX_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, SEARCH_ROWS, HISTORY_KEYS, SPARK_SCALES, CHART_NAMES } from './constants.js';
+import { HISTORY_CAPACITY, GPU_CHARTS, MIN_RESAMPLE_US, POLL_DEADLINE_MS, ALERT_DISK_EVERY_US, ALERT_GPU_EVERY_US, GPU_EVERY_US, PROCESS_EVERY_US, MIN_GAP_US, GLIDE_MAX_US, BACKGROUND_EVERY_US, NET_USAGE_SAVE_US, GLIDE_FRAME_MS, PROCESS_ROWS, SEARCH_ROWS, SPARK_SCALES, CHART_NAMES } from './constants.js';
 
 export class PollingMethods {
     /** Pinned metrics as stored, minus unknown keys and duplicates. */
@@ -49,7 +50,7 @@ export class PollingMethods {
         this._gapUs = Math.max(2.5 * intervalMs * 1000, MIN_GAP_US);
 
         // Samples taken at another cadence would distort the time axis.
-        for (const key of HISTORY_KEYS) this._hist[key].clear();
+        for (const key of this._histKeys) this._hist[key].clear();
         const span = Math.round(interval * HISTORY_CAPACITY);
         // Translators: how much a chart shows, kept short: "2m", "60s".
         const spanLabel = span > 60 && span % 60 === 0 ? fill(_('{m}m'), { m: span / 60 }) : fill(_('{s}s'), { s: span });
@@ -185,7 +186,32 @@ export class PollingMethods {
             this._pushHistory('netTx', data.net.total.txRate / 1000, now);
         }
         if (need.thm) this._pushHistory('thm', data.thm.packageTemp, now);
-        if (need.gpu && data.gpu.present) this._pushHistory('gpu', data.gpu.percent, now);
+        if (need.gpu && data.gpu.present) {
+            this._pushHistory('gpu', data.gpu.percent, now);
+            if (data.gpu.gpus?.length > 1) {
+                for (const g of data.gpu.gpus) {
+                    const hist = this._gpuHistKey(g.key);
+                    if (hist) this._pushHistory(hist, g.percent, now);
+                }
+            }
+        }
+    }
+
+    /**
+     * The series of one GPU of several: allocated once, when it first appears,
+     * for at most GPU_CHARTS GPUs. Null for a GPU past those.
+     */
+    _gpuHistKey(key) {
+        const known = this._gpuHist.get(key);
+        if (known || this._gpuHist.size >= GPU_CHARTS) return known ?? null;
+        const hist = `gpu:${key}`;
+        this._gpuHist.set(key, hist);
+        this._hist[hist] = new RingBuffer(HISTORY_CAPACITY);
+        for (const [range, spec] of Object.entries(RANGES)) {
+            if (spec) this._long[range][hist] = new BucketSeries(spec.bucketUs, spec.capacity);
+        }
+        this._histKeys.push(hist);
+        return hist;
     }
 
     /**
@@ -213,9 +239,17 @@ export class PollingMethods {
             values.netTx = data.net.total.txRate / 1000;
         }
         if (need.thm && !thermalUnavailable(data.thm)) values.thm = data.thm.packageTemp;
-        if (need.gpu && data.gpu.present) values.gpu = data.gpu.percent;
+        if (need.gpu && data.gpu.present) {
+            values.gpu = data.gpu.percent;
+            if (data.gpu.gpus?.length > 1) {
+                for (const g of data.gpu.gpus) {
+                    const hist = this._gpuHistKey(g.key);
+                    if (hist) values[hist] = g.percent;
+                }
+            }
+        }
         for (const series of Object.values(this._long)) {
-            for (const key of HISTORY_KEYS) {
+            for (const key of this._histKeys) {
                 if (key in values) series[key].add(values[key], now);
                 else series[key].advance(now);
             }
@@ -485,7 +519,7 @@ export class PollingMethods {
         const spark = new Sparkline(this._hist[key], height, Object.assign({}, options, scale));
         spark.histKey = key;
         // The detail charts answer the pointer, so they need a name.
-        if (options.showGrid) spark.accessible_name = fill(_('{chart} over time'), { chart: CHART_NAMES[key] });
+        if (options.showGrid) spark.accessible_name = fill(_('{chart} over time'), { chart: CHART_NAMES[key] ?? CHART_NAMES.gpu });
         // Pages are built on first visit, after polling has started.
         if (this._spanLabel) spark.setSpanLabel(this._spanLabel);
         if (this._sampleSeconds) spark.setSampleSeconds(this._sampleSeconds);
