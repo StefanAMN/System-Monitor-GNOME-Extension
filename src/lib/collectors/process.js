@@ -69,7 +69,8 @@ export function cpuPercent(prev, cur, deltaSeconds, clkTck) {
  * Costs nothing extra to collect; the kernel truncates comm to 15 bytes, so
  * helpers that rename themselves (e.g. browser content processes) form
  * their own group. Summed RSS counts pages shared between members once per
- * member, so a group's memory is an upper bound.
+ * member, so a group's memory here is an upper bound; for the memory list
+ * readGroupMemory then replaces it.
  * @param {{comm: string, pid: number, cpu: number, rss: number, rssBytes: number, mem: number}[]} rows
  */
 /**
@@ -121,6 +122,8 @@ const MIN_RATE_INTERVAL_S = 0.25;
 
 // Files read per main-loop slice: ~0.3 ms of work, far below a frame.
 const BATCH = 32;
+// Groups read for their real memory, as a multiple of the rows wanted.
+const GROUP_MEMORY_MARGIN = 3;
 
 function listPids() {
     // GLib.Dir: ~0.8 ms for 500 entries, a third of a GFileEnumerator.
@@ -166,7 +169,78 @@ export function parseProcIo(text) {
     return read && write ? { read: Number(read[1]), write: Number(write[1]) } : null;
 }
 
-function readAllStats(handle, onChunk, withIo = false) {
+/**
+ * Pages from /proc/<pid>/statm: `shared` are those backed by a file or shared
+ * memory, the part several processes can hold at once.
+ * @returns {?{resident: number, shared: number}}
+ */
+export function parseStatm(text) {
+    const fields = text.split(' ');
+    const resident = Number(fields[1]);
+    const shared = Number(fields[2]);
+    return Number.isFinite(resident) && Number.isFinite(shared) ? { resident, shared } : null;
+}
+
+/**
+ * Pages a group of processes holds: each one's private pages, and the largest
+ * shared part once. Adding up RSS counts libraries and shared memory once per
+ * member, which read about twice the proportional figure (PSS) on the Electron
+ * apps and browsers measured (docs/PLAN.md); PSS itself (smaps_rollup) costs
+ * far more per process and takes the process's memory lock.
+ * @param {{resident: number, shared: number}[]} members
+ */
+export function groupMemoryPages(members) {
+    let priv = 0;
+    let shared = 0;
+    for (const m of members) {
+        priv += Math.max(0, m.resident - m.shared);
+        shared = Math.max(shared, m.shared);
+    }
+    return priv + shared;
+}
+
+/**
+ * Replace the summed RSS of `groups` of several processes by groupMemoryPages,
+ * BATCH files per idle slice like the stat files. A member that has exited
+ * counts for nothing; a group none of whose members could be read stays as it was.
+ * @param {object[]} groups from groupByName (changed in place)
+ * @param {{id: number}} handle receives the idle source id, for cancellation
+ * @param {string} [proc] procfs root (a fixture in tests)
+ * @returns {Promise<boolean>} false when cancelled
+ */
+export function readGroupMemory(groups, handle, proc = '/proc') {
+    const todo = [];
+    for (const group of groups) {
+        if (group.count > 1) for (const { pid } of group.members) todo.push([group, pid]);
+    }
+    if (todo.length === 0) return Promise.resolve(true);
+    const read = new Map();
+    return new Promise(resolve => {
+        let next = 0;
+        handle.resolve = resolve;
+        handle.id = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            for (const end = Math.min(next + BATCH, todo.length); next < end; next++) {
+                const [group, pid] = todo[next];
+                try {
+                    const pages = parseStatm(decoder.decode(GLib.file_get_contents(`${proc}/${pid}/statm`)[1]));
+                    if (pages && read.has(group)) read.get(group).push(pages);
+                    else if (pages) read.set(group, [pages]);
+                } catch (e) {
+                    // Exited since the list was read: normal, as in readAllStats.
+                    if (!e.matches?.(GLib.FileError, GLib.FileError.NOENT) && !e.matches?.(GLib.FileError, GLib.FileError.FAILED))
+                        noteReadError(e);
+                }
+            }
+            if (next < todo.length) return GLib.SOURCE_CONTINUE;
+            handle.id = 0;
+            for (const [group, members] of read) group.rss = groupMemoryPages(members);
+            resolve(true);
+            return GLib.SOURCE_REMOVE;
+        });
+    });
+}
+
+function readAllStats(handle, onChunk, withIo = false, ioDenied = null) {
     return new Promise((resolve) => {
         let pids = null;
         let next = 0;
@@ -189,7 +263,11 @@ function readAllStats(handle, onChunk, withIo = false) {
             const io = withIo ? new Map() : null;
             let denied = 0;
             for (; next < end; next++) {
-                if (withIo) {
+                if (withIo && ioDenied?.has(pids[next])) {
+                    // Refused before: it stays refused while the process lives,
+                    // and each refusal costs an exception.
+                    denied++;
+                } else if (withIo) {
                     try {
                         const parsed = parseProcIo(decoder.decode(GLib.file_get_contents(`/proc/${pids[next]}/io`)[1]));
                         if (parsed) io.set(Number(pids[next]), parsed);
@@ -197,9 +275,10 @@ function readAllStats(handle, onChunk, withIo = false) {
                         // Another user's process: its io file needs ptrace
                         // rights. Counted and shown on the Disk page; exits
                         // are normal as above.
-                        if (e.matches?.(GLib.FileError, GLib.FileError.ACCES) || e.matches?.(GLib.FileError, GLib.FileError.PERM))
+                        if (e.matches?.(GLib.FileError, GLib.FileError.ACCES) || e.matches?.(GLib.FileError, GLib.FileError.PERM)) {
                             denied++;
-                        else if (!e.matches?.(GLib.FileError, GLib.FileError.NOENT) && !e.matches?.(GLib.FileError, GLib.FileError.FAILED))
+                            ioDenied?.add(pids[next]);
+                        } else if (!e.matches?.(GLib.FileError, GLib.FileError.NOENT) && !e.matches?.(GLib.FileError, GLib.FileError.FAILED))
                             noteReadError(e);
                     }
                 }
@@ -228,6 +307,7 @@ function readAllStats(handle, onChunk, withIo = false) {
 export class ProcessSampler {
     constructor() {
         this._prev = new Map(); // pid -> { start, ticks, time, seen }
+        this._ioDenied = new Set(); // pids (as listed) whose io file was refused
         this._prevTime = 0;
         this._seq = 0;
         this._handle = { id: 0 };
@@ -298,11 +378,14 @@ export class ProcessSampler {
                 }
                 rows.push(row);
             }
-        }, io);
+        }, io, this._ioDenied);
         if (!done || this._destroyed) return null;
         // Exited processes must not accumulate.
         for (const [pid, prev] of this._prev) {
             if (prev.seen !== seq) this._prev.delete(pid);
+        }
+        for (const pid of this._ioDenied) {
+            if (!this._prev.has(Number(pid))) this._ioDenied.delete(pid);
         }
         this._prevTime = GLib.get_monotonic_time();
         this._prevIo = io;
@@ -310,21 +393,35 @@ export class ProcessSampler {
         const groups = groupByName(rows);
         // A paused group uses no CPU: by CPU it would drop out of the list
         // it can be resumed from, so paused groups come first there.
+        const byRss = (a, b) => b.rss - a.rss;
         groups.sort(io
             ? (a, b) => (b.ioRate - a.ioRate) || (b.cpu - a.cpu)
             : byMemory
-                ? (a, b) => b.rss - a.rss
+                ? byRss
                 : (a, b) => (b.paused - a.paused) || (b.cpu - a.cpu) || (b.rss - a.rss));
+        let top = filterGroups(groups, filter);
+        if (byMemory) {
+            // Only the likely rows are read: a group's figure can only fall,
+            // so those well past the limit by summed RSS stay out of the list.
+            top = top.slice(0, limit * GROUP_MEMORY_MARGIN);
+            if (!await readGroupMemory(top, this._handle) || this._destroyed) return null;
+            for (const group of top) {
+                group.rssBytes = group.rss * pageSize;
+                group.mem = memTotal > 0 ? (group.rssBytes / memTotal) * 100 : 0;
+            }
+            top.sort(byRss);
+        }
         return {
             warmingUp,
             count: rows.length,
             ioDenied,
-            top: filterGroups(groups, filter).slice(0, limit)
+            top: top.slice(0, limit)
         };
     }
 
     reset() {
         this._prev.clear();
+        this._ioDenied.clear();
         this._prevTime = 0;
     }
 }

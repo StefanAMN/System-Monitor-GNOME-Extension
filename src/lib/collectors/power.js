@@ -141,27 +141,31 @@ export class PowerSampler {
                     try {
                         const energyStr = await readFileAsync(item.energyPath);
                         const energy = parseFloat(energyStr.trim()) || 0;
+                        // Timed at the read: the probe above and the reads
+                        // before this one are not part of its interval.
+                        const time = GLib.get_monotonic_time();
 
                         if (this._prevEnergy[item.baseDir] !== undefined) {
                             const watts = raplWatts(this._prevEnergy[item.baseDir], energy, item.maxRange,
-                                (now - this._prevTime[item.baseDir]) / 1000000);
+                                (time - this._prevTime[item.baseDir]) / 1000000);
                             if (watts !== null) packagePower += watts;
                         }
 
                         this._prevEnergy[item.baseDir] = energy;
-                        this._prevTime[item.baseDir] = now;
+                        this._prevTime[item.baseDir] = time;
                     } catch (e) { noteReadError(e); }
                 }
                 for (const item of this._uncorePaths) {
                     try {
                         const energy = parseFloat((await readFileAsync(item.energyPath)).trim()) || 0;
+                        const time = GLib.get_monotonic_time();
                         if (this._prevEnergy[item.baseDir] !== undefined) {
                             const watts = raplWatts(this._prevEnergy[item.baseDir], energy, item.maxRange,
-                                (now - this._prevTime[item.baseDir]) / 1000000);
+                                (time - this._prevTime[item.baseDir]) / 1000000);
                             if (watts !== null) uncorePower = (uncorePower ?? 0) + watts;
                         }
                         this._prevEnergy[item.baseDir] = energy;
-                        this._prevTime[item.baseDir] = now;
+                        this._prevTime[item.baseDir] = time;
                     } catch (e) { noteReadError(e); }
                 }
             }

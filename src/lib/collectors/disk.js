@@ -1,6 +1,17 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { readProcFile, logOnce } from '../common/utils.js';
+import { counterDelta } from './network.js';
+
+/**
+ * How full a filesystem is, as df counts it: used against what is usable.
+ * Blocks reserved for root (5 % on ext4 by default) are in neither figure, so
+ * a disk an ordinary user can no longer write to reads 100 %, not 95 %.
+ */
+export function spaceUsedPercent(used, free) {
+    const usable = used + free;
+    return usable > 0 ? Math.max(0, Math.min(100, (used / usable) * 100)) : 0;
+}
 
 function queryFilesystem(path) {
     return new Promise((resolve) => {
@@ -20,13 +31,12 @@ function queryFilesystem(path) {
                     if (used === 0 && size > free) {
                         used = size - free;
                     }
-                    const percent = size > 0 ? (used / size) * 100 : 0;
                     resolve({
                         mount: path,
                         size: size,
                         used: used,
                         free: free,
-                        percent: Math.max(0, Math.min(100, percent))
+                        percent: spaceUsedPercent(used, free)
                     });
                 } catch (e) {
                     resolve(null);
@@ -99,23 +109,25 @@ export function ioUtilization(curTicks, prevTicks, elapsedMs) {
  * unprivileged GNOME Shell security model, focusing instead on system-wide physical disk throughput and mounts.
  */
 export class DiskSampler {
-    constructor() {
-        this._prevRead = 0;
-        this._prevWrite = 0;
-        this._prevIoTicks = 0;
-        this._prevDiskTicks = new Map();
+    /** @param {string} [proc] /proc, or a fixture in tests */
+    constructor(proc = '/proc') {
+        this._proc = proc;
+        this._prevDisks = new Map(); // name -> its parseDiskstats entry at the last reading
         this._prevTime = 0;
         this._maxSpeed = 100 * 1024 * 1024; // 100 MB/s initial baseline
         this._cachedMounts = [];
         this._lastMountCheck = 0;
         this._cachedDetailed = null;
+        this._mountQuery = 0;
+        this._refreshing = false;
     }
 
     async _queryMounts(detailed = true) {
+        const query = ++this._mountQuery;
         const mountList = [{ device: '', mount: '/' }];
         if (detailed) {
             try {
-                mountList.push(...parseMounts(readProcFile('/proc/mounts')));
+                mountList.push(...parseMounts(readProcFile(`${this._proc}/mounts`)));
             } catch (e) {
                 logOnce(`Failed to read /proc/mounts: ${e.message}`, 'error');
             }
@@ -123,48 +135,47 @@ export class DiskSampler {
 
         const spacePromises = mountList.map(m => queryFilesystem(m.mount));
         const rawResults = (await Promise.all(spacePromises)).filter(r => r !== null);
+        // An older query that answers late (a disk spinning up) changes nothing.
+        if (query !== this._mountQuery) return;
         this._cachedMounts = rawResults;
         this._lastMountCheck = GLib.get_monotonic_time();
     }
 
+    /** Update the free space behind the readings: a slow disk delays only this figure. */
+    _refreshMounts(detailed) {
+        if (this._refreshing) return;
+        this._refreshing = true;
+        this._queryMounts(detailed)
+            .catch(e => logOnce(`Failed to query mounts: ${e.message}`, 'error'))
+            .finally(() => {
+                this._refreshing = false;
+            });
+    }
+
     async sample(detailed = true) {
         try {
-            const now = GLib.get_monotonic_time();
-
-            // 1. Refresh Mounts Space periodically (every 15 seconds)
-            // The overview only needs '/'; a switch to the disk tab must not wait
-            // for the cache to expire before the other mounts show up.
-            if (this._cachedMounts.length === 0 || this._cachedDetailed !== detailed ||
-                (now - this._lastMountCheck) > 15000000) {
-                await this._queryMounts(detailed);
-                this._cachedDetailed = detailed;
-            }
-            const spaceResults = this._cachedMounts;
-
-            // 2. Parse Disk I/O throughput & hardware active time
-            let totalReadBytes = 0;
-            let totalWriteBytes = 0;
-            let totalIoTicks = 0;
+            // 1. Disk I/O throughput & hardware active time, first and timed
+            // at the read: a rate must not include how long the mounts take.
+            let readBytes = 0;
+            let writeBytes = 0;
             let maxDiskIoPercent = 0;
-            const currentDiskTicks = new Map();
-
-            let deltaTimeMs = 0;
-            if (this._prevTime > 0) {
-                const deltaTime = (now - this._prevTime) / 1000000;
-                deltaTimeMs = deltaTime * 1000;
-            }
+            const disks = new Map();
+            let now = GLib.get_monotonic_time();
 
             try {
-                const diskstats = readProcFile('/proc/diskstats');
+                const diskstats = readProcFile(`${this._proc}/diskstats`);
+                now = GLib.get_monotonic_time();
+                const deltaTimeMs = this._prevTime > 0 ? (now - this._prevTime) / 1000 : 0;
                 for (const disk of parseDiskstats(diskstats)) {
-                    totalReadBytes += disk.sectorsRead * 512;
-                    totalWriteBytes += disk.sectorsWritten * 512;
-                    totalIoTicks += disk.ioTicks;
-                    currentDiskTicks.set(disk.name, disk.ioTicks);
-                    if (this._prevDiskTicks.has(disk.name)) {
-                        const util = ioUtilization(disk.ioTicks, this._prevDiskTicks.get(disk.name), deltaTimeMs);
-                        if (util > maxDiskIoPercent) maxDiskIoPercent = util;
-                    }
+                    disks.set(disk.name, disk);
+                    // Per disk: one attached since the last reading counts from
+                    // the next, and one removed does not hide the others' traffic.
+                    const prev = this._prevDisks.get(disk.name);
+                    if (!prev) continue;
+                    readBytes += counterDelta(disk.sectorsRead, prev.sectorsRead) * 512;
+                    writeBytes += counterDelta(disk.sectorsWritten, prev.sectorsWritten) * 512;
+                    const util = ioUtilization(disk.ioTicks, prev.ioTicks, deltaTimeMs);
+                    if (util > maxDiskIoPercent) maxDiskIoPercent = util;
                 }
             } catch (e) {
                 logOnce(`Failed to read /proc/diskstats: ${e.message}`, 'error');
@@ -177,8 +188,8 @@ export class DiskSampler {
             if (this._prevTime > 0) {
                 const deltaTime = (now - this._prevTime) / 1000000;
                 if (deltaTime > 0) {
-                    readRate = Math.max(0, (totalReadBytes - this._prevRead) / deltaTime);
-                    writeRate = Math.max(0, (totalWriteBytes - this._prevWrite) / deltaTime);
+                    readRate = readBytes / deltaTime;
+                    writeRate = writeBytes / deltaTime;
 
                     // Busiest device's active time (io_ticks), the same figure
                     // iostat reports as %util.
@@ -186,11 +197,20 @@ export class DiskSampler {
                 }
             }
 
-            this._prevRead = totalReadBytes;
-            this._prevWrite = totalWriteBytes;
-            this._prevIoTicks = totalIoTicks;
-            this._prevDiskTicks = currentDiskTicks;
+            this._prevDisks = disks;
             this._prevTime = now;
+
+            // 2. Mounts' space. The overview only needs '/'; a switch to the
+            // disk tab must not wait for the cache to expire before the other
+            // mounts show up. Otherwise refreshed every 15 seconds, behind the
+            // reading: this one shows the last figure.
+            if (this._cachedMounts.length === 0 || this._cachedDetailed !== detailed) {
+                await this._queryMounts(detailed);
+                this._cachedDetailed = detailed;
+            } else if ((now - this._lastMountCheck) > 15000000) {
+                this._refreshMounts(detailed);
+            }
+            const spaceResults = this._cachedMounts;
 
             return {
                 mounts: spaceResults,

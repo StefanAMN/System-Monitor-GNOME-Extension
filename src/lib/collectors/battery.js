@@ -203,13 +203,11 @@ export class BatterySampler {
 
     async _sampleSysfs(batName) {
         try {
-            let capacityExists = false;
+            let percentStr = null;
             try {
-                await readFileAsync(`${this._supply}/${batName}/capacity`);
-                capacityExists = true;
+                percentStr = await readFileAsync(`${this._supply}/${batName}/capacity`);
             } catch (e) { noteReadError(e); }
-            if (capacityExists) {
-                const percentStr = await readFileAsync(`${this._supply}/${batName}/capacity`);
+            if (percentStr !== null) {
                 const percent = parseFloat(percentStr.trim()) || 0;
 
                 const statusStr = await readFileAsync(`${this._supply}/${batName}/status`);
@@ -234,7 +232,8 @@ export class BatterySampler {
                     const efdStr = await readFileAsync(`${this._supply}/${batName}/energy_full_design`);
                     energyFullDesign = (parseInt(efdStr.trim(), 10) || 0) / 1000000;
                     const pnStr = await readFileAsync(`${this._supply}/${batName}/power_now`);
-                    powerNow = parseInt(pnStr.trim(), 10) || 0;
+                    // Some drivers sign the figure by direction; `status` says which.
+                    powerNow = Math.abs(parseInt(pnStr.trim(), 10) || 0);
                 } catch (e) {
                     try {
                         const cnStr = await readFileAsync(`${this._supply}/${batName}/charge_now`);
@@ -260,7 +259,7 @@ export class BatterySampler {
                         energyFullDesign = chargeFullDesign * voltage;
                         const cnCurrentStr = await readFileAsync(`${this._supply}/${batName}/current_now`);
                         const currentNowUa = parseInt(cnCurrentStr.trim(), 10) || 0;
-                        powerNow = Math.round(currentNowUa * voltage);
+                        powerNow = Math.abs(Math.round(currentNowUa * voltage));
                     } catch (e2) { noteReadError(e2); }
                 }
 

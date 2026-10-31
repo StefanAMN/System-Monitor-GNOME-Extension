@@ -1501,3 +1501,41 @@ Owner: the slider should scale about exponentially, precise in the very frequent
 **Proof:** unit (stops, nearest stop, migration on a memory backend, old backups). test-ui under Orchis-Pink, real pointer: drag to both ends and a sixth along; in the shell 10-13 ticks in 3 s at 0.25 s, 3-5 process and GPU reads in 4 s, no ticks in 2 s at 30 s. `test-overhead 0`, one run on a quiet machine: 2 s default closed +0.33 % (budget 1 %); 0.25 s closed +4.33 %, CPU tab +7.10 %; an earlier run with another shell test running read +3.60 % and +14.87 %.
 
 **Open:** the 1 % budget holds at the default, not below about 1 s (cost scales with the rate); that is the owner's choice per setting, and the row's tooltip says so. Sub-second intervals with a real NVIDIA card were not run.
+
+# Tracking audit: accuracy and overhead (2026-10-31)
+
+Owner: look through the extension for bugs, and ways to use fewer resources or be more accurate.
+
+**Where the cost is (this machine, 12 threads, about 600 processes, 2 s interval):** all the collectors of a closed-menu poll add up to under 1 ms, about 0.04 % of a core; `test-overhead` measures +0.2 to +0.6 % in all from run to run, so most of it is redrawing the top bar. Parsing was not rewritten: nothing there would show. Only the Disk tab's list was worth trimming.
+
+**Fixed, each reproduced first (the new unit tests fail on the old collectors; figures from this machine):**
+
+| Reading | Was | Now | Cause |
+|---|---|---|---|
+| Intel GPU busy | 0 % once a minute (i915 without `gpu_busy_percent`: `16 16 15 0 16 16`) | `16 16 16 15 17 17` | looking for the cards again every 60 s threw away the RC6 baseline. Unpinned, it is read every 30 s, so every other reading was 0 and a GPU alert could never last its 30 s |
+| Disk space % | 49.3 %, `df` 52 % | 52.0 % | counted against the whole size, 25.6 GB of it reserved for root. A disk a user can no longer write to read 95 %, so the default 95 % alert came only when it was already full |
+| Memory of a group of processes | claude-desktop 1.82 GB, PSS 1.02 | 1.04 GB | summed RSS counts shared pages once per member. Now private pages plus the largest shared part, from `statm`, for three times the rows shown. Within about 10 % of PSS on the largest groups here (small ones can be further off: Web Content 0.13 GB against 0.05), and a single process stays its RSS; `smaps_rollup` is about 0.6 ms per process and takes each one's memory lock |
+| Disk rates | a disk attached counted its whole past as traffic (6 GB/s in the test), one removed hid the others | per disk | totals were compared across readings |
+| Disk rates | high by the time the mounts took to answer, every 15 s | timed at the read | clock read before the mount query, counters after it. A slow disk also held the whole reading up: the refresh now runs behind it |
+| CPU power | high once a minute by the probe's time (40 W for a true 10 W in the test) | timed at each read | same mistake. Throttle share likewise |
+| GPU time per app | a client ending made the unit's sum fall, read as a counter reset: the others' whole lifetime counted again | never falls | per-client deltas in `GpuUsageSampler` (`_clients`, bounded: forgotten after 20 readings) |
+| Top bar at long intervals | at 30 s, still half the reading from 30 s ago | weight grows above 2 s (`smoothAlpha`) | a fixed weight per reading |
+| Battery from sysfs | a driver signing `power_now` read as negative watts with no time left | its size | fallback path only: UPower normally answers |
+
+**Resources:** a refused `/proc/<pid>/io` (328 here) is remembered for the process's life instead of throwing every time: Disk tab list 11.8 to 9.5 ms a sample. The Memory tab's list costs 0.6 ms more for the corrected figures. The battery fallback no longer reads `capacity` twice.
+
+**Left as they are:**
+- The Thermal tab reads the NVMe sensors at every poll: 27 ms each (an admin command to the drive, in a worker thread), and it keeps the drive from its low-power state while that tab is open. Top bar and tracking read only the CPU sensor.
+- `nvidia-smi` is a process per reading. Pinned at 2 s it may well exceed the 1 % budget; no NVIDIA card here to measure. `nvidia-smi --loop` would be the fix, to be proven on a machine with one.
+- The first power reading after enabling shows 0.0 W for one interval, since `powerReadout` has no state for "no baseline yet".
+- A rate shown right after opening the menu is an average since the last background read, for one interval. It is the right figure for the long charts.
+
+**Proof:** lint clean; test-unit 645 passed (11 of the new checks fail against the old collectors); test-ui passed. `test-overhead 0`, three runs each, alternating; the spread between runs of the same code is larger than any difference, and all are within budget:
+
+| | Before | After |
+|---|---|---|
+| Menu closed, 8 metrics, 2 s | +0.17, +0.50, +0.40 % | +0.33, +0.60, +0.37 % |
+| Menu open, overview | +3.13, +4.20, +4.20 % | +4.03, +4.30, +3.67 % |
+| Menu open, CPU tab | +2.43, +2.40, +2.53 % | +2.60, +2.70, +2.03 % |
+
+Not run: a real attached or removed disk, a slow real mount, a client ending in a real GPU app (fixtures only), a battery driver that signs its power, AMD or NVIDIA GPUs.
