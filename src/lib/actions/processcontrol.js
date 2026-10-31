@@ -10,7 +10,7 @@ import { F_NICE, F_STARTTIME } from '../collectors/process.js';
 // kernel reports them (comm, at most 15 bytes).
 const SESSION_CRITICAL = new Set([
     'systemd', 'gnome-shell', 'gnome-session-b', 'gnome-session-c', 'gnome-session-i',
-    'Xwayland', 'dbus-daemon', 'dbus-broker', 'dbus-broker-lau', 'gdm-wayland-ses',
+    'Xorg', 'Xwayland', 'dbus-daemon', 'dbus-broker', 'dbus-broker-lau', 'gdm-wayland-ses',
     'gdm-x-session', 'pipewire', 'wireplumber',
 ]);
 

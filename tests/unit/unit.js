@@ -204,6 +204,7 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     ok(canEnd({ comm: 'firefox', members: [{ pid: 10 }] }, 999), 'end: an ordinary app may be ended');
     ok(!canEnd({ comm: 'gnome-shell', members: [{ pid: 10 }] }, 999), 'end: never the shell');
     ok(!canEnd({ comm: 'Xwayland', members: [{ pid: 10 }] }, 999), 'end: never Xwayland');
+    ok(!canEnd({ comm: 'Xorg', members: [{ pid: 10 }] }, 999), 'end: never the X server (an X11 session has no way back from pausing it)');
     ok(!canEnd({ comm: 'renamed', members: [{ pid: 999 }] }, 999), 'end: never a group holding our own pid');
     ok(!canEnd({ comm: 'init', members: [{ pid: 1 }] }, 999), 'end: never pid 1');
 }
