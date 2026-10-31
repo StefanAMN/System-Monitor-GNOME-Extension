@@ -90,7 +90,7 @@ export default class ResourcePulseExtension extends Extension {
         this._shownFrom = null;
         this._shownTo = null;
         this._shownAt = 0;
-        this._smoothPrev = null;
+        this._average = null;
         this._glideId = 0;
         // Network data per day: counted from the file's last counters once loaded.
         this._netUsage = null;
@@ -553,7 +553,7 @@ export default class ResourcePulseExtension extends Extension {
         this._alerts = null;
         if (this._glideId) GLib.source_remove(this._glideId);
         this._glideId = 0;
-        this._shownFrom = this._shownTo = this._smoothPrev = null;
+        this._shownFrom = this._shownTo = this._average = null;
         // Counters since the last save; the next enable counts from here.
         if (this._netUsage) this._saveNetUsage();
         this._netUsage = null;

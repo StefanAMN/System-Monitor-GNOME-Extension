@@ -80,7 +80,7 @@
     <key name="smooth-transitions" type="b">
       <default>true</default>
       <summary>Smooth Changes</summary>
-      <description>Shown values glide to each new reading over one polling interval; noisy rates are lightly averaged. Alerts and history use the raw readings.</description>
+      <description>Shown values glide to each new reading over one polling interval; CPU, GPU, power, network and disk show their average over 10 s. Alerts and history use the raw readings.</description>
     </key>
     <key name="alert-notify" type="b">
       <default>true</default>
