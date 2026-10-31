@@ -1498,8 +1498,28 @@ async function endProcesses(rp) {
         await hoverShows(bar().pause, 'Pause', row.nameLbl);
         await hoverShows(bar().lower, 'Lower priority', row.nameLbl);
         await hoverShows(bar().confirm, 'End…', row.nameLbl);
-        await clickBar(bar().pause);
-        check(await until(() => processIdentity(pid)?.state === 'T' && bar().pause.label === 'Resume', 3000), `pause: rpendpause is ${processIdentity(pid)?.state}, the button reads '${bar().pause.label}'`);
+        // Rarely on CI the process runs while the button reads Resume, cause
+        // unknown and not reproduced: a failure says how it got there.
+        const seen = [];
+        const watch = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 20, () => {
+            const now = `${processIdentity(pid)?.state}/${bar().pause.label}/${bar().step}`;
+            if (seen.at(-1)?.now !== now) seen.push({ at: Math.round(GLib.get_monotonic_time() / 1000), now });
+            return GLib.SOURCE_CONTINUE;
+        });
+        let paused;
+        try {
+            await clickBar(bar().pause);
+            paused = await until(() => processIdentity(pid)?.state === 'T' && bar().pause.label === 'Resume', 3000);
+        } finally {
+            GLib.source_remove(watch);
+        }
+        const trail = () => {
+            const [, ps] = GLib.spawn_command_line_sync(`ps -o pid,ppid,pgid,sid,stat,comm -p ${pid},${Number(other.get_identifier())}`);
+            const [, sig] = GLib.spawn_command_line_sync(`grep -E '^Sig(Ign|Blk)|^Shd' /proc/${pid}/status`);
+            const decode = bytes => new TextDecoder().decode(bytes).trim().replace(/\s*\n\s*/g, '; ').replace(/\s+/g, ' ');
+            return `${seen.map(s => `${s.at - seen[0].at} ms ${s.now}`).join(', ')}; members ${bar().target?.members.map(m => m.pid)}, pid ${pid}; ${decode(ps)}; ${decode(sig)}`;
+        };
+        check(paused, `pause: rpendpause is ${processIdentity(pid)?.state}, the button reads '${paused ? '' : bar().pause.label}' (${paused ? '' : trail()})`);
         check(row.group.paused && row.icon.icon_name === 'media-playback-pause-symbolic', `pause: the row shows it (icon ${row.icon.icon_name})`);
         // It stays open, also past the next readings, and under its row.
         await sleep(3000);
