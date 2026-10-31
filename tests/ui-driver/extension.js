@@ -1427,9 +1427,17 @@ async function processSearch(rp) {
         rp._indicator.menu.open();
         rp._activeTab = 'cpu';
         rp._updateTabVisibility();
-        await sleep(2 * rp._glideUs / 1000 + 800);
+        // Busier ones fill the list: on a quiet machine an idle loop can be fifth.
+        const noise = [];
+        for (let i = 0; i < 5; i++) {
+            GLib.spawn_command_line_sync(`ln -s /bin/sh ${dir}/rpnoise${i}`);
+            noise.push(Gio.Subprocess.new([`${dir}/rpnoise${i}`, '-c', 'while :; do :; done'], Gio.SubprocessFlags.NONE));
+        }
+        for (let i = 0; i < 25 && shown().filter(comm => comm?.startsWith('rpnoise')).length < 5; i++) await sleep(300);
         const search = rp._procSearch.cpu;
-        check(!shown().includes('rpsearchidle'), `search: the idle process is already among the busiest (${shown().join(', ')})`);
+        const crowded = shown().join(', ');
+        for (const p of noise) p.force_exit();
+        check(!crowded.includes('rpsearchidle'), `search: the idle process is already among the busiest (${crowded})`);
         await scrollIntoView(rp, search.entry);
         await clickActor(search.entry);
         await type('rpsearch');
@@ -1500,11 +1508,23 @@ async function endProcesses(rp) {
         await clickActor(button);
     };
     // The row's button opens the action line; End… asks for confirmation.
-    const openActions = async w => {
-        await scrollIntoView(rp, w.endBtn);
-        await clickActor(w.endBtn);
-        check(bar().step === 'menu' && bar().box.visible, `actions: the row's button left the line '${bar().box.visible ? bar().label.text : 'hidden'}' (step ${bar().step})`);
-        underRow(bar(), rp._procList, w);
+    // By name, not by row: rows are reused, and two busy processes change
+    // places between readings, so a row found earlier may show another by now.
+    const openActions = async comm => {
+        for (let tries = 0; tries < 5; tries++) {
+            const w = await rowFor(comm);
+            await scrollIntoView(rp, w.endBtn);
+            await clickActor(w.endBtn);
+            check(bar().step === 'menu' && bar().box.visible, `actions: the row's button left the line '${bar().box.visible ? bar().label.text : 'hidden'}' (step ${bar().step})`);
+            if (bar().target.comm === comm) {
+                underRow(bar(), rp._procList, w);
+                return w;
+            }
+            // The rows changed places as the pointer got there, as they can for a person.
+            rp._hideEndBar(bar());
+            await sleep(300);
+        }
+        throw new Error(`actions: the line never opened for ${comm}`);
     };
     // The line sits right under its row, in the list.
     const underRow = (b, list, w) => {
@@ -1531,8 +1551,8 @@ async function endProcesses(rp) {
         const moved = Math.abs(over.red - rest.red) + Math.abs(over.green - rest.green) + Math.abs(over.blue - rest.blue) + Math.abs(over.alpha - rest.alpha);
         check(button.hover && moved > 30, `actions: ${name} under the pointer: hover ${button.hover}, colour ${rest.red},${rest.green},${rest.blue},${rest.alpha} -> ${over.red},${over.green},${over.blue},${over.alpha}`);
     };
-    const clickEnd = async w => {
-        await openActions(w);
+    const clickEnd = async comm => {
+        await openActions(comm);
         await clickBar(bar().confirm);
     };
     const { processIdentity } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/collectors/process.js`);
@@ -1545,9 +1565,9 @@ async function endProcesses(rp) {
         const busy = spawn('rpendpause', 'while :; do :; done');
         const other = spawn('rpendother', 'while :; do :; done');
         const pid = Number(busy.get_identifier());
-        const row = await rowFor('rpendpause');
+        await rowFor('rpendpause');
         await rowFor('rpendother');
-        await openActions(row);
+        const row = await openActions('rpendpause');
         check(!bar().label.visible && bar().pause.label === 'Pause' && bar().lower.visible && bar().confirm.label === 'End…' && !bar().cancel.visible,
             `actions: the line offers ${bar().pause.label} / ${bar().lower.visible ? bar().lower.label : '-'} / ${bar().confirm.label}, label '${bar().label.visible ? bar().label.text : ''}', close ${bar().cancel.visible}`);
         // Opened at the panel's bottom edge, it scrolled into view by itself.
@@ -1563,28 +1583,8 @@ async function endProcesses(rp) {
         await hoverShows(bar().pause, 'Pause', row.nameLbl);
         await hoverShows(bar().lower, 'Lower priority', row.nameLbl);
         await hoverShows(bar().confirm, 'End…', row.nameLbl);
-        // Rarely on CI the process runs while the button reads Resume, cause
-        // unknown and not reproduced: a failure says how it got there.
-        const seen = [];
-        const watch = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 20, () => {
-            const now = `${processIdentity(pid)?.state}/${bar().pause.label}/${bar().step}`;
-            if (seen.at(-1)?.now !== now) seen.push({ at: Math.round(GLib.get_monotonic_time() / 1000), now });
-            return GLib.SOURCE_CONTINUE;
-        });
-        let paused;
-        try {
-            await clickBar(bar().pause);
-            paused = await until(() => processIdentity(pid)?.state === 'T' && bar().pause.label === 'Resume', 3000);
-        } finally {
-            GLib.source_remove(watch);
-        }
-        const trail = () => {
-            const [, ps] = GLib.spawn_command_line_sync(`ps -o pid,ppid,pgid,sid,stat,comm -p ${pid},${Number(other.get_identifier())}`);
-            const [, sig] = GLib.spawn_command_line_sync(`grep -E '^Sig(Ign|Blk)|^Shd' /proc/${pid}/status`);
-            const decode = bytes => new TextDecoder().decode(bytes).trim().replace(/\s*\n\s*/g, '; ').replace(/\s+/g, ' ');
-            return `${seen.map(s => `${s.at - seen[0].at} ms ${s.now}`).join(', ')}; members ${bar().target?.members.map(m => m.pid)}, pid ${pid}; ${decode(ps)}; ${decode(sig)}`;
-        };
-        check(paused, `pause: rpendpause is ${processIdentity(pid)?.state}, the button reads '${paused ? '' : bar().pause.label}' (${paused ? '' : trail()})`);
+        await clickBar(bar().pause);
+        check(await until(() => processIdentity(pid)?.state === 'T' && bar().pause.label === 'Resume', 3000), `pause: rpendpause is ${processIdentity(pid)?.state}, the button reads '${bar().pause.label}', the line is for ${bar().target?.comm}`);
         check(row.group.paused && row.icon.icon_name === 'media-playback-pause-symbolic', `pause: the row shows it (icon ${row.icon.icon_name})`);
         // It stays open, also past the next readings, and under its row.
         await sleep(3000);
@@ -1597,14 +1597,13 @@ async function endProcesses(rp) {
         check(await until(() => processIdentity(pid)?.nice === 10 && !bar().lower.visible, 3000), `priority: rpendpause runs at niceness ${processIdentity(pid)?.nice}, the button ${bar().lower.visible ? 'still offered' : 'gone'}`);
         check(bar().box.visible, 'priority: the line closed');
         // Another process's ⋮ moves it there; pressed again, ⋮ closes it.
-        const otherRow = await rowFor('rpendother');
-        await openActions(otherRow);
+        const otherRow = await openActions('rpendother');
         check(bar().target.comm === 'rpendother' && bar().lower.visible, `actions: the line went to ${bar().target?.comm}`);
         await scrollIntoView(rp, otherRow.endBtn);
         await clickActor(otherRow.endBtn);
         check(!bar().box.visible && bar().step === 'idle', 'actions: its ⋮ pressed again did not close the line');
         // Closed, a paused group comes first in the CPU list.
-        await openActions(await rowFor('rpendpause'));
+        await openActions('rpendpause');
         await clickBar(bar().pause);
         await until(() => bar().pause.label === 'Resume', 3000);
         await clickActor((await rowFor('rpendpause')).endBtn);
@@ -1635,8 +1634,7 @@ async function endProcesses(rp) {
 
         // 1. Quits on request.
         const polite = spawn('rpendpolite', 'while :; do :; done');
-        const politeRow = await rowFor('rpendpolite');
-        await clickEnd(politeRow);
+        await clickEnd('rpendpolite');
         check(rp._indicator.menu.isOpen, 'end: clicking the row button closed the menu (the row click went through)');
         check(bar().box.visible && /^End rpendpolite\?/.test(bar().label.text), `end: confirmation is '${bar().box.visible ? bar().label.text : 'hidden'}'`);
         await shot('end-confirm');
@@ -1646,7 +1644,7 @@ async function endProcesses(rp) {
 
         // 2. Ignores the request: Force quit is offered and works.
         const stubborn = spawn('rpendstubborn', 'trap "" TERM; while :; do :; done');
-        await clickEnd(await rowFor('rpendstubborn'));
+        await clickEnd('rpendstubborn');
         await clickBar(bar().confirm);
         check(await until(() => bar().step === 'force', 9000), `end: no Force quit offered ('${bar().label.text}')`);
         check(/did not quit/.test(bar().label.text) && bar().confirm.label === 'Force quit', `end: force step reads '${bar().label.text}' / '${bar().confirm.label}'`);
@@ -1657,7 +1655,7 @@ async function endProcesses(rp) {
 
         // 3. Cancel leaves it running.
         const kept = spawn('rpendkept', 'while :; do :; done');
-        await clickEnd(await rowFor('rpendkept'));
+        await clickEnd('rpendkept');
         await clickBar(bar().cancel);
         check(bar().box.visible && bar().step === 'menu', `end: Cancel did not go back to the actions (step ${bar().step})`);
         await clickActor((await rowFor('rpendkept')).endBtn);
