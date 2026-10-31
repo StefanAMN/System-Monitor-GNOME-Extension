@@ -458,9 +458,10 @@ async function agentMenuLook(window, agent, variant, p) {
     await sleep(300);
     const shot = render(window);
     const inner = findAll(agent.menu, w => w instanceof Gtk.ToggleButton)[0];
-    const [okButton, edge] = inner ? inner.compute_point(window, new Graphene.Point().init(4, inner.get_height() / 2)) : [false, null];
+    // Widget coordinates start at the content box: -4 is in the padding, clear of the label's glyphs.
+    const [okButton, edge] = inner ? inner.compute_point(window, new Graphene.Point().init(-4, inner.get_height() / 2)) : [false, null];
     const buttonBg = okButton && shot ? shot.at(edge.x, edge.y) : null;
-    ok(buttonBg && lum(buttonBg) > 40 && buttonBg[2] > buttonBg[0] + 40, `look (${variant}): the agent button is ${buttonBg ? show(buttonBg) : 'not drawn'}, not the accent`);
+    ok(buttonBg && near(buttonBg, '#3584e4', 20), `look (${variant}): the agent button is ${buttonBg ? show(buttonBg) : 'not drawn'}, not the accent`);
 
     // As with every popover opened from code on GTK 4.18: reopened while it has not drawn.
     const popover = agent.popover;
