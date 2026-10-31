@@ -22,18 +22,18 @@ What the zip holds: the code (`extension.js`, `prefs.js`, `lib/`, `ui/`), `style
 
 ## Listing text
 
-Name: **Resource Pulse**. Homepage: https://github.com/StefanAMN/System-Monitor-GNOME-Extension. GNOME Shell 46, 47, 48, 49, 50.
+Name: **Resource Pulse**. Homepage: https://github.com/StefanAMN/System-Monitor-GNOME-Extension. GNOME Shell 46, 47, 48, 49, 50, 51.
 
-Description (from `metadata.json`, 763 characters):
+Description (from `metadata.json`, 801 characters):
 
 > Your computer's vital signs, one glance away: CPU, memory, battery, disk, network, temperature, power and GPU, live in the top bar and in a dropdown dashboard with charts, per-core and per-sensor readings, the busiest processes and alerts.
 >
 > * Usage tracking: which apps used the processor, memory, disk, graphics and battery, hour by hour, for 14 days
 > * Diagnostics: what runs in the background, holds memory or drains the battery, with the evidence
-> * Fix with an agent: hand the findings to a coding agent you choose; it runs in a terminal and asks before changing anything
+> * Fix with an agent: hand the findings to a coding agent you choose; it asks before changing anything
 > * Under 1 % of one core with the panel closed; everything stays on this computer
 >
-> Clipboard: the preferences window copies text only when you ask (Copy report, Copy prompt, Copy commands).
+> Clipboard: the preferences window copies text only when you ask (Copy report, Copy commands, or handing the findings to an agent app that can only take them that way).
 
 The site sets the version number itself (`version` is not in `metadata.json`). A `version-name` (a label such as "1.0") is optional and not set.
 
@@ -42,18 +42,19 @@ The site sets the version number itself (`version` is not in `metadata.json`). A
 Checked against the review guidelines as published on 2026-10-24 (https://gjs.guide/extensions/review-guidelines/review-guidelines.html). The item-by-item audit is in `docs/PLAN.md`, area 4; what changed since:
 
 - **Lifecycle.** Nothing is created, connected or scheduled before `enable()`; `disable()` destroys every widget, disconnects every signal and removes every main-loop source, including the idle batches that read per-process disk counters (cancelled when tracking stops). The UI test's disable / enable cycles and the 20-minute soak (actors, file descriptors and the JS heap flat) check it.
-- **Subprocesses.** Always argument lists, never a shell string, never privileged. In the shell: `getconf` and `lspci` once, `nvidia-smi` with a timeout (cancelled on disable), `kill` when the user ends a process from the panel, GNOME System Monitor launched as an app from the process lists. In the preferences window, only on a click: GNOME Settings › Power, and the agent hand-off, which opens a terminal (`xdg-terminal-exec` or one the user picks) running the coding agent the user chose (Claude Code, Codex, Gemini CLI when installed, or the user's own command) in a private folder. The first hand-off to each agent asks for confirmation and offers a preview of what is sent; the agent runs in its normal interactive mode with its own permission prompts.
+- **Subprocesses.** Always argument lists, never a shell string, never privileged. In the shell: `getconf` and `lspci` once, `nvidia-smi` with a timeout (cancelled on disable), `kill` and `renice` when the user pauses, resumes, ends or lowers a process from the panel. In the preferences window, only on a click: GNOME Settings › Power, `kill` and `renice` from a Diagnostics finding, and the agent hand-off, which starts the coding agent the user chose among those installed (Claude Code, Gemini CLI and other terminal programs in a terminal, `xdg-terminal-exec` or another that is found; the Claude, Codex and Antigravity apps through their desktop files) in a private folder. The first hand-off to each agent asks for confirmation and offers a preview of what is sent; the agent runs in its normal interactive mode with its own permission prompts.
 - **Synchronous reads in the shell.** Only `/proc` files, which never touch a disk: per-process `stat` and `io`, read in batches of 32 per idle callback while the process pages are open, and every 30 s while usage tracking is on. Asynchronous reads of a few hundred such files cost the shell about 20 ms of CPU per round, the batches 1.5 ms.
 - **Data leaving the machine.** None, and no telemetry. The only path out is the agent hand-off, started by the user, confirmed once per agent, with the report shown before it is sent. The report holds app names and figures, never paths, the user name or the host name.
-- **Clipboard.** Declared in the description; written only on a button press (Copy report, Copy prompt, Copy commands); no shortcuts.
-- **Files written.** Under `~/.local/share/resource-pulse/`: the usage history (only once the user switches tracking on), the daily network totals, and the agent's `report.md` (on a hand-off).
+- **Clipboard.** Declared in the description; written only on a button press (Copy report, Copy commands, or a hand-off to Antigravity's apps, which take the prompt no other way); no shortcuts.
+- **Files written.** Under `~/.local/share/resource-pulse/`: the usage history (only once the user switches tracking on), the daily network totals, and the agent's `report.md` (on a hand-off). In the runtime directory: the session's totals, kept through the screen lock.
+- **Other shell-wide things.** The optional panel shortcut is empty by default, registered with `Main.wm.addKeybinding` and removed in `disable()`.
 - **Licence.** MIT, compatible with GPL-2.0-or-later. No code from other extensions.
 
 ## For the owner to decide before uploading
 
 - **AI-assisted code.** The guidelines allow AI as a development tool but reject submissions that show signs of unreviewed AI output, and expect the developer to explain any part of the code. This code was written with an AI assistant; read through it, or be ready to answer questions about it.
 - **Brand names.** The overview's processor badge shows the vendor's name in vendor-like colours ("intel CORE", also AMD and NVIDIA badges on such machines), and the screenshot shows the Intel one. The agent hand-off names Claude Code, Codex and Gemini CLI as text. The guidelines ask for permission for brand names and logos; reviewers may ask for the badge to become neutral.
-- **GNOME 51.** Released in September 2026; not claimed in `shell-version` because no test runs on it yet.
+- **GNOME 51.** Claimed in `shell-version`; the automated tests run on it in a container, not daily use.
 
 ## shexli (static analyser for extension reviews)
 

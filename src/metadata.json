@@ -1,7 +1,7 @@
 {
   "uuid": "resource-pulse@stefanamn.github.io",
   "name": "Resource Pulse",
-  "description": "Your computer's vital signs, one glance away: CPU, memory, battery, disk, network, temperature, power and GPU, live in the top bar and in a dropdown dashboard with charts, per-core and per-sensor readings, the busiest processes and alerts.\n\n* Usage tracking: which apps used the processor, memory, disk, graphics and battery, hour by hour, for 14 days\n* Diagnostics: what runs in the background, holds memory or drains the battery, with the evidence\n* Fix with an agent: hand the findings to a coding agent you choose; it runs in a terminal and asks before changing anything\n* Under 1 % of one core with the panel closed; everything stays on this computer\n\nClipboard: the preferences window copies text only when you ask (Copy report, Copy prompt, Copy commands).",
+  "description": "Your computer's vital signs, one glance away: CPU, memory, battery, disk, network, temperature, power and GPU, live in the top bar and in a dropdown dashboard with charts, per-core and per-sensor readings, the busiest processes and alerts.\n\n* Usage tracking: which apps used the processor, memory, disk, graphics and battery, hour by hour, for 14 days\n* Diagnostics: what runs in the background, holds memory or drains the battery, with the evidence\n* Fix with an agent: hand the findings to a coding agent you choose; it asks before changing anything\n* Under 1 % of one core with the panel closed; everything stays on this computer\n\nClipboard: the preferences window copies text only when you ask (Copy report, Copy commands, or handing the findings to an agent app that can only take them that way).",
   "shell-version": [
     "46",
     "47",
