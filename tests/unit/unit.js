@@ -1007,6 +1007,21 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         await second.sample();
         const carried = second.sessionTotals();
         ok(carried.rx >= saved.rx + (saved.counters.length > 0 ? 500 : 0), `network session: carried ${carried.rx} after restoring ${saved.rx} (${saved.counters.length} interfaces)`);
+
+        // The saved figures come from a file, so the first sample can get
+        // there first: the gap still counts, once, and a virtual one never.
+        const late = new NetworkSampler();
+        late._prevStats.set('eth9', { rxBytes: 5000, txBytes: 900, seen: 1 });
+        late._isVirtualCache.set('eth9', false);
+        late._prevStats.set('veth9', { rxBytes: 7000, txBytes: 7000, seen: 1 });
+        late._isVirtualCache.set('veth9', true);
+        late.restoreSession({ rx: 10, tx: 20, counters: [
+            { iface: 'eth9', rxBytes: 4000, txBytes: 800 },
+            { iface: 'veth9', rxBytes: 0, txBytes: 0 },
+            { iface: 'wlan9', rxBytes: 1, txBytes: 1 },
+        ] });
+        const lateTotals = late.sessionTotals();
+        eq([lateTotals.rx, lateTotals.tx, [...late._carried.keys()]], [1010, 120, ['wlan9']], 'network session: restored after the first sample, the traffic in between still counts');
     }
     {
         // Two batteries in a sysfs fixture, read through the sampler.

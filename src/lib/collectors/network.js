@@ -62,7 +62,20 @@ export class NetworkSampler {
     restoreSession({ rx, tx, counters }) {
         this._sessionRx += rx;
         this._sessionTx += tx;
-        this._carried = new Map(counters.map(c => [c.iface, c]));
+        this._carried = new Map();
+        for (const c of counters) {
+            // This arrives from a file, so a sample may have got here first;
+            // its reading ends the gap for the interfaces it saw.
+            const prev = this._prevStats.get(c.iface);
+            if (prev) {
+                if (this._isVirtualCache.get(c.iface) === false) {
+                    this._sessionRx += counterDelta(prev.rxBytes, c.rxBytes);
+                    this._sessionTx += counterDelta(prev.txBytes, c.txBytes);
+                }
+            } else {
+                this._carried.set(c.iface, c);
+            }
+        }
     }
 
     async _checkIsVirtual(iface) {
