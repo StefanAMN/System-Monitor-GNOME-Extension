@@ -93,6 +93,35 @@ export function calcCpuUsage(parts, prevTotal, prevActive) {
     return { total, active, percent: Math.max(0, Math.min(100, percent)) };
 }
 
+/**
+ * The clock of each CPU in /proc/cpuinfo, with the CPU id /proc/stat uses:
+ * an offline core is absent from both, so a position is not an id.
+ * @param {string} cpuinfo
+ * @returns {{id: number, mhz: number}[]}
+ */
+export function parseCoreMhz(cpuinfo) {
+    const out = [];
+    let id = NaN;
+    for (const line of cpuinfo.split('\n')) {
+        if (line.startsWith('processor')) {
+            id = parseInt(line.slice(line.indexOf(':') + 1), 10);
+        } else if (line.toLowerCase().startsWith('cpu mhz')) {
+            out.push({ id: Number.isNaN(id) ? out.length : id, mhz: parseFloat(line.slice(line.indexOf(':') + 1)) || 0 });
+            id = NaN;
+        }
+    }
+    return out;
+}
+
+/** One label per core row, indexed by CPU id; '' for a core with no clock (offline). */
+export function coreFreqLabels(readings, count) {
+    const labels = new Array(count).fill('');
+    for (const { id, mhz } of readings) {
+        if (mhz > 0) labels[id] = `${(mhz / 1000).toFixed(2)} GHz`;
+    }
+    return labels;
+}
+
 function ordinalSuffix(n) {
     const t = n % 100;
     if (t >= 11 && t <= 13) return 'th';
@@ -199,20 +228,14 @@ export class CpuSampler {
             let coreFreqs = [];
             if (wantFreq) try {
                 const cpuinfo = await readFileAsync('/proc/cpuinfo');
-                const mhzLines = cpuinfo.split('\n').filter(l => l.toLowerCase().startsWith('cpu mhz'));
-                if (mhzLines.length > 0) {
+                const readings = parseCoreMhz(cpuinfo);
+                if (readings.length > 0) {
                     let totalMhz = 0;
-                    const parsedMhz = mhzLines.map(line => {
-                        const val = parseFloat(line.split(':')[1].trim()) || 0;
-                        totalMhz += val;
-                        return val;
-                    });
-                    const avgGhz = (totalMhz / mhzLines.length) / 1000;
+                    for (const { mhz } of readings) totalMhz += mhz;
+                    const avgGhz = (totalMhz / readings.length) / 1000;
                     freqStr = `${avgGhz.toFixed(2)} GHz`;
 
-                    if (detailed) {
-                        coreFreqs = parsedMhz.map(mhz => mhz > 0 ? `${(mhz / 1000).toFixed(2)} GHz` : '');
-                    }
+                    if (detailed) coreFreqs = coreFreqLabels(readings, denseCores.length);
                 }
             } catch (e) { noteReadError(e); }
 

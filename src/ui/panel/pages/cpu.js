@@ -151,7 +151,8 @@ export class CpuPage {
                 } else {
                     w.pbar.setColor(0.18, 0.76, 0.494); // Green
                 }
-                if (coreFreqs[i]) w.freqLbl.text = coreFreqs[i].replace(' GHz', '');
+                // Empty list: no clocks read this time. Empty label: the core went offline.
+                if (coreFreqs.length) w.freqLbl.text = (coreFreqs[i] ?? '').replace(' GHz', '');
                 w.val.text = `${Math.round(load)}%`;
             }
         });

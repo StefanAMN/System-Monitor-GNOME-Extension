@@ -10,7 +10,7 @@ import { RunningStats } from '../../src/lib/engine/stats.js';
 import { METRICS, SETTINGS_SECTIONS, POLL_STOPS_MS, allSettingRows, formatSettingValue, nearestStop, stepSettingValue, pinPositions, togglePinned, movePinned } from '../../src/lib/common/settingsmodel.js';
 import { parseStatBlob, cpuPercent, groupByName, parseStatm, groupMemoryPages, readGroupMemory, ProcessSampler, filterGroups, parseProcIo } from '../../src/lib/collectors/process.js';
 import { canEnd, processIdentity, liveMembers, signalProcesses, groupState, reniceProcesses, LOWER_NICE } from '../../src/lib/actions/processcontrol.js';
-import { parseCpuLines, calcCpuUsage, parseCpuIdentity } from '../../src/lib/collectors/cpu.js';
+import { parseCpuLines, calcCpuUsage, parseCpuIdentity, parseCoreMhz, coreFreqLabels } from '../../src/lib/collectors/cpu.js';
 import { migrateSettings, listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
 import { parseNetDev, counterDelta, NetworkSampler } from '../../src/lib/collectors/network.js';
 import { sessionIdentity, sessionStateText, parseSessionState, currentSessionIdentity } from '../../src/lib/engine/sessiontotals.js';
@@ -201,6 +201,14 @@ eq(batteryStateLabel('bogus'), 'Unknown', 'battery unknown state');
     const st = (comm, pid, state) => ({ ...row(comm, pid, 0, 10), state });
     const p = groupByName([st('vim', 1, 'T'), st('vim', 2, 'T'), st('app', 3, 'T'), st('app', 4, 'S'), st('sh', 5, 'S')]);
     eq(p.map(x => [x.comm, x.paused]), [['vim', true], ['app', false], ['sh', false]], 'pause: a group is paused when every member is stopped');
+    {
+        // CPU 1 offline: /proc/cpuinfo goes 0, 2, 3 and the clocks must keep those ids.
+        const cpuinfo = 'processor\t: 0\ncpu MHz\t\t: 1000.0\n\nprocessor\t: 2\ncpu MHz\t\t: 2000.0\n\nprocessor\t: 3\ncpu MHz\t\t: 3500.0\n';
+        const readings = parseCoreMhz(cpuinfo);
+        eq(readings.map(r => r.id), [0, 2, 3], 'core clocks: ids come from the processor lines');
+        eq(coreFreqLabels(readings, 4), ['1.00 GHz', '', '2.00 GHz', '3.50 GHz'], 'core clocks: an offline core leaves its own row empty, the later ones keep theirs');
+        eq(parseCoreMhz('Processor\t: ARMv7\ncpu MHz\t: 900\ncpu MHz\t: 800\n').map(r => r.id), [0, 1], 'core clocks: no numbered processor line, by position');
+    }
     ok(canEnd({ comm: 'firefox', members: [{ pid: 10 }] }, 999), 'end: an ordinary app may be ended');
     ok(!canEnd({ comm: 'gnome-shell', members: [{ pid: 10 }] }, 999), 'end: never the shell');
     ok(!canEnd({ comm: 'Xwayland', members: [{ pid: 10 }] }, 999), 'end: never Xwayland');
