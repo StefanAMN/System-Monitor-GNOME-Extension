@@ -132,6 +132,7 @@ export default class ResourcePulseExtension extends Extension {
         this._alertSampled = { dsk: 0, gpu: 0, net: 0, bat: 0, pwr: 0 };
         this._alertCauses = {};
         this._alertProc = null;
+        this._causeTurn = Promise.resolve();
         this._causeTimerId = 0;
         this._causeResolve = null;
         this._notifySource = null;

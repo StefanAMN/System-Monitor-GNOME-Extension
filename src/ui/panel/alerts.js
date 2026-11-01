@@ -74,7 +74,11 @@ export class AlertsMethods {
     async _onAlertRaised(key, now) {
         const gen = this._gen;
         if (key === 'cpu' || key === 'memory') {
-            const cause = await this._alertCause(key);
+            // One at a time: they share a sampler, which refuses a second scan
+            // while one runs, and each resets its baseline when done.
+            const turn = this._causeTurn.then(() => (gen === this._gen ? this._alertCause(key) : ''));
+            this._causeTurn = turn.catch(() => {});
+            const cause = await turn;
             if (gen !== this._gen || !this._alerts?.isActive(key)) return;
             if (cause) this._alertCauses[key] = cause;
         }

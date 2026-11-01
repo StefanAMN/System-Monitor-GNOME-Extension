@@ -1764,6 +1764,23 @@ async function alertsRaise(rp) {
     rp._alerts = new AlertMonitor();
 }
 
+// CPU and memory going over their limits together: each alert names its own
+// cause. They share a sampler, and the second used to get no answer.
+async function alertsCauses(rp) {
+    const real = rp._alerts;
+    rp._alerts = { update: () => ({ raised: [], cleared: [] }), active: () => [], isActive: () => true, takeNotification: () => false };
+    rp._alertCauses = {};
+    const now = GLib.get_monotonic_time();
+    rp._onAlertRaised('cpu', now);
+    rp._onAlertRaised('memory', now);
+    for (let i = 0; i < 20 && !(rp._alertCauses.cpu && rp._alertCauses.memory); i++) await sleep(250);
+    const { cpu, memory } = rp._alertCauses;
+    console.log(`RP-UITEST alerts causes: cpu "${cpu}"; memory "${memory}"`);
+    check(/cores/.test(cpu ?? '') && /using/.test(memory ?? ''), `alerts causes: raised together, cpu "${cpu}", memory "${memory}"`);
+    rp._alertCauses = {};
+    rp._alerts = real;
+}
+
 // A reading high for a while, then well below its limit (memory 95 % then
 // 60 % against 90 %), through the real poll, glide and alert path: the ⚠
 // and the red value must go once the reading has been below the limit for
@@ -1997,6 +2014,7 @@ async function run() {
     await screenReader(ext.stateObj);
     await stuckCollector(ext.stateObj);
     await alertsRaise(ext.stateObj);
+    await alertsCauses(ext.stateObj);
     await alertsRecover(ext.stateObj);
     await panelShortcut(ext.stateObj);
     await endProcesses(ext.stateObj);
