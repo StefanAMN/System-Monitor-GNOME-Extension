@@ -1076,6 +1076,35 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         GLib.spawn_command_line_sync(`rm -rf ${sys}`);
     }
     {
+        // An Intel GPU on the xe driver: the layout of drivers/gpu/drm/xe
+        // (xe_gt_idle.c, xe_gt_freq.c) and its hwmon ABI.
+        const sys = GLib.dir_make_tmp('rp-xe-sys-XXXXXX');
+        const dev = `${sys}/devices/pci0000:00/0000:00:02.0`;
+        const put = (path, value) => {
+            GLib.mkdir_with_parents(GLib.path_get_dirname(`${dev}/${path}`), 0o755);
+            GLib.file_set_contents(`${dev}/${path}`, `${value}\n`);
+        };
+        put('vendor', '0x8086');
+        put('power/runtime_status', 'active');
+        put('tile0/gt0/gtidle/idle_residency_ms', 1000);
+        put('tile0/gt0/freq0/act_freq', 1950);
+        put('tile0/gt0/freq0/max_freq', 2050);
+        put('hwmon/hwmon3/temp2_input', 47000);
+        GLib.mkdir_with_parents(`${sys}/bus/pci/drivers/xe`, 0o755);
+        Gio.File.new_for_path(`${dev}/driver`).make_symbolic_link('../../../bus/pci/drivers/xe', null);
+        GLib.mkdir_with_parents(`${sys}/class/drm/card0`, 0o755);
+        Gio.File.new_for_path(`${sys}/class/drm/card0/device`).make_symbolic_link('../../../devices/pci0000:00/0000:00:02.0', null);
+        const sampler = new GpuSampler(sys);
+        await sampler.sample();
+        await sleep(400);
+        // 200 ms asleep out of about 400: the elapsed time is measured, so a range.
+        put('tile0/gt0/gtidle/idle_residency_ms', 1200);
+        const r = await sampler.sample();
+        ok(r.percent >= 30 && r.percent <= 60, `gpu xe: load from the idle residency (${r.percent} %)`);
+        eq([r.driver, r.clock, r.maxClock, r.temp], ['xe', 1950, 2050, 47], 'gpu xe: named by its driver, with its clocks and package temperature');
+        GLib.spawn_command_line_sync(`rm -rf ${sys}`);
+    }
+    {
         // Disk rates from a /proc fixture.
         const proc = GLib.dir_make_tmp('rp-disk-XXXXXX');
         GLib.file_set_contents(`${proc}/mounts`, '');

@@ -229,22 +229,33 @@ export class GpuSampler {
                     });
                 } else if (vendor === PCI_VENDOR.intel) {
                     const cardPath = `${drm}/${dir}`;
+                    // The last of each list is the xe driver's (Lunar Lake and newer
+                    // by default): tile0/gt0 is the render engine, gt1 the media one.
                     const freq = [
                         { act: `${cardPath}/gt_act_freq_mhz`, max: `${cardPath}/gt_max_freq_mhz` },
                         { act: `${basePath}/gt/gt0/rps_act_freq_mhz`, max: `${basePath}/gt/gt0/rps_max_freq_mhz` },
+                        { act: `${basePath}/tile0/gt0/freq0/act_freq`, max: `${basePath}/tile0/gt0/freq0/max_freq` },
                     ].find(p => this._exists(p.act));
                     const rc6Path = [
                         `${cardPath}/gt/gt0/rc6_residency_ms`,
                         `${cardPath}/power/rc6_residency_ms`,
                         `${basePath}/power/rc6_residency_ms`,
+                        `${basePath}/tile0/gt0/gtidle/idle_residency_ms`,
                     ].find(p => this._exists(p)) ?? null;
+                    const busyPath = this._exists(`${basePath}/gpu_busy_percent`) ? `${basePath}/gpu_busy_percent` : null;
+                    if (!busyPath && !rc6Path) logOnce(`GPU ${dir}: no busy or idle counter found, its load reads 0 %`);
+                    let driver = 'i915';
+                    try {
+                        driver = GLib.path_get_basename(GLib.file_read_link(`${basePath}/driver`));
+                    } catch (e) { noteReadError(e); }
                     cards.push({
-                        key: dir, type: 'intel', brand: 'Intel', model: name || 'Intel Graphics', driver: 'i915', runtimePath,
-                        busyPath: this._exists(`${basePath}/gpu_busy_percent`) ? `${basePath}/gpu_busy_percent` : null,
+                        key: dir, type: 'intel', brand: 'Intel', model: name || 'Intel Graphics', driver, runtimePath,
+                        busyPath,
                         rc6Path,
                         actFreqPath: freq?.act ?? null,
                         maxFreqPath: freq?.max ?? null,
-                        tempPath: hwmon ? `${hwmon}/temp1_input` : null,
+                        // xe has no temp1: its package temperature is temp2.
+                        tempPath: hwmon ? [`${hwmon}/temp1_input`, `${hwmon}/temp2_input`].find(p => this._exists(p)) ?? null : null,
                     });
                 }
             }
@@ -335,29 +346,21 @@ export class GpuSampler {
     async _readIntel(conf) {
         // No figure this time (too soon, counter reset): the last one stands, not 0.
         let percent = conf.lastBusy ?? 0;
-        let foundStats = false;
         if (conf.busyPath) {
             const busy = await this._readNumber(conf.busyPath);
-            if (busy !== null) {
-                percent = busy;
-                foundStats = true;
-            }
+            if (busy !== null) percent = busy;
         } else if (conf.rc6Path) {
             const rc6Ms = await this._readNumber(conf.rc6Path);
             const rc6Time = GLib.get_monotonic_time();
             if (rc6Ms !== null) {
                 if (conf.prevRc6Ms !== undefined) {
                     const busy = intelBusyFromRc6(conf.prevRc6Ms, rc6Ms, (rc6Time - conf.prevRc6Time) / 1000);
-                    if (busy !== null) {
-                        percent = conf.lastBusy = busy;
-                        foundStats = true;
-                    }
+                    if (busy !== null) percent = conf.lastBusy = busy;
                 }
                 conf.prevRc6Ms = rc6Ms;
                 conf.prevRc6Time = rc6Time;
             }
         }
-        if (!foundStats && !conf.model) return null;
         return {
             present: true,
             key: conf.key,
@@ -383,10 +386,9 @@ export class GpuSampler {
             if (!this._cards || GLib.get_monotonic_time() - this._lastDetect > DETECT_EVERY_US) await this._detect();
             gpus.push(...await this._sampleNvidia());
             for (const card of this._cards) {
-                const reading = await this._asleep(card.runtimePath)
+                gpus.push(await this._asleep(card.runtimePath)
                     ? asleepReading(card)
-                    : card.type === 'amd' ? await this._readAmd(card) : await this._readIntel(card);
-                if (reading) gpus.push(reading);
+                    : card.type === 'amd' ? await this._readAmd(card) : await this._readIntel(card));
             }
         } catch (e) {
             logOnce(`Error in GPU sample: ${e.message}`, 'error');
