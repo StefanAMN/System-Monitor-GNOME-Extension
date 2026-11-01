@@ -1589,12 +1589,7 @@ Owner: track only one GPU, or let the GPU tab show both. Chosen: show them all. 
 
 **Sampling overhead:** none; imports and comments only. `processIdentity` reads through `readProcFile`, the same call and the same decoding.
 
-**Open findings, not fixed here:**
-- `canEnd` (`processcontrol.js`): `Xorg` is not in `SESSION_CRITICAL`, so on an X11 session the panel offers Pause and End on the X server. Pause freezes the desktop with no way back from inside it.
-- `CpuSampler`: `coreFreqs` is by position among online CPUs and `cores` by CPU id, so with a core offline the clocks of later cores show on the wrong row.
-- `NetworkSampler.restoreSession`: only counts traffic during the lock if it arrives before the first sample. Measured: 7.9 GB restored first, 0 restored after. `enable()` starts both at once, so the order is a race.
-- `GpuSampler`: no paths for Intel's `xe` driver (`tile0/gt0/...`), so such a GPU reads 0 % always, and the driver reads `i915`. Not run: no such GPU here.
-- `_alertCause`: a CPU and a memory alert close together share one sampler. The second gets no reading, and its `reset()` can clear the first's baseline.
+**Open findings, not fixed here** (the five bugs found alongside these are fixed, see "Five fixes from the review" below):
 - `ThermalSampler`: the Thermal tab reads every hwmon sensor, including a sleeping GPU's, which `GpuSampler` takes care not to wake. Not run: no such GPU here.
 - `tests/ui-driver` tracking check: fails on a machine where a real app outruns the burner (seen with a busy desktop app). Passes in a container.
 - shexli on 2026-10-31 reports EGO-M-004 (error) on `shell-version` and EGO-L-003 on the indicator's `destroy` signal, both new since the result recorded in `docs/ego/README.md`.
@@ -1602,3 +1597,15 @@ Owner: track only one GPU, or let the GPU tab show both. Chosen: show them all. 
 **Proof:** lint clean; unit 660 passed; prefs-check 323 of 323 under the owner's stylesheet; test-i18n; test-zip ACTIVE with a clean log; test-compat 50 and CI for the UI tests.
 
 **The alert recovery check, local runs:** failed twice in the GNOME 50 container while another project's virtual machines loaded this computer ("⚠ gone after 10.5 s", cpu, then gpu), with the alert's own recovery on time by its readings. The check also required the ⚠ gone, and the machine's readings are live with a 2 s sustain here, so a real alert on another metric could hold it. The check now asks that the ⚠ match the alerts active, and logs them. Passed once after that. The cause is the likely one, not proven: the logs of that run were not kept.
+
+## Five fixes from the review (2026-11-01)
+
+- **`Xorg` protected (`processcontrol.js`).** On an X11 session (GNOME 46-48) the panel offered Pause and End on the X server; Pause froze the desktop with no way back from inside it.
+- **Core clocks by CPU id (`cpu.js`, `pages/cpu.js`).** Clocks went by position among online CPUs and usage by CPU id, so with a core offline later rows showed another core's clock. `parseCoreMhz` keeps the id from the `processor` lines; an offline core's clock is now blank, not its last value. Same cost: one read of `/proc/cpuinfo`, no regex.
+- **Network totals across the lock (`network.js`).** The saved figures come from a file, so the first sample could get there first and the traffic during the lock was lost. `restoreSession` now counts the gap at once for interfaces a sample has already seen, and first-seen ones as before.
+- **Intel `xe` driver (`gpu.js`).** Load from `tile0/gt0/gtidle/idle_residency_ms`, clocks from `tile0/gt0/freq0/`, temperature from `temp2_input`, driver name from the `driver` link. Paths taken from the kernel source (`xe_gt_idle.c`, `xe_gt_freq.c`, the xe hwmon ABI). A card with no counter at all still reads 0 %, now with a log line. The check `!foundStats && !conf.model` was dead and is gone.
+- **Alert causes in turn (`alerts.js`).** A CPU and a memory alert close together shared a sampler that refuses a second scan; the second got no cause. They now run one after the other, so there are never two scans at once. A memory cause may wait up to a second behind a CPU one.
+
+**Proof:** lint clean; unit 667 passed; test-compat 50 passed with all of it (test-unit, test-headless, test-ui, test-i18n, test-zip). New checks fail without their fix: network (`[10,20]` instead of `[1010,120]`), xe (`i915`, 0 %, no clocks), Xorg, and in the shell `alerts causes` (memory cause `undefined`). The clock parser gave ids 0-11 on this machine's real `/proc/cpuinfo`.
+
+**Not run:** a real core taken offline (needs root; a fixture stands in), a real `xe` GPU (none here; a fixture built from the kernel source stands in), a real X11 session for the Xorg entry (unit check of `canEnd` only).
