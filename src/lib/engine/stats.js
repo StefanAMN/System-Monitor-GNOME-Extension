@@ -34,6 +34,11 @@ export class RunningStats {
         if (value > this.peak) this.peak = value;
     }
 
+    /** A missing measurement must not bridge the next mean with stale data. */
+    breakInterval() {
+        this._lastTime = 0;
+    }
+
     /** The figures, for carrying across a disable (sessiontotals.js). */
     toJSON() {
         return { peak: this.peak, count: this.count, weighted: this._weighted, seconds: this._seconds };

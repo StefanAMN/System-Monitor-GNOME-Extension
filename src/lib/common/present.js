@@ -35,10 +35,14 @@ export function na() {
  */
 export function powerReadout(pwr) {
     if (!pwr) return { value: null, source: '', reason: _('Not sampled yet') };
-    if (pwr.systemPower !== null && pwr.systemPower !== undefined)
+    if (Number.isFinite(pwr.systemPower))
         return { value: pwr.systemPower, source: _('On Battery'), reason: '' };
-    if (pwr.raplSupported)
-        return { value: pwr.packagePower || 0, source: _('AC · CPU package only'), reason: '' };
+    if (pwr.raplSupported && Number.isFinite(pwr.packagePower))
+        return { value: pwr.packagePower, source: _('AC · CPU package only'), reason: '' };
+    if (pwr.warmingUp)
+        return { value: null, source: '', reason: _('Waiting for a second energy reading') };
+    if (pwr.packagePartial)
+        return { value: null, source: '', reason: _('Some CPU package energy readings are unavailable') };
     return {
         value: null,
         source: '',
@@ -89,8 +93,8 @@ export function gpuReadings(gpu, tempUnit = 'C') {
     return {
         clock,
         temp: gpu.temp > 0 ? formatTemp(gpu.temp, tempUnit) : null,
-        // 0 RPM is a reading (the fan is stopped); only "no fan" is left out.
-        fan: Number.isFinite(gpu.fanSpeed) ? `${gpu.fanSpeed} RPM` : null,
+        // NVIDIA reports percent; hwmon reports RPM. Old snapshots default to RPM.
+        fan: Number.isFinite(gpu.fanSpeed) ? `${gpu.fanSpeed}${gpu.fanUnit === 'percent' ? '%' : ' RPM'}` : null,
         power: gpu.powerDraw > 0 ? `${gpu.powerDraw.toFixed(1)} W` : null,
     };
 }
@@ -230,4 +234,16 @@ export function spokenValue(text) {
         .replace(/(\d)\s?W\b/g, (_whole, digit) => `${digit} ${_('watts')}`)
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+const SAMPLE_SOURCES = { memory: 'mem', battery: 'bat', power: 'pwr', disk: 'dsk', network: 'net', thermal: 'thm' };
+
+/** Why a retained value is dimmed; age refers to its last successful sample. */
+export function sampleNote(data, metric, nowUs) {
+    const source = SAMPLE_SOURCES[metric] ?? metric;
+    const sample = data.samples?.[source];
+    if (!sample || sample.status === 'fresh' || sample.status === 'cached') return '';
+    if (!Number.isFinite(sample.sampledAt)) return _('Waiting for a new reading');
+    const seconds = Math.max(0, Math.floor((nowUs - sample.sampledAt) / 1e6));
+    return fill(_('Last reading {seconds} s ago · updates delayed'), { seconds });
 }

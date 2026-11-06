@@ -75,6 +75,9 @@ export class DetailsMethods {
         this._detailHeader.add_child(optBtn);
 
         this._detailArea.add_child(this._detailHeader);
+        this._sampleStatusLabel = new St.Label({ style_class: 'rp-muted', visible: false, x_expand: true });
+        this._sampleStatusLabel.clutter_text.line_wrap = true;
+        this._detailArea.add_child(this._sampleStatusLabel);
 
         // Sections are built on first visit: most opens only ever show the
         // overview, so enable() should not pay for eight unseen pages.

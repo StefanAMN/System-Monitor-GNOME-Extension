@@ -132,16 +132,17 @@ export class AppUsageSampler {
         this._mount = mount;
         this._session = session;
         this.available = null;
-        // unit -> { usec, pids, memory, age } at the previous reading. A unit
-        // whose CPU time did not move started and ended no process, so its
-        // process list and (for a few readings) its memory are kept.
+        // unit -> { usec, memory, age } at the previous reading. Memory is
+        // cached briefly for idle units; membership is always read afresh.
         this._cache = new Map();
         this._idleId = 0;
         this._finish = null;
+        this._generation = 0;
     }
 
     /** Stop a reading in progress (tracking stopped); its call resolves with no units. */
     cancel() {
+        this._generation++;
         if (this._idleId) GLib.source_remove(this._idleId);
         this._idleId = 0;
         this._finish?.({ time: GLib.get_monotonic_time(), total: null, system: null, units: [] });
@@ -182,7 +183,7 @@ export class AppUsageSampler {
         const unit = { unit: name, usec, ...what };
         const before = this._cache.get(name);
         const idle = before?.usec === usec;
-        if (withPids) unit.pids = idle && before.pids ? before.pids : this._readPids(`${dir}/${name}`);
+        if (withPids) unit.pids = this._readPids(`${dir}/${name}`);
         if (withMemory) {
             const fresh = !idle || before.memory === undefined || before.age + 1 >= IDLE_MEMORY_EVERY;
             unit.memory = fresh ? this._readMemory(`${dir}/${name}`) : before.memory;
@@ -205,8 +206,10 @@ export class AppUsageSampler {
      */
     async sample({ withPids = false, withMemory = false } = {}) {
         this.cancel();
+        const generation = this._generation;
         const time = GLib.get_monotonic_time();
         const root = await this._sessionRoot();
+        if (generation !== this._generation) return { time, total: null, system: null, units: [] };
         // Slices nest (app.slice/app-gnome\x2dsession\x2dmanager.slice/…);
         // units are the leaves that count.
         const todo = root ? listUnits(root) : [];
@@ -222,7 +225,7 @@ export class AppUsageSampler {
                 if (i < todo.length) return GLib.SOURCE_CONTINUE;
                 this._idleId = 0;
                 this._finish = null;
-                this._cache = new Map(units.map(u => [u.unit, { usec: u.usec, pids: u.pids, memory: u.memory, age: u.memoryAge ?? 0 }]));
+                this._cache = new Map(units.map(u => [u.unit, { usec: u.usec, memory: u.memory, age: u.memoryAge ?? 0 }]));
                 const total = this._readUsage(this._mount);
                 const system = this._readUsage(`${this._mount}/system.slice`);
                 this.available = root !== null && total !== null;

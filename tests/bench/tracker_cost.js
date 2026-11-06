@@ -60,7 +60,13 @@ const loop = new GLib.MainLoop(null, false);
     total += await measure('apps: CPU, processes, memory', () => new AppUsageSampler().sample({ withPids: true, withMemory: true }));
     const unitPids = new Map(first.units.map(u => [u.unit, u.pids ?? []]));
     const gpu = new GpuUsageSampler();
-    total += await measure('apps: GPU time (fdinfo)', () => gpu.sample(unitPids));
+    await measure('apps: GPU time (cached fds)', () => gpu.sample(unitPids));
+    // At the real 30 s cadence every descriptor cache has expired. Include
+    // discovery in the total, rather than reporting only rapid warm reads.
+    total += await measure('apps: GPU time (full fd rescan)', () => {
+        for (const entry of gpu._pids.values()) entry.scanned = -Infinity;
+        return gpu.sample(unitPids);
+    });
     const io = new AppIoSampler();
     total += await measure('apps: disk bytes (/proc/<pid>/io)', () => {
         io.reset();

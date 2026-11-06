@@ -250,7 +250,12 @@ async function overhead() {
     check(ext._tracker?.lastSample, 'battery tracking did not start');
     const SAMPLES = 40;
     const c0 = cpuTicks();
-    for (let i = 0; i < SAMPLES; i++) await ext._tracker.tick();
+    for (let i = 0; i < SAMPLES; i++) {
+        // The 30 s cadence expires every GPU descriptor cache. Immediate
+        // samples otherwise benchmark only the cheaper cached path.
+        for (const entry of ext._tracker._gpu._pids.values()) entry.scanned = -Infinity;
+        await ext._tracker.tick();
+    }
     const perSampleMs = (cpuTicks() - c0) * (1000 / CLK_TCK) / SAMPLES;
     const tracking = perSampleMs / (30 * 1000) * 100;
     report(`battery tracking: ${perSampleMs.toFixed(1)} ms CPU per sample (apps ${ext._tracker.lastSample.appsAvailable ? 'read' : 'not available'}), ` +

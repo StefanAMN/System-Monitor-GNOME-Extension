@@ -142,10 +142,15 @@ export class BatteryTracker {
                 this._machine ? this._machine.sample() : null,
                 this._network ? this._network.sample() : null,
             ]);
-            // GPU time and disk bytes need the units' processes, so they come second.
+            // Stop may have cancelled the first stage while a sysfs read was
+            // pending. Never start another idle source after that cancellation.
+            if (gen !== this._gen) return false;
+            // Both depend on membership, but not on each other's readings.
             const unitPids = new Map(usage.units.map(u => [u.unit, u.pids ?? []]));
-            const gpu = this._gpu ? await this._gpu.sample(unitPids) : null;
-            const appIo = this._appIo ? await this._appIo.sample(usage.units) : null;
+            const [gpu, appIo] = await Promise.all([
+                this._gpu ? this._gpu.sample(unitPids) : null,
+                this._appIo ? this._appIo.sample(usage.units) : null,
+            ]);
             if (gen !== this._gen) return false;
             this._noteFocus();
             const focusUsec = this._focusUsec;

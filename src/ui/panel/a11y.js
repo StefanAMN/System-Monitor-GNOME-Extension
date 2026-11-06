@@ -10,14 +10,14 @@ export class AccessibilityMethods {
     /** Name what is shown; called when it shows a reading, not a glide frame. */
     _nameValues() {
         for (const [key, widget] of Object.entries(this._topBarWidgets ?? {}))
-            widget.box.accessible_name = fill(_('{metric} {value}'), { metric: METRIC_NAMES[key], value: spokenValue(widget.text) });
+            widget.box.accessible_name = fill(_('{metric} {value}'), { metric: METRIC_NAMES[key], value: [spokenValue(widget.text), widget.sampleNote].filter(Boolean).join(', ') });
         if (this._dangerBox?.visible)
             this._dangerBox.accessible_name = fill(_('Alerts: {alerts}'), { alerts: spokenValue(this._alertText().replaceAll('\n', ' · ')) });
         // The cards are read only while the menu is open; opening it renders.
         if (!this._menuOpen || !this._summaryCards) return;
         for (const card of Object.values(this._summaryCards)) {
             const sub = card.subLabel?.visible && card.subLabel.text ? `, ${spokenValue(card.subLabel.text)}` : '';
-            card.box.accessible_name = fill(_('{metric} {value}, opens {metric} details'), { metric: card.title, value: spokenValue(card.valueLabel.text) + sub });
+            card.box.accessible_name = fill(_('{metric} {value}, opens {metric} details'), { metric: card.title, value: spokenValue(card.valueLabel.text) + sub + (card.sampleNote ? `, ${card.sampleNote}` : '') });
         }
     }
 }

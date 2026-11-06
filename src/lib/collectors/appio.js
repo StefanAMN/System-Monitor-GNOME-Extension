@@ -5,12 +5,10 @@
 // read. They are per process: bytes of a process that started and ended
 // between two readings are missed, and the figure is an estimate.
 //
-// Deltas are kept per pid. Reading or writing takes processor time, so a
-// unit whose CPU time did not move since the previous call is not read: its
-// processes keep their previous counters. Every other unit is read whole, so
-// a pid not seen before started since then (with CPU time, in a unit that is
-// read) and counts from zero; a counter lower than before is a new process
-// with a reused pid. The first call reads every unit.
+// Deltas are keyed by PID and start time. All listed processes are read:
+// asynchronous writeback can advance their I/O counters without CPU time.
+// A temporary failure retains the known baseline while that same process
+// remains listed; a process identity change starts a fresh counter.
 //
 // The files are read synchronously in batches, one batch per idle callback,
 // as the process list does (process.js): /proc reads do not touch a disk, and
@@ -20,7 +18,7 @@
 import GLib from 'gi://GLib';
 
 import { logOnce, noteReadError } from '../common/utils.js';
-import { parseProcIo } from './process.js';
+import { parseProcIo, F_STARTTIME } from './process.js';
 
 const BATCH = 32;
 const decoder = new TextDecoder('utf-8', { fatal: false });
@@ -29,11 +27,9 @@ export class AppIoSampler {
     /** @param {string} [proc] /proc, or a fixture in tests */
     constructor(proc = '/proc') {
         this._proc = proc;
-        // pid -> { read, write } at the previous call; only live processes.
+        // pid -> { start, read, write, unit }; bounded by the listed processes.
         this._prev = new Map();
         this._primed = false;
-        // unit -> its CPU µs at the previous call.
-        this._prevUsec = new Map();
         // Processes whose counters could not be read at the last call.
         this.denied = 0;
         this._denied = 0;
@@ -45,7 +41,6 @@ export class AppIoSampler {
     reset() {
         this.cancel();
         this._prev = new Map();
-        this._prevUsec = new Map();
         this._primed = false;
     }
 
@@ -57,10 +52,22 @@ export class AppIoSampler {
         this._finish = null;
     }
 
+    /** Start time is stable for a process and distinguishes a recycled PID. */
+    _start(pid) {
+        const stat = decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/stat`)[1]);
+        const close = stat.lastIndexOf(')');
+        const value = close < 0 ? NaN : Number(stat.slice(close + 2).split(' ')[F_STARTTIME]);
+        return Number.isFinite(value) ? value : null;
+    }
+
     /** One process's counters, or null when it ended or cannot be read. */
     _read(pid) {
         try {
-            return parseProcIo(decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/io`)[1]));
+            const start = this._start(pid);
+            if (start === null) return null;
+            const io = parseProcIo(decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/io`)[1]));
+            // It can exit and its PID can be reused between either read.
+            return io && this._start(pid) === start ? { ...io, start } : null;
         } catch (e) {
             // ENOENT: ended before open(); ESRCH (FAILED to GLib): ended
             // while being read. Both are normal.
@@ -85,15 +92,8 @@ export class AppIoSampler {
         this.cancel();
         const next = new Map();
         const out = new Map();
-        const usec = new Map();
         const todo = [];
-        for (const { unit, usec: cpu, pids = [] } of units) {
-            usec.set(unit, cpu);
-            if (this._primed && this._prevUsec.get(unit) === cpu) {
-                // Idle since the last call: nothing read or written.
-                for (const pid of pids) if (this._prev.has(pid)) next.set(pid, this._prev.get(pid));
-                continue;
-            }
+        for (const { unit, pids = [] } of units) {
             for (const pid of pids) todo.push([unit, pid]);
         }
         this._denied = 0;
@@ -104,12 +104,21 @@ export class AppIoSampler {
                 for (const end = Math.min(i + BATCH, todo.length); i < end; i++) {
                     const [unit, pid] = todo[i];
                     const io = this._read(pid);
-                    if (!io) continue;
-                    next.set(pid, io);
-                    if (!this._primed) continue;
                     const before = this._prev.get(pid);
-                    const read = !before || io.read < before.read ? io.read : io.read - before.read;
-                    const write = !before || io.write < before.write ? io.write : io.write - before.write;
+                    if (!io) {
+                        // A failed counter read does not make the next successful
+                        // reading the whole lifetime of a "new" process.
+                        next.set(pid, before ?? { unit, start: null, read: null, write: null });
+                        continue;
+                    }
+                    next.set(pid, { ...io, unit });
+                    if (!this._primed || before?.start === null) continue;
+                    const same = before?.start === io.start;
+                    // Migration to another unit is a new attribution baseline:
+                    // its old unit's lifetime must not be assigned to the new one.
+                    if (same && before.unit !== unit) continue;
+                    const read = same ? Math.max(0, io.read - before.read) : io.read;
+                    const write = same ? Math.max(0, io.write - before.write) : io.write;
                     if (read === 0 && write === 0) continue;
                     const sum = out.get(unit) ?? { read: 0, write: 0 };
                     sum.read += read;
@@ -120,7 +129,6 @@ export class AppIoSampler {
                 this._idleId = 0;
                 this._finish = null;
                 this._prev = next;
-                this._prevUsec = usec;
                 this._primed = true;
                 this.denied = this._denied;
                 resolve(out);

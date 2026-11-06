@@ -4,8 +4,9 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 
 import { BatteryTracker } from '../../lib/engine/batterytracker.js';
-import { powerReadout, thermalUnavailable } from '../../lib/common/present.js';
+import { powerReadout, thermalUnavailable, sampleNote } from '../../lib/common/present.js';
 import { RANGES, BucketSeries } from '../../lib/engine/longhistory.js';
+import { SAMPLE_KEYS, freshSample, recordLiveSample, historyMetric } from '../../lib/engine/samples.js';
 import { RingBuffer } from '../../lib/engine/ringbuffer.js';
 import { DisplayAverage, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
 import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
@@ -89,7 +90,21 @@ export class PollingMethods {
      */
     _render(data, topBarOnly = false, frame = false) {
         this._updateTopBarUI(data, frame);
-        if (!topBarOnly) this._updateDashboardUI(data, frame);
+        if (!topBarOnly) {
+            this._updateDashboardUI(data, frame);
+            if (!frame) {
+                const now = GLib.get_monotonic_time();
+                for (const [key, card] of Object.entries(this._summaryCards ?? {})) {
+                    card.sampleNote = sampleNote(data, key, now);
+                    card.valueLabel.opacity = card.sampleNote ? 160 : 255;
+                }
+                if (this._sampleStatusLabel) {
+                    const note = sampleNote(data, this._activeTab, now);
+                    this._sampleStatusLabel.text = note;
+                    this._sampleStatusLabel.visible = !!note;
+                }
+            }
+        }
         // A glide's start shows the last reading; its end (below) the new one.
         if (!frame && !this._glideId) this._nameValues();
     }
@@ -157,40 +172,41 @@ export class PollingMethods {
         });
     }
 
-    _pushHistory(key, value, now) {
+    _pushHistory(key, value, now, sampledAt = now) {
         // A metric that was not sampled for a while (unpinned with the menu
         // closed) restarts its graph instead of joining stale and fresh points.
         const last = this._histStamp[key] || 0;
         if (last && now - last > this._gapUs) this._hist[key].clear();
         this._histStamp[key] = now;
-        this._hist[key].push(value);
+        recordLiveSample(this._hist[key], value, sampledAt, now, this._sampleSeconds * 1e6);
     }
 
     _recordHistory(data, need, now) {
         const MB = 1000000;
-        if (need.cpu) this._pushHistory('cpu', data.cpu.total, now);
-        if (need.mem) this._pushHistory('mem', data.mem.percent, now);
+        const push = (key, value, metric) => this._pushHistory(key, freshSample(data, metric) ? value : NaN, now, data.samples?.[metric]?.sampledAt ?? now);
+        if (need.cpu) push('cpu', data.cpu.total, 'cpu');
+        if (need.mem) push('mem', data.mem.percent, 'mem');
         if (need.bat && data.bat.present) {
-            this._pushHistory('bat', data.bat.percent, now);
-            this._pushHistory('batRate', data.bat.energyRate || 0, now);
+            push('bat', data.bat.percent, 'bat');
+            push('batRate', data.bat.energyRate || 0, 'bat');
         }
-        if (need.pwr && (data.pwr.raplSupported || data.pwr.systemPower !== null))
-            this._pushHistory('pwr', data.pwr.systemPower ?? data.pwr.packagePower ?? 0, now);
+        if (need.pwr)
+            push('pwr', powerReadout(data.pwr).value ?? NaN, 'pwr');
         if (need.dsk) {
-            this._pushHistory('dskRead', data.dsk.readRate / MB, now);
-            this._pushHistory('dskWrite', data.dsk.writeRate / MB, now);
+            push('dskRead', data.dsk.readRate / MB, 'dsk');
+            push('dskWrite', data.dsk.writeRate / MB, 'dsk');
         }
         if (need.net) {
-            this._pushHistory('netRx', data.net.total.rxRate / 1000, now);
-            this._pushHistory('netTx', data.net.total.txRate / 1000, now);
+            push('netRx', data.net.total.rxRate / 1000, 'net');
+            push('netTx', data.net.total.txRate / 1000, 'net');
         }
-        if (need.thm) this._pushHistory('thm', data.thm.packageTemp, now);
+        if (need.thm) push('thm', thermalUnavailable(data.thm) ? NaN : data.thm.packageTemp, 'thm');
         if (need.gpu && data.gpu.present) {
-            this._pushHistory('gpu', data.gpu.percent, now);
+            push('gpu', data.gpu.percent, 'gpu');
             if (data.gpu.gpus?.length > 1) {
                 for (const g of data.gpu.gpus) {
                     const hist = this._gpuHistKey(g.key);
-                    if (hist) this._pushHistory(hist, g.percent, now);
+                    if (hist) push(hist, g.percent, 'gpu');
                 }
             }
         }
@@ -249,8 +265,8 @@ export class PollingMethods {
         }
         for (const series of Object.values(this._long)) {
             for (const key of this._histKeys) {
-                if (key in values) series[key].add(values[key], now);
-                else series[key].advance(now);
+                if (key in values) series[key].add(values[key], data.samples?.[historyMetric(key)]?.sampledAt ?? now);
+                series[key].advance(now);
             }
         }
     }
@@ -303,22 +319,10 @@ export class PollingMethods {
      * @param {function(): Promise} start begins the sample
      * @param {*} fallback value to use when the collector is late or stuck
      */
-    _guarded(key, deadline, start, fallback) {
-        const outstanding = this._outstanding;
-        if (outstanding[key]) return fallback;
-        const sample = start();
-        let settled = false;
-        const settle = () => {
-            settled = true;
-            if (outstanding[key] === sample) delete outstanding[key];
-        };
-        outstanding[key] = sample;
-        sample.then(settle, settle);
-        return Promise.race([sample, deadline.then(() => {
-            if (!settled)
-                logOnce(`ResourcePulse: ${key} collector did not answer within ${POLL_DEADLINE_MS} ms; showing its last value`);
-            return fallback;
-        })]);
+    async _guarded(key, deadline, start, fallback, samples = null, context = null) {
+        const result = await this._samples.read(key, deadline, start, fallback, context);
+        if (samples) samples[key] = result;
+        return result.value;
     }
 
     /**
@@ -407,14 +411,25 @@ export class PollingMethods {
                 pwr: this._lastPwr || { raplSupported: false, packagePower: null, systemPower: null }
             };
 
-            const [cpu, mem, bat, dsk, net, thm, gpu] = await Promise.all([
-                need.cpu ? this._guarded('cpu', deadline, () => this._cpu.sample(isDetailedCpu, isOpen), last.cpu) : last.cpu,
-                need.mem ? this._guarded('memory', deadline, () => this._mem.sample(isDetailedMem), last.mem) : last.mem,
-                need.bat ? this._guarded('battery', deadline, () => this._bat.sample(), last.bat) : last.bat,
-                need.dsk ? this._guarded('disk', deadline, () => this._dsk.sample(isDetailedDsk), last.dsk) : last.dsk,
-                need.net ? this._guarded('network', deadline, () => this._net.sample(), last.net) : last.net,
-                need.thm ? this._guarded('thermal', deadline, () => this._thm.sample(isDetailedThm), last.thm) : last.thm,
-                need.gpu ? this._guarded('gpu', deadline, () => this._gpu.sample(), last.gpu) : last.gpu
+            const samples = {};
+            const read = (key, start, fallback, context = null) => this._guarded(key, deadline, start, fallback, samples, context);
+            // Independent reads do not wait behind a GPU or mount query.
+            const psiPromise = read('pressure', () => this._psi.sample(), this._lastPsi ?? null);
+            const throttlePromise = read('throttle', () => this._throttle.sample(), this._lastThrottle ?? null);
+            const batteryPromise = need.bat ? read('battery', () => this._bat.sample(), last.bat) : Promise.resolve(last.bat);
+            const powerPromise = need.pwr ? batteryPromise.then(battery => {
+                if (gen !== this._gen) return last.pwr;
+                return read('power', () => this._pwr.sample(samples.battery?.fresh ? battery : null), last.pwr);
+            }) : Promise.resolve(last.pwr);
+            const [cpu, mem, bat, dsk, net, thm, gpu, psi, throttle, pwr] = await Promise.all([
+                need.cpu ? read('cpu', () => this._cpu.sample(isDetailedCpu, isOpen), last.cpu) : last.cpu,
+                need.mem ? read('memory', () => this._mem.sample(isDetailedMem), last.mem) : last.mem,
+                batteryPromise,
+                need.dsk ? read('disk', () => this._dsk.sample(isDetailedDsk), last.dsk) : last.dsk,
+                need.net ? read('network', () => this._net.sample(), last.net) : last.net,
+                need.thm ? read('thermal', () => this._thm.sample(isDetailedThm), last.thm) : last.thm,
+                need.gpu ? read('gpu', () => this._gpu.sample(), last.gpu) : last.gpu,
+                psiPromise, throttlePromise, powerPromise
             ]);
             if (gen !== this._gen) return;
 
@@ -426,26 +441,9 @@ export class PollingMethods {
             if (need.thm) this._lastThm = thm;
             if (need.gpu) this._lastGpu = gpu;
 
-            // Three small reads; feeds the load rows and the memory alert.
-            const psi = await this._guarded('pressure', deadline, () => this._psi.sample(), this._lastPsi ?? null);
-            if (gen !== this._gen) return;
             this._lastPsi = psi;
-            // One small file per processor package: how much of the time it was slowed to cool.
-            const throttle = await this._guarded('throttle', deadline, () => this._throttle.sample(), this._lastThrottle ?? null);
-            if (gen !== this._gen) return;
             this._lastThrottle = throttle;
-
-            const pwr = need.pwr
-                ? await this._guarded('power', deadline, () => this._pwr.sample(bat), last.pwr)
-                : last.pwr;
-            if (gen !== this._gen) return;
-            if (need.pwr) {
-                this._lastPwr = pwr;
-                // One entry per sample, here in the engine: the render path
-                // also runs for re-draws of an old sample.
-                const draw = powerReadout(pwr).value;
-                if (draw > 0) this._pwrStats.add(draw, now);
-            }
+            if (need.pwr) this._lastPwr = pwr;
 
             let processes = [];
             let procSort = null;
@@ -465,8 +463,8 @@ export class PollingMethods {
                     processes = held.processes;
                     ioDenied = held.ioDenied;
                 } else {
-                    const procResult = await this._guarded('processes', deadline,
-                        () => this._proc.sample(mem.total, isDetailedMem, filter ? SEARCH_ROWS : PROCESS_ROWS, this._gapUs / 1e6, { io: isDetailedDsk, filter }), null);
+                    const procResult = await read('processes',
+                        () => this._proc.sample(mem.total, isDetailedMem, filter ? SEARCH_ROWS : PROCESS_ROWS, this._gapUs / 1e6, { io: isDetailedDsk, filter }), null, `${procSort}:${filter}`);
                     if (gen !== this._gen) return;
                     // null: the sampler was destroyed or is still reading.
                     // CPU and disk rates need two readings; memory is valid from the first.
@@ -485,12 +483,22 @@ export class PollingMethods {
                 this._proc.reset();
             }
 
-            if (need.net) this._countNetUsage(net, now);
-
             const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, throttle, processes, procSort, procFilter, ioDenied };
+            data.samples = {};
+            for (const [key, collector] of Object.entries(SAMPLE_KEYS)) {
+                const result = samples[collector] ?? this._samples.held(collector, data[key]);
+                data.samples[key] = { fresh: result.fresh, status: result.status, sampledAt: result.sampledAt };
+            }
+            if (freshSample(data, 'net')) this._countNetUsage(net, now);
+            if (need.pwr) {
+                const draw = freshSample(data, 'pwr') ? powerReadout(pwr).value : null;
+                if (draw !== null) this._pwrStats.add(draw, data.samples.pwr.sampledAt);
+                else this._pwrStats.breakInterval();
+            }
             if (tick || this._recordPending) {
                 this._recordHistory(data, shown, now);
-                this._recordLong(data, need, now);
+                const fresh = Object.fromEntries(Object.entries(need).map(([key, wanted]) => [key, wanted && freshSample(data, key)]));
+                this._recordLong(data, fresh, now);
             }
             this._lastData = data;
             this._present(data);

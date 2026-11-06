@@ -7,10 +7,12 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, gpuTooltip, na } from '../../lib/common/present.js';
+import { powerReadout, thermalUnavailable, batteryIconName, labelTemplate, gpuTooltip, sampleNote, na } from '../../lib/common/present.js';
 import { _, fill } from '../../lib/common/i18n.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatDuration, batteryStateLabel } from '../../lib/common/format.js';
 import { TOP_BAR_FIT_MARGIN_PX, METRIC_NAMES } from './constants.js';
+
+const AVERAGED_METRICS = new Set(['cpu', 'gpu', 'power', 'disk', 'network']);
 
 export class TopbarMethods {
     _rebuildTopBar() {
@@ -260,6 +262,14 @@ export class TopbarMethods {
                     : fill(_('Package Temp: {temp}'), { temp: formatTemp(data.thm.packageTemp, tempUnit) }) + fanInfo;
             }
             if (data.gpu) this._tooltipTexts['gpu'] = gpuTooltip(data.gpu, tempUnit);
+            const now = GLib.get_monotonic_time();
+            for (const [key, widget] of Object.entries(this._topBarWidgets)) {
+                widget.sampleNote = sampleNote(data, key, now);
+                widget.box.opacity = widget.sampleNote ? 160 : 255;
+                if (widget.sampleNote) this._tooltipTexts[key] += `\n${widget.sampleNote}`;
+                if (this._smoothOn() && AVERAGED_METRICS.has(key))
+                    this._tooltipTexts[key] += `\n${_('10 s average · turn off Smooth changes for immediate readings')}`;
+            }
         }
 
         // 2. Update top bar text & icons

@@ -1,4 +1,5 @@
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import { readFileAsync, noteReadError, logOnce } from '../common/utils.js';
 
 /**
@@ -23,6 +24,7 @@ export class PowerSampler {
         this._raplPaths = null;
         this._uncorePaths = [];
         this._raplBlocked = false;
+        this._packageCount = null;
         this._lastProbe = 0;
     }
 
@@ -112,7 +114,8 @@ export class PowerSampler {
 
         this._raplPaths = paths;
         this._uncorePaths = uncore;
-        this._raplBlocked = paths.length === 0 && domains > 0;
+        this._packageCount = domains;
+        this._raplBlocked = paths.length < domains;
         this._lastProbe = GLib.get_monotonic_time();
     }
 
@@ -125,50 +128,61 @@ export class PowerSampler {
             systemPower = batteryData.energyRate;
         }
 
-        let packagePower = 0;
+        let packagePower = null;
         let uncorePower = null;
         let raplSupported = false;
+        let packageSamples = 0;
+        let warmingUp = false;
+        let blocked = false;
+
+        // A failed reading breaks the rate interval. Recovery first establishes
+        // a new baseline rather than treating a long average as current power.
+        const wattsFor = async item => {
+            try {
+                const text = (await readFileAsync(item.energyPath)).trim();
+                const energy = /^\d+$/.test(text) ? Number(text) : NaN;
+                if (!Number.isFinite(energy)) throw new Error(`Invalid energy counter: ${item.energyPath}`);
+                const time = GLib.get_monotonic_time();
+                const before = this._prevEnergy[item.baseDir];
+                const watts = before === undefined ? null : raplWatts(before, energy, item.maxRange,
+                    (time - this._prevTime[item.baseDir]) / 1000000);
+                this._prevEnergy[item.baseDir] = energy;
+                this._prevTime[item.baseDir] = time;
+                return { watts, warmingUp: before === undefined };
+            } catch (e) {
+                delete this._prevEnergy[item.baseDir];
+                delete this._prevTime[item.baseDir];
+                blocked ||= !!(e.matches?.(GLib.FileError, GLib.FileError.ACCES) ||
+                    e.matches?.(GLib.FileError, GLib.FileError.PERM) ||
+                    e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.PERMISSION_DENIED));
+                noteReadError(e);
+                return { watts: null, warmingUp: false };
+            }
+        };
 
         try {
             const now = GLib.get_monotonic_time();
-            if (!this._raplPaths || (now - this._lastProbe) > 60000000) {
-                await this._probeRapl();
+            if (!this._raplPaths || (now - this._lastProbe) > 60000000) await this._probeRapl();
+            raplSupported = this._raplPaths.length > 0;
+            let sum = 0;
+            for (const item of this._raplPaths) {
+                const result = await wattsFor(item);
+                warmingUp ||= result.warmingUp;
+                if (result.watts === null) continue;
+                sum += result.watts;
+                packageSamples++;
             }
-
-            if (this._raplPaths.length > 0) {
-                raplSupported = true;
-                for (const item of this._raplPaths) {
-                    try {
-                        const energyStr = await readFileAsync(item.energyPath);
-                        const energy = parseFloat(energyStr.trim()) || 0;
-                        // Timed at the read: the probe above and the reads
-                        // before this one are not part of its interval.
-                        const time = GLib.get_monotonic_time();
-
-                        if (this._prevEnergy[item.baseDir] !== undefined) {
-                            const watts = raplWatts(this._prevEnergy[item.baseDir], energy, item.maxRange,
-                                (time - this._prevTime[item.baseDir]) / 1000000);
-                            if (watts !== null) packagePower += watts;
-                        }
-
-                        this._prevEnergy[item.baseDir] = energy;
-                        this._prevTime[item.baseDir] = time;
-                    } catch (e) { noteReadError(e); }
-                }
-                for (const item of this._uncorePaths) {
-                    try {
-                        const energy = parseFloat((await readFileAsync(item.energyPath)).trim()) || 0;
-                        const time = GLib.get_monotonic_time();
-                        if (this._prevEnergy[item.baseDir] !== undefined) {
-                            const watts = raplWatts(this._prevEnergy[item.baseDir], energy, item.maxRange,
-                                (time - this._prevTime[item.baseDir]) / 1000000);
-                            if (watts !== null) uncorePower = (uncorePower ?? 0) + watts;
-                        }
-                        this._prevEnergy[item.baseDir] = energy;
-                        this._prevTime[item.baseDir] = time;
-                    } catch (e) { noteReadError(e); }
-                }
+            // Summing only the working packages under-reports the machine.
+            if (raplSupported && packageSamples === (this._packageCount ?? this._raplPaths.length)) packagePower = sum;
+            let uncoreSum = 0;
+            let uncoreSamples = 0;
+            for (const item of this._uncorePaths) {
+                const { watts } = await wattsFor(item);
+                if (watts === null) continue;
+                uncoreSum += watts;
+                uncoreSamples++;
             }
+            if (uncoreSamples > 0 && uncoreSamples === this._uncorePaths.length) uncorePower = uncoreSum;
         } catch (e) {
             logOnce(`RAPL power sample failed: ${e.message}`, 'error');
         }
@@ -176,8 +190,12 @@ export class PowerSampler {
         return {
             raplSupported: raplSupported,
             // Counters exist but this user may not read them (fixable).
-            raplBlocked: this._raplBlocked,
-            packagePower: raplSupported ? packagePower : null,
+            raplBlocked: this._raplBlocked || blocked,
+            packagePower,
+            warmingUp,
+            packagePartial: packageSamples > 0 && packageSamples < (this._packageCount ?? this._raplPaths?.length ?? 0),
+            packageSamples,
+            packageCount: this._packageCount ?? this._raplPaths?.length ?? 0,
             // Part of packagePower: integrated graphics and the rest of the uncore (Intel).
             uncorePower,
             systemPower: systemPower

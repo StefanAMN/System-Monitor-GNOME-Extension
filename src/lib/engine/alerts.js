@@ -36,7 +36,7 @@ export class AlertMonitor {
 
     /**
      * Feed one set of readings.
-     * @param {Object<string, ?{value: number, threshold: number, below?: boolean}>} readings
+     * @param {Object<string, ?{value: number, threshold: number, below?: boolean, sampledAt?: number}>} readings
      *   null (or a non-finite value) means the metric cannot be read now: it
      *   never alerts and an active alert on it clears. `below`: the value is in
      *   danger at or under its threshold (the battery's charge), not over it.
@@ -65,21 +65,24 @@ export class AlertMonitor {
             const sign = reading.below ? -1 : 1;
             const value = sign * reading.value;
             const threshold = sign * reading.threshold;
+            // Late results keep their measurement time. A delayed delivery
+            // must not extend a threshold interval or restart its clock later.
+            const time = Number.isFinite(reading.sampledAt) ? reading.sampledAt : now;
             s.value = reading.value;
             s.threshold = reading.threshold;
             if (!s.active) {
-                s.aboveSince = value >= threshold ? (s.aboveSince ?? now) : null;
-                if (s.aboveSince !== null && now - s.aboveSince >= this._sustainUs) {
+                s.aboveSince = value >= threshold ? (s.aboveSince ?? time) : null;
+                if (s.aboveSince !== null && time - s.aboveSince >= this._sustainUs) {
                     s.active = true;
                     s.since = s.aboveSince;
                     s.belowSince = s.deepSince = null;
                     raised.push(key);
                 }
             } else {
-                s.belowSince = value < threshold - this._hysteresis ? (s.belowSince ?? now) : null;
-                s.deepSince = value <= threshold - this._deepDrop ? (s.deepSince ?? now) : null;
-                const recovered = (s.belowSince !== null && now - s.belowSince >= this._recoverUs) ||
-                    (s.deepSince !== null && now - s.deepSince >= this._deepRecoverUs);
+                s.belowSince = value < threshold - this._hysteresis ? (s.belowSince ?? time) : null;
+                s.deepSince = value <= threshold - this._deepDrop ? (s.deepSince ?? time) : null;
+                const recovered = (s.belowSince !== null && time - s.belowSince >= this._recoverUs) ||
+                    (s.deepSince !== null && time - s.deepSince >= this._deepRecoverUs);
                 if (recovered) {
                     s.active = false;
                     s.aboveSince = s.belowSince = s.deepSince = null;
@@ -130,7 +133,7 @@ export class AlertMonitor {
 export function alertReadings(data, limits, thermalUnavailable) {
     const reading = (ok, value, threshold, below = false) => (ok ? { value, threshold, ...(below ? { below } : {}) } : null);
     const root = data.dsk?.mounts?.[0];
-    return {
+    const readings = {
         cpu: reading(!!data.cpu, data.cpu?.total, limits.cpu),
         memory: reading(!!data.mem && data.mem.total > 0, data.mem?.percent, limits.memory),
         thermal: reading(!!data.thm && !thermalUnavailable(data.thm), data.thm?.packageTemp, limits.thermal),
@@ -147,6 +150,18 @@ export function alertReadings(data, limits, thermalUnavailable) {
         // processors that do not report it (AMD).
         throttle: reading(Number.isFinite(data.throttle?.percent) && Number.isFinite(limits.throttle), data.throttle?.percent, limits.throttle),
     };
+    if (data.samples) {
+        const sources = { cpu: 'cpu', memory: 'mem', thermal: 'thm', gpu: 'gpu', disk: 'dsk', pressure: 'psi', battery: 'bat', throttle: 'throttle' };
+        for (const [key, source] of Object.entries(sources)) {
+            const sample = data.samples[source];
+            // A scheduled, held reading supplies no new evidence either way.
+            // Failed or overdue samples break a sustained-threshold interval.
+            if (sample?.status === 'cached') delete readings[key];
+            else if (!sample?.fresh) readings[key] = null;
+            else if (readings[key] && Number.isFinite(sample.sampledAt)) readings[key].sampledAt = sample.sampledAt;
+        }
+    }
+    return readings;
 }
 
 /** Load of the busiest GPU that is awake (a machine may have several). */

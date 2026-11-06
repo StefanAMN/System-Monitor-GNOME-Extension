@@ -10,6 +10,7 @@
 export const DISPLAY_WINDOW_US = 10e6;
 // Kept per value. The shortest interval, 0.25 s, needs 40 in the window.
 const WINDOW_READINGS = 48;
+const sampleTime = (data, key, now) => Number.isFinite(data.samples?.[key]?.sampledAt) ? data.samples[key].sampledAt : now;
 
 /** A value's readings over the window, each weighted by the time it covers. */
 class WindowMean {
@@ -64,14 +65,15 @@ export class DisplayAverage {
     }
 
     /** A number's average; anything else (no reading) as it is, and the value starts anew. */
-    _mean(values, key, value, fresh, now) {
+    _mean(values, key, value, fresh, now, sampledAt = now) {
         if (!Number.isFinite(value)) {
             values.delete(key);
             return value;
         }
         let series = values.get(key);
+        if (!series && !fresh) return value;
         if (!series) values.set(key, series = new WindowMean());
-        if (fresh) series.add(value, now);
+        if (fresh) series.add(value, sampledAt);
         return series.mean(now);
     }
 
@@ -85,19 +87,21 @@ export class DisplayAverage {
         const v = this._values;
         const raw = this._raw;
         if (data.cpu) {
-            const fresh = data.cpu !== raw.cpu;
-            out.cpu = { ...data.cpu, total: this._mean(v, 'cpu', data.cpu.total, fresh, now) };
+            const fresh = data.samples ? data.samples.cpu?.fresh === true : data.cpu !== raw.cpu;
+            const at = sampleTime(data, 'cpu', now);
+            out.cpu = { ...data.cpu, total: this._mean(v, 'cpu', data.cpu.total, fresh, now, at) };
             if (Array.isArray(data.cpu.cores))
-                out.cpu.cores = data.cpu.cores.map((value, i) => this._mean(v, `core${i}`, value, fresh, now));
+                out.cpu.cores = data.cpu.cores.map((value, i) => this._mean(v, `core${i}`, value, fresh, now, at));
         }
         if (data.gpu?.present) {
             // Per card: the one shown can change, and the GPU page shows them all.
-            const fresh = data.gpu !== raw.gpu;
+            const fresh = data.samples ? data.samples.gpu?.fresh === true : data.gpu !== raw.gpu;
+            const at = sampleTime(data, 'gpu', now);
             const key = data.gpu.key ?? '';
             const averaged = (g, add) => ({
                 ...g,
-                percent: this._mean(v, `gpu${g.key ?? ''}`, g.percent, add, now),
-                powerDraw: this._mean(v, `gpuPower${g.key ?? ''}`, g.powerDraw, add, now),
+                percent: this._mean(v, `gpu${g.key ?? ''}`, g.percent, add, now, at),
+                powerDraw: this._mean(v, `gpuPower${g.key ?? ''}`, g.powerDraw, add, now, at),
             });
             const gpus = data.gpu.gpus?.map(g => averaged(g, fresh));
             // The one shown is one of those: its reading counts once.
@@ -105,32 +109,35 @@ export class DisplayAverage {
             if (gpus) out.gpu.gpus = gpus;
         }
         if (data.pwr) {
-            const fresh = data.pwr !== raw.pwr;
+            const fresh = data.samples ? data.samples.pwr?.fresh === true : data.pwr !== raw.pwr;
+            const at = sampleTime(data, 'pwr', now);
             out.pwr = {
                 ...data.pwr,
-                packagePower: this._mean(v, 'package', data.pwr.packagePower, fresh, now),
-                systemPower: this._mean(v, 'system', data.pwr.systemPower, fresh, now),
+                packagePower: this._mean(v, 'package', data.pwr.packagePower, fresh, now, at),
+                systemPower: this._mean(v, 'system', data.pwr.systemPower, fresh, now, at),
             };
         }
         if (data.dsk) {
-            const fresh = data.dsk !== raw.dsk;
+            const fresh = data.samples ? data.samples.dsk?.fresh === true : data.dsk !== raw.dsk;
+            const at = sampleTime(data, 'dsk', now);
             out.dsk = {
                 ...data.dsk,
-                readRate: this._mean(v, 'read', data.dsk.readRate, fresh, now),
-                writeRate: this._mean(v, 'write', data.dsk.writeRate, fresh, now),
-                diskPercent: this._mean(v, 'busy', data.dsk.diskPercent, fresh, now),
+                readRate: this._mean(v, 'read', data.dsk.readRate, fresh, now, at),
+                writeRate: this._mean(v, 'write', data.dsk.writeRate, fresh, now, at),
+                diskPercent: this._mean(v, 'busy', data.dsk.diskPercent, fresh, now, at),
             };
         }
         if (data.net?.total) {
-            const fresh = data.net !== raw.net;
+            const fresh = data.samples ? data.samples.net?.fresh === true : data.net !== raw.net;
+            const at = sampleTime(data, 'net', now);
             const interfaces = {};
             for (const [name, iface] of Object.entries(data.net.interfaces ?? {})) {
                 let own = this._interfaces.get(name);
                 if (!own) this._interfaces.set(name, own = new Map());
                 interfaces[name] = {
                     ...iface,
-                    rxRate: this._mean(own, 'rx', iface.rxRate, fresh, now),
-                    txRate: this._mean(own, 'tx', iface.txRate, fresh, now),
+                    rxRate: this._mean(own, 'rx', iface.rxRate, fresh, now, at),
+                    txRate: this._mean(own, 'tx', iface.txRate, fresh, now, at),
                 };
             }
             // Interfaces come and go (containers, VPNs).
@@ -140,8 +147,8 @@ export class DisplayAverage {
                 interfaces,
                 total: {
                     ...data.net.total,
-                    rxRate: this._mean(v, 'rx', data.net.total.rxRate, fresh, now),
-                    txRate: this._mean(v, 'tx', data.net.total.txRate, fresh, now),
+                    rxRate: this._mean(v, 'rx', data.net.total.rxRate, fresh, now, at),
+                    txRate: this._mean(v, 'tx', data.net.total.txRate, fresh, now, at),
                 },
             };
         }
@@ -161,7 +168,7 @@ const GLIDE = new Set([
 ]);
 // Never descended into: their entries are not the same thing from one
 // reading to the next.
-const OPAQUE = new Set(['processes']);
+const OPAQUE = new Set(['processes', 'samples']);
 
 // Objects and arrays this module created for a buffer. Only these are ever
 // written into: a buffer can also hold references to a reading's own

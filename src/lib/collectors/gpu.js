@@ -25,7 +25,8 @@ function parseNvidiaSmiLine(line) {
         model: f[0] || 'NVIDIA GPU',
         driver: `NVIDIA ${f[1] || ''}`.trim(),
         percent: num(2) ?? 0,
-        memPercent: num(3) ?? 0,
+        // utilization.memory is bus activity, not allocated VRAM.
+        memPercent: memTotal > 0 ? Math.max(0, Math.min(100, memUsed / memTotal * 100)) : 0,
         memUsed,
         memTotal,
         memFree: Math.max(0, memTotal - memUsed),
@@ -33,7 +34,8 @@ function parseNvidiaSmiLine(line) {
         powerDraw: num(7),
         clock: num(8),
         maxClock: num(9),
-        fanSpeed: num(10)
+        fanSpeed: num(10),
+        fanUnit: 'percent'
     };
 }
 
@@ -339,7 +341,8 @@ export class GpuSampler {
             powerDraw: (await this._readNumber(conf.pwrPath, 1e6)) ?? (await this._readNumber(conf.pwrFallbackPath, 1e6)),
             clock,
             maxClock: null,
-            fanSpeed: (await this._readNumber(conf.fanPath)) || null,
+            fanSpeed: await this._readNumber(conf.fanPath),
+            fanUnit: 'rpm',
         };
     }
 

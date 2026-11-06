@@ -22,6 +22,7 @@ import { ProcessSampler } from './lib/collectors/process.js';
 import { ledgerPath } from './lib/engine/batterytracker.js';
 import { BatteryLedger, saveLedger } from './lib/engine/batteryledger.js';
 import { PeakScale } from './lib/common/present.js';
+import { CollectorSamples } from './lib/engine/samples.js';
 import { RingBuffer } from './lib/engine/ringbuffer.js';
 import { AlertMonitor } from './lib/engine/alerts.js';
 import { PressureSampler } from './lib/collectors/pressure.js';
@@ -33,7 +34,7 @@ import { currentSessionIdentity, loadSessionState, saveSessionState, sessionStat
 import { HISTORY_CAPACITY, HISTORY_KEYS } from './ui/panel/constants.js';
 import { installMethods } from './ui/panel/mixins.js';
 import { setTranslations, resetTranslations, _ } from './lib/common/i18n.js';
-import { resetUtils, migrateSettings } from './lib/common/utils.js';
+import { resetUtils, migrateSettings, logOnce } from './lib/common/utils.js';
 import { forgetAppInfo } from './lib/common/appnames.js';
 import { SharedMethods } from './ui/panel/shared.js';
 import { SizingMethods } from './ui/panel/sizing.js';
@@ -147,6 +148,10 @@ export default class ResourcePulseExtension extends Extension {
         this._deferredPollId = null;
         this._pollDeadlineId = null;
         this._outstanding = {};
+        this._samples = new CollectorSamples(() => GLib.get_monotonic_time(), this._outstanding,
+            (key, error) => logOnce(error
+                ? `ResourcePulse: ${key} sample failed: ${error.message}`
+                : `ResourcePulse: ${key} collector is late; showing its last value`));
 
         // Time-series history: fixed-capacity buffers owned here, painted by sparklines.
         this._hist = {};
@@ -413,6 +418,8 @@ export default class ResourcePulseExtension extends Extension {
         this._tracker = null;
 
         this._gen++;
+        this._samples?.close();
+        this._samples = null;
         this._pollInFlight = false;
         this._lastData = null;
         if (this._timeoutId) {

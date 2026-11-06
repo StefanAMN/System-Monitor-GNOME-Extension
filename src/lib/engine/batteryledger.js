@@ -115,6 +115,20 @@ function emptyBucket(start, onBattery) {
     };
 }
 
+const BUCKET_NUMBERS = [...FINE_SUMS, ...FINE_MAXES];
+const nonnegative = value => Number.isFinite(value) && value >= 0;
+const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Check fields that are present; older versions legitimately omit newer ones. */
+function validBucket(bucket, withApps) {
+    return record(bucket) && nonnegative(bucket.t) &&
+        (bucket.b === undefined || typeof bucket.b === 'boolean') &&
+        (bucket.energy === undefined || typeof bucket.energy === 'boolean') &&
+        BUCKET_NUMBERS.every(key => bucket[key] === undefined || nonnegative(bucket[key])) &&
+        (!withApps || (record(bucket.a) && Object.values(bucket.a).every(entry =>
+            Array.isArray(entry) && entry.length >= 3 && entry.length <= 8 && entry.every(nonnegative))));
+}
+
 export class BatteryLedger {
     constructor(state = null) {
         this.buckets = state?.buckets ?? [];
@@ -151,13 +165,28 @@ export class BatteryLedger {
         }
         if (!READABLE_VERSIONS.includes(obj?.version))
             throw new LedgerFormatError(`version ${obj?.version} is not one of ${READABLE_VERSIONS.join(', ')}`);
-        if (!Array.isArray(obj.buckets) || !obj.buckets.every(b => Number.isFinite(b?.t) && typeof b.a === 'object'))
+        if (!Array.isArray(obj.buckets) || !obj.buckets.every(b => validBucket(b, true)))
             throw new LedgerFormatError('buckets are malformed');
+        for (const key of ['baselineW', 'uncoreBaselineW']) {
+            if (obj[key] !== undefined && obj[key] !== null && !nonnegative(obj[key]))
+                throw new LedgerFormatError(`${key} is malformed`);
+        }
+        if (obj.last !== undefined && (!record(obj.last) || ['wall', 'batteryWh'].some(key =>
+            obj.last[key] !== undefined && obj.last[key] !== null && !nonnegative(obj.last[key]))))
+            throw new LedgerFormatError('last reading is malformed');
+        // Normalize missing fields so sparse historical buckets can be read
+        // and extended without undefined arithmetic. No on-disk format changes.
+        obj.buckets = obj.buckets.slice(-MAX_BUCKETS).map(b => ({ ...emptyBucket(b.t, b.b ?? false), ...b }));
         // Five-minute totals are optional (newer files); bad ones are dropped, not fatal.
-        if (obj.fine !== undefined && !(Array.isArray(obj.fine) && obj.fine.every(b => Number.isFinite(b?.t)))) obj.fine = [];
+        obj.fine = Array.isArray(obj.fine) ? obj.fine.filter(b => validBucket(b, false)).slice(-MAX_FINE).map(b => {
+            const normalized = { t: b.t, b: false, energy: false };
+            for (const key of BUCKET_NUMBERS) normalized[key] = 0;
+            return { ...normalized, ...b };
+        }) : [];
         // Optional like `fine`: a bad entry costs that entry, not the history.
         obj.health = Array.isArray(obj.health)
-            ? obj.health.filter(e => /^\d{4}-\d{2}-\d{2}$/.test(e?.d) && Number.isFinite(e.h)).slice(-HEALTH_DAYS_KEPT)
+            ? obj.health.filter(e => /^\d{4}-\d{2}-\d{2}$/.test(e?.d) && nonnegative(e.h) && e.h <= 100 &&
+                ['c', 'f'].every(key => e[key] === undefined || nonnegative(e[key]))).slice(-HEALTH_DAYS_KEPT)
             : [];
         const ledger = new BatteryLedger(obj);
         ledger.loadedVersion = obj.version;
@@ -445,7 +474,7 @@ export class BatteryLedger {
 
         if (gap) {
             bucket.gw += delivered;
-        } else if (!first && dt > 0 && usage.total !== null && this._prevTotal !== null) {
+        } else if (!first && dt > 0) {
             attributed = true;
             bucket.s += dt;
             bucket.bw += delivered;
@@ -462,7 +491,10 @@ export class BatteryLedger {
                 bucket.ta += temp * dt;
                 bucket.tm = Math.max(bucket.tm, temp);
             }
-            const totalCpu = Math.max(0, usage.total - this._prevTotal);
+            // Independent telemetry remains valid if the cgroup CPU controller
+            // is absent or one reading failed. Only CPU attribution needs it.
+            const cpuAvailable = Number.isFinite(usage.total) && Number.isFinite(this._prevTotal);
+            const totalCpu = cpuAvailable ? Math.max(0, usage.total - this._prevTotal) : 0;
             bucket.cpu += totalCpu;
 
             // GPU busy time per unit, as deltas (a unit or GPU client that is
@@ -510,7 +542,7 @@ export class BatteryLedger {
             // Per unit deltas, then summed per app id.
             let named = 0;
             const perApp = new Map();
-            for (const u of usage.units) {
+            for (const u of cpuAvailable ? usage.units : []) {
                 const before = this._prevUnits.get(u.unit);
                 // A unit born since the last sample counts from zero.
                 const delta = before === undefined || u.usec < before ? u.usec : u.usec - before;
@@ -524,7 +556,7 @@ export class BatteryLedger {
                 const ns = gpuByApp.get(id) ?? 0;
                 this._add(bucket, id, cpu, cpu * fg, whFor(cpu) + graphicsFor(ns), ns);
             }
-            if (usage.system !== null && this._prevSystem !== null) {
+            if (cpuAvailable && Number.isFinite(usage.system) && Number.isFinite(this._prevSystem)) {
                 const sys = Math.max(0, usage.system - this._prevSystem);
                 if (sys > 0) this._add(bucket, SYSTEM, sys, 0, whFor(sys));
                 named += sys;
@@ -629,8 +661,8 @@ export class BatteryLedger {
             }
         }
         sum.tempAvg = sum.tempSeconds > 0 ? tempArea / sum.tempSeconds : null;
-        sum.attributedWh = sum.packageWh - sum.idleWh;
         sum.apps = [...apps.values()].sort((x, y) => (y.wh - x.wh) || (y.cpu - x.cpu));
+        sum.attributedWh = sum.apps.reduce((wh, app) => wh + app.wh, 0);
         for (const app of sum.apps) {
             app.cpuShare = sum.cpu > 0 ? app.cpu / sum.cpu : 0;
             // Share of what the battery delivered, when there is a battery figure.

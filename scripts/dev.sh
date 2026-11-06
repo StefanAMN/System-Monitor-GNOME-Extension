@@ -603,12 +603,13 @@ cmd_test_unit() {
     check_syntax
     compile_schemas
     log_info "Running parser / engine unit tests (gjs, no shell needed)..."
-    if gjs -m "$REPO_DIR/tests/unit/unit.js"; then
-        log_success "Unit tests passed"
-    else
-        log_error "Unit tests failed"
-        exit 1
-    fi
+    for test_file in "$REPO_DIR"/tests/unit/*.js; do
+        if ! gjs -m "$test_file"; then
+            log_error "Unit tests failed: $test_file"
+            exit 1
+        fi
+    done
+    log_success "Unit tests passed"
 }
 
 # ------------------------------------------------------------------------------

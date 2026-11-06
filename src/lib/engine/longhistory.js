@@ -57,6 +57,8 @@ export class BucketSeries {
 
     /** @param {number} value a sample; non-finite values are ignored */
     add(value, now) {
+        // A delayed result cannot be inserted into a bucket already closed.
+        if (this._openIndex > Math.floor(now / this.bucketUs)) return;
         this.advance(now);
         if (!Number.isFinite(value)) return;
         this._sum += value;

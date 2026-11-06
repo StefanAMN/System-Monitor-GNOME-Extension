@@ -8,7 +8,7 @@ import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatUptime,
 import { RingBuffer } from '../../src/lib/engine/ringbuffer.js';
 import { RunningStats } from '../../src/lib/engine/stats.js';
 import { METRICS, SETTINGS_SECTIONS, POLL_STOPS_MS, allSettingRows, formatSettingValue, nearestStop, stepSettingValue, pinPositions, togglePinned, movePinned } from '../../src/lib/common/settingsmodel.js';
-import { parseStatBlob, cpuPercent, groupByName, parseStatm, groupMemoryPages, readGroupMemory, ProcessSampler, filterGroups, parseProcIo } from '../../src/lib/collectors/process.js';
+import { parseStatBlob, cpuPercent, groupByName, parseStatm, groupMemoryPages, readGroupMemory, ProcessSampler, filterGroups, parseProcIo, F_STARTTIME } from '../../src/lib/collectors/process.js';
 import { canEnd, processIdentity, liveMembers, signalProcesses, groupState, reniceProcesses, LOWER_NICE } from '../../src/lib/actions/processcontrol.js';
 import { parseCpuLines, calcCpuUsage, parseCpuIdentity, parseCoreMhz, coreFreqLabels } from '../../src/lib/collectors/cpu.js';
 import { migrateSettings, listDirAsync, runSubprocess, readFileAsync, noteReadError, logOnce, resetUtils } from '../../src/lib/common/utils.js';
@@ -344,7 +344,7 @@ docker0: 1 2 3
 {
     const nv = parseNvidiaSmi('NVIDIA GeForce RTX 3060, 550.54.14, 37, 12, 61, 2048, 12288, 45.20, 1530, 2100, 30\n');
     eq([nv.model, nv.driver, nv.percent, nv.memPercent, nv.temp, nv.memUsed, nv.memTotal, nv.powerDraw, nv.clock, nv.maxClock, nv.fanSpeed],
-        ['NVIDIA GeForce RTX 3060', 'NVIDIA 550.54.14', 37, 12, 61, 2048 * 1048576, 12288 * 1048576, 45.2, 1530, 2100, 30], 'nvidia-smi: all fields');
+        ['NVIDIA GeForce RTX 3060', 'NVIDIA 550.54.14', 37, 2048 / 12288 * 100, 61, 2048 * 1048576, 12288 * 1048576, 45.2, 1530, 2100, 30], 'nvidia-smi: all fields');
     const laptop = parseNvidiaSmi('NVIDIA RTX A500 Laptop GPU, 535.1, 0, 0, 45, 5, 4096, [N/A], 210, 1695, [Not Supported]');
     eq([laptop.powerDraw, laptop.fanSpeed, laptop.clock], [null, null, 210], 'nvidia-smi: [N/A] and [Not Supported] become null');
     eq(parseNvidiaSmi(''), null, 'nvidia-smi: no output');
@@ -1423,8 +1423,8 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         GLib.file_set_contents(`${naut}/memory.current`, `${400 * 1024 * 1024}\n`);
         const idle = [];
         for (let i = 0; i < IDLE_MEMORY_EVERY; i++) idle.push(unitOf(await reuse.sample({ withPids: true, withMemory: true })));
-        eq([first.pids, idle[0].pids, idle[0].memory / 2 ** 20, idle.at(-1).memory / 2 ** 20], [[100, 101], [100, 101], 300, 400],
-            `app usage: an idle unit keeps its processes and memory, its memory is read again after ${IDLE_MEMORY_EVERY} readings`);
+        eq([first.pids, idle[0].pids, idle[0].memory / 2 ** 20, idle.at(-1).memory / 2 ** 20], [[100, 101], [100, 101, 102], 300, 400],
+            `app usage: an idle unit refreshes its processes, its memory is read again after ${IDLE_MEMORY_EVERY} readings`);
         GLib.file_set_contents(`${naut}/cpu.stat`, 'usage_usec 1600000\nuser_usec 1\nsystem_usec 1\n');
         eq(unitOf(await reuse.sample({ withPids: true, withMemory: true })).pids, [100, 101, 102], 'app usage: a busy unit is read again');
         GLib.unlink(`${naut}/cgroup.procs`);
@@ -1923,8 +1923,12 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
             'app io: storage bytes, not the characters the process asked for');
         eq(parseProcIo('rchar: 9\n'), null, 'app io: a file without the storage counters');
         const proc = GLib.dir_make_tmp('rp-appio-XXXXXX');
-        const io = (pid, read, write) => {
+        const io = (pid, read, write, start = pid) => {
             GLib.mkdir_with_parents(`${proc}/${pid}`, 0o755);
+            const fields = new Array(22).fill('0');
+            fields[0] = 'S';
+            fields[F_STARTTIME] = String(start);
+            GLib.file_set_contents(`${proc}/${pid}/stat`, `${pid} (fixture) ${fields.join(' ')}\n`);
             GLib.file_set_contents(`${proc}/${pid}/io`, `rchar: 1\nread_bytes: ${read}\nwrite_bytes: ${write}\n`);
         };
         io(10, 1000, 500);
@@ -1939,7 +1943,8 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         eq([...await sampler.sample(units)], [], 'app io: the first reading only sets the baseline');
         io(10, 1600, 900); // +600 read, +400 written
         io(12, 50, 30); // started since: counts from zero
-        io(20, 20, 5); // lower than before: a new process with a reused pid
+        io(20, 20, 5, 200); // lower than before: a new process with a reused pid
+        GLib.unlink(`${proc}/11/stat`);
         GLib.unlink(`${proc}/11/io`); // ended between listing and reading
         GLib.rmdir(`${proc}/11`);
         const units2Map = new Map([['a.scope', [10, 11, 12]], ['b.scope', [20]]]);
@@ -1950,8 +1955,8 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         // A unit whose CPU time did not move is not read; its counters carry over.
         const still = last.map(u => (u.unit === 'a.scope' ? u : { ...u, usec: ++tick }));
         io(10, 9999, 9999); // not read: a.scope's CPU time is the same
-        io(20, 120, 5);
-        eq([...await sampler.sample(still)], [['b.scope', { read: 100, write: 0 }]], 'app io: an idle unit is skipped, a busy one read');
+        io(20, 120, 5, 200);
+        eq([...await sampler.sample(still)], [['a.scope', { read: 8399, write: 9099 }], ['b.scope', { read: 100, write: 0 }]], 'app io: I/O advances even without new CPU time');
         io(10, 1600, 900);
         if (Gio.Credentials.new().get_unix_user() !== 0) {
             Gio.File.new_for_path(`${proc}/10/io`).set_attribute_uint32('unix::mode', 0o000, Gio.FileQueryInfoFlags.NONE, null);
@@ -2245,6 +2250,10 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         const made = [];
         const fd = (pid, n, target, info) => {
             GLib.mkdir_with_parents(`${proc}/${pid}/fd`, 0o755);
+            const fields = new Array(22).fill('0');
+            fields[0] = 'S';
+            fields[F_STARTTIME] = String(pid);
+            GLib.file_set_contents(`${proc}/${pid}/stat`, `${pid} (fixture) ${fields.join(' ')}\n`);
             GLib.mkdir_with_parents(`${proc}/${pid}/fdinfo`, 0o755);
             Gio.File.new_for_path(`${proc}/${pid}/fd/${n}`).make_symbolic_link(target, null);
             GLib.file_set_contents(`${proc}/${pid}/fdinfo/${n}`, info);
@@ -2295,6 +2304,7 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         ok(!ending._clients.has('i915/0000:00:02.0/21'), 'gpu: a client gone for a while is forgotten');
         eq((await ending.sample(new Map())).size, 0, 'gpu: a unit that ended is forgotten');
         for (const path of ['fd/3', 'fdinfo/3']) GLib.unlink(`${proc}/500/${path}`);
+        GLib.unlink(`${proc}/500/stat`);
         GLib.rmdir(`${proc}/500/fd`);
         GLib.rmdir(`${proc}/500/fdinfo`);
         GLib.rmdir(`${proc}/500`);
@@ -2302,6 +2312,7 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         eq([gpuIdle > 0, gs._idleId, (await gpuPending).size], [true, 0, 0], 'gpu: cancel() resolves a reading in progress with nothing and removes its idle callback');
         for (const path of made.reverse()) GLib.unlink(`${proc}/${path}`);
         for (const pid of [100, 101, 200, 300]) {
+            GLib.unlink(`${proc}/${pid}/stat`);
             GLib.rmdir(`${proc}/${pid}/fd`);
             GLib.rmdir(`${proc}/${pid}/fdinfo`);
             GLib.rmdir(`${proc}/${pid}`);

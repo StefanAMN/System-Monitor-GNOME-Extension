@@ -1181,7 +1181,55 @@ async function batteryTracking(rp) {
     check(!rp._tracker, 'tracking: still running after being switched off');
 }
 
+// Hardware reads independent of the GPU must start before a slow GPU answers.
+async function independentCollectors(rp) {
+    const poll = rp._poll;
+    rp._poll = () => {};
+    for (let i = 0; i < 50 && rp._pollInFlight; i++) await sleep(100);
+    check(!rp._pollInFlight, 'parallel collectors: previous poll did not finish');
+    const methods = [rp._gpu, rp._psi, rp._throttle, rp._pwr].map(sampler => [sampler, sampler.sample]);
+    const collectorStarts = new Set();
+    let finishGpu;
+    const gpu = rp._lastGpu;
+    rp._gpu.sample = () => new Promise(resolve => { finishGpu = resolve; });
+    rp._psi.sample = async () => { collectorStarts.add('pressure'); return rp._lastPsi; };
+    rp._throttle.sample = async () => { collectorStarts.add('throttle'); return rp._lastThrottle; };
+    rp._pwr.sample = async () => { collectorStarts.add('power'); return rp._lastPwr; };
+    rp._alertSampled.gpu = rp._alertSampled.pwr = -Infinity;
+    let pending;
+    try {
+        pending = poll.call(rp, true);
+        await sleep(150);
+        check(!!finishGpu && ['pressure', 'throttle', 'power'].every(key => collectorStarts.has(key)),
+            `parallel collectors: a held GPU delayed ${['pressure', 'throttle', 'power'].filter(key => !collectorStarts.has(key)).join(', ')}`);
+    } finally {
+        finishGpu?.(gpu);
+        await pending;
+        for (const [sampler, sample] of methods) sampler.sample = sample;
+        rp._poll = poll;
+    }
+}
+
 async function stuckCollector(rp) {
+    rp._indicator.menu.open();
+    rp._activeTab = 'overview';
+    rp._updateTabVisibility();
+    await sleep(500);
+    await scrollIntoView(rp, rp._summaryCards.network.box);
+    check(rp._summaryCards.network.box.is_mapped() && rp._summaryCards.network.box.width > 0,
+        'stuck collector: network card has no mapped allocation');
+    let traceId = 0;
+    if (GLib.getenv('RP_UI_AUDIT_ONLY') === '1') traceId = global.stage.connect('captured-event', (_stage, event) => {
+        if ([Clutter.EventType.BUTTON_PRESS, Clutter.EventType.BUTTON_RELEASE].includes(event.type()))
+            console.log(`RP-UITEST audit pointer: ${event.type()} at ${event.get_coords().join(',')}, Activities ${Main.overview.visible}`);
+        return Clutter.EVENT_PROPAGATE;
+    });
+    try {
+        await clickActor(rp._summaryCards.network.box);
+    } finally {
+        if (traceId) global.stage.disconnect(traceId);
+    }
+    check(rp._activeTab === 'network', 'stuck collector: network card did not open through the pointer');
     let calls = 0;
     rp._net.sample = () => {
         calls++;
@@ -1193,6 +1241,18 @@ async function stuckCollector(rp) {
     check(idle < interval + 800, `stuck collector: last poll started ${idle.toFixed(0)} ms ago, polling has stalled`);
     check(!!rp._outstanding.network, 'stuck collector: outstanding call not tracked');
     check(calls === 1, `stuck collector: started ${calls} times while still outstanding`);
+    check(rp._lastData.samples.net.status === 'stale' && !rp._lastData.samples.net.fresh,
+        'stuck collector: retained network value was presented as a fresh measurement');
+    check(rp._topBarWidgets.network?.box.opacity < 255 && rp._tooltipTexts.network.includes('updates delayed'),
+        'stuck collector: retained network reading is not dimmed with its age');
+    check(rp._sampleStatusLabel.visible && rp._sampleStatusLabel.text.includes('updates delayed'),
+        'stuck collector: detail page hides delayed-reading status');
+    check(cutOffLabels(rp._sampleStatusLabel).length === 0, 'stuck collector: reading age is cut off');
+    await shot('network-stale');
+
+    if (rp._hist.netRx.length)
+        check(Number.isNaN(rp._hist.netRx.get(rp._hist.netRx.length - 1)), 'stuck collector: held network reading entered live history');
+
     const cpuBefore = rp._lastCpu;
     await sleep(interval + 500);
     check(rp._lastCpu !== cpuBefore, 'stuck collector: cpu stopped updating');
@@ -1200,6 +1260,13 @@ async function stuckCollector(rp) {
     delete rp._outstanding.network;
     await sleep(interval + 500);
     check(!rp._outstanding.network && rp._lastNet?.interfaces, 'stuck collector: network did not recover');
+    check(rp._lastData.samples.net.status === 'fresh' && rp._topBarWidgets.network.box.opacity === 255,
+        'stuck collector: recovered reading remains dimmed or stale');
+    // Restore the popup grab before the next scenario hovers the top bar.
+    rp._indicator.menu.close();
+    await sleep(400);
+
+
 }
 
 // The 1 h / 24 h range with real clicks on the detail header, the network
@@ -1343,7 +1410,8 @@ async function smoothGlide(rp) {
     check(!rp._pollInFlight, 'glide: a poll was still in flight after 5 s');
     try {
         const base = rp._lastData;
-        const reading = (mem, cpu) => ({ ...base, mem: { ...base.mem, percent: mem }, cpu: { ...base.cpu, total: cpu } });
+        // Synthetic readings use their delivery time, not the retained real sample's timestamp.
+        const reading = (mem, cpu) => ({ ...base, samples: undefined, mem: { ...base.mem, percent: mem }, cpu: { ...base.cpu, total: cpu } });
         const mem = () => parseInt(rp._summaryCards.memory.valueLabel.text, 10);
         const cpu = () => parseInt(rp._summaryCards.cpu.valueLabel.text, 10);
         rp._average = null;
@@ -1963,6 +2031,20 @@ async function run() {
         ['cpu', 'memory', 'battery', 'power', 'disk', 'network', 'thermal', 'gpu']);
     await sleep(2500);
     await shot('topbar');
+    if (GLib.getenv('RP_UI_AUDIT_ONLY') === '1') {
+        // A new virtual pointer begins at the hot corner. Move it onto the
+        // desktop before dismissing Activities, as the full driver does.
+        pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+        await sleep(300);
+        Main.overview.hide();
+        for (let i = 0; i < 30 && (Main.overview.visible || Main.overview.animationInProgress); i++) await sleep(100);
+        await independentCollectors(ext.stateObj);
+        await stuckCollector(ext.stateObj);
+        await alertsRaise(ext.stateObj);
+        await smoothGlide(ext.stateObj);
+        return;
+    }
     {
         // No pinned label may reserve much more room than its text needs.
         const rp = ext.stateObj;
@@ -2012,6 +2094,7 @@ async function run() {
     await batteryTracking(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
     await screenReader(ext.stateObj);
+    await independentCollectors(ext.stateObj);
     await stuckCollector(ext.stateObj);
     await alertsRaise(ext.stateObj);
     await alertsCauses(ext.stateObj);

@@ -11,9 +11,25 @@ export class RingBuffer {
     }
 
     push(value) {
-        this._buf[this._head] = Number.isFinite(value) ? value : 0;
+        this._push(Number.isFinite(value) ? value : 0);
+    }
+
+    /** A missing measurement, drawn as a gap rather than an idle reading. */
+    pushGap() {
+        this._push(NaN);
+    }
+
+    _push(value) {
+        this._buf[this._head] = value;
         this._head = (this._head + 1) % this.capacity;
         if (this.length < this.capacity) this.length++;
+    }
+
+    /** Fill a missing past tick when a delayed measurement finally arrives. */
+    fillGap(i, value) {
+        if (i < 0 || i >= this.length || !Number.isFinite(value) || Number.isFinite(this.get(i))) return false;
+        this._buf[(this._head - this.length + i + this.capacity) % this.capacity] = value;
+        return true;
     }
 
     get(i) {

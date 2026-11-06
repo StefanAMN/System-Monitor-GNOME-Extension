@@ -3,10 +3,11 @@
 // user's own processes are readable without privileges. Supported by i915,
 // xe and amdgpu among others; the NVIDIA driver does not publish it.
 //
-// Cost control: a process's fd table is listed once and then again only
-// every RESCAN_US; in between only the fdinfo files of its GPU fds are read.
+// Empty fd caches expire after 5 s and active caches after 15 s; both
+// are refreshed at every normal 30 s tracking sample. PID start times
+// prevent a reused PID inheriting another's cache.
 // A GPU client open in several fds or processes (dup, fork) is counted once.
-// The files are read synchronously, a batch of processes per idle callback,
+// Directory entries and fdinfo reads share a bounded idle-callback budget,
 // as appusage.js reads cgroups: /proc lives in memory, and an asynchronous
 // GIO read per file cost several times the CPU (tests/bench/tracker_cost.js).
 //
@@ -14,11 +15,13 @@
 import GLib from 'gi://GLib';
 import { noteReadError, logOnce } from '../common/utils.js';
 
-const RESCAN_US = 10 * 60 * 1e6;
+const RESCAN_US = 15e6;
+const EMPTY_RESCAN_US = 5e6;
 // Bounded cache: one entry per live process that was looked at.
 const MAX_PIDS = 4096;
-// Processes looked at per idle callback.
-const BATCH = 32;
+// Bound actual operations, including descriptor walks of one large process.
+const SLICE_OPERATIONS = 64;
+const SLICE_US = 2000;
 // A client not seen for this many readings has ended (ids are not reused
 // within a boot); until then a failed read does not count it as new.
 const CLIENT_KEPT_READINGS = 20;
@@ -40,7 +43,7 @@ export function parseDrmFdinfo(text) {
 }
 
 /** The fds of `dir` (a /proc/<pid>/fd) that are open on a GPU device. */
-function gpuLinks(dir) {
+function* gpuLinks(dir) {
     const fds = [];
     let handle;
     try {
@@ -60,23 +63,28 @@ function gpuLinks(dir) {
         for (let fd = handle.read_name(); fd !== null; fd = handle.read_name()) {
             try {
                 if (GLib.file_read_link(`${dir}/${fd}`).startsWith('/dev/dri/')) fds.push(fd);
-            } catch {
-                // Closed while listing: skipped.
+            } catch (e) {
+                if (e.matches?.(GLib.FileError, GLib.FileError.ACCES) || e.matches?.(GLib.FileError, GLib.FileError.PERM)) {
+                    // ptrace restrictions apply to every link: do not throw once per fd.
+                    logOnce('ResourcePulse: some processes\' open files cannot be read (permission denied); GPU time per app leaves those processes out');
+                    return fds;
+                }
+                // Closed while listing: ENOENT is normal; other errors stay visible.
+                noteReadError(e);
             }
+            yield;
         }
     } finally {
         handle.close();
     }
-    // In fd order, whatever the directory's: a client open in several fds
-    // is then always read from the lowest one.
-    return fds.sort((a, b) => Number(a) - Number(b));
+    return fds;
 }
 
 export class GpuUsageSampler {
     /** @param {string} [proc] procfs root (a fixture in tests) */
     constructor(proc = '/proc') {
         this._proc = proc;
-        // pid -> { fds: string[], scanned: µs }
+        // pid -> { fds: string[], scanned: µs, start: ?number }
         this._pids = new Map();
         // client key -> { ns, reading } when last seen.
         this._clients = new Map();
@@ -85,51 +93,96 @@ export class GpuUsageSampler {
         this._reading = 0;
         this._idleId = 0;
         this._finish = null;
+        this._work = null;
     }
 
     /** Stop a reading in progress (tracking stopped); its call resolves with nothing. */
     cancel() {
         if (this._idleId) GLib.source_remove(this._idleId);
         this._idleId = 0;
+        // Returning closes a descriptor-directory iterator suspended at yield.
+        this._work?.return();
+        this._work = null;
         this._finish?.(new Map());
         this._finish = null;
     }
 
-    _gpuFds(pid, now) {
-        let entry = this._pids.get(pid);
-        if (!entry || now - entry.scanned > RESCAN_US) {
-            entry = { fds: gpuLinks(`${this._proc}/${pid}/fd`), scanned: now };
-            if (this._pids.size >= MAX_PIDS) this._pids.clear();
-            this._pids.set(pid, entry);
+    /** Read identity separately from cached fds: a reused PID can keep the same fd numbers. */
+    _startTime(pid) {
+        try {
+            const stat = decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/stat`)[1]);
+            const value = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]);
+            return Number.isFinite(value) ? value : null;
+        } catch (e) {
+            noteReadError(e);
+            return null;
         }
-        return entry.fds;
     }
 
-    /**
-     * What a process's GPU clients added since they were last read, each client
-     * counted once across the reading (`seen`). Per client: a unit's sum falls
-     * when one of its clients ends, and that must not look like a counter reset.
-     */
-    _readPid(pid, now, seen) {
-        let ns = 0;
-        for (const fd of this._gpuFds(pid, now)) {
-            let text;
-            try {
-                text = decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/fdinfo/${fd}`)[1]);
-            } catch (e) {
-                // Closed since the scan, or the process exited: rescan next time.
-                noteReadError(e);
-                this._pids.delete(pid);
-                continue;
-            }
-            const client = parseDrmFdinfo(text);
-            if (!client || seen.has(client.key)) continue;
-            seen.add(client.key);
-            const before = this._clients.get(client.key);
-            ns += before ? Math.max(0, client.ns - before.ns) : client.ns;
-            this._clients.set(client.key, { ns: client.ns, reading: this._reading });
+    /** Yield after every identity, link or fdinfo read, even within one process. */
+    *_readPid(pid, unit, now, seen) {
+        const start = this._startTime(pid);
+        yield;
+        let entry = this._pids.get(pid);
+        const rescanUs = entry?.fds.length ? RESCAN_US : EMPTY_RESCAN_US;
+        if (!entry || entry.start !== start || now - entry.scanned >= rescanUs) {
+            const fds = yield* gpuLinks(`${this._proc}/${pid}/fd`);
+            entry = { fds, scanned: now, start };
+            if (!this._pids.has(pid) && this._pids.size >= MAX_PIDS) this._pids.delete(this._pids.keys().next().value);
+            this._pids.set(pid, entry);
+            yield;
         }
-        return ns;
+        for (const fd of entry.fds) {
+            try {
+                const text = decoder.decode(GLib.file_get_contents(`${this._proc}/${pid}/fdinfo/${fd}`)[1]);
+                const client = parseDrmFdinfo(text);
+                // A cached fd can be replaced by a non-DRM file without disappearing.
+                if (!client) entry.scanned = -Infinity;
+                else {
+                    // Duplicated fds can expose slightly different cached values. Use
+                    // the largest counter, retaining the first unit as its owner.
+                    const owner = seen.get(client.key) ?? unit;
+                    seen.set(client.key, owner);
+                    const before = this._clients.get(client.key);
+                    const ns = before ? Math.max(0, client.ns - before.ns) : client.ns;
+                    this._clients.set(client.key, { ns: Math.max(client.ns, before?.ns ?? 0), reading: this._reading });
+                    // Commit both counters together: cancellation cannot lose a consumed delta.
+                    if (ns > 0) this._unitNs.set(owner, (this._unitNs.get(owner) ?? 0) + ns);
+                }
+            } catch (e) {
+                entry.scanned = -Infinity;
+                if (e.matches?.(GLib.FileError, GLib.FileError.ACCES) || e.matches?.(GLib.FileError, GLib.FileError.PERM)) {
+                    logOnce('ResourcePulse: some processes\' GPU counters cannot be read (permission denied); GPU time per app leaves those processes out');
+                    break;
+                }
+                noteReadError(e);
+            }
+            yield;
+        }
+    }
+
+    *_collect(unitPids, now, reading, out) {
+        const seen = new Map();
+        const live = new Set();
+        for (const [unit, pids] of unitPids) {
+            for (const pid of pids) {
+                live.add(pid);
+                yield* this._readPid(pid, unit, now, seen);
+            }
+        }
+        for (const pid of this._pids.keys()) {
+            if (!live.has(pid)) this._pids.delete(pid);
+            yield;
+        }
+        for (const [key, client] of this._clients) {
+            if (reading - client.reading > CLIENT_KEPT_READINGS) this._clients.delete(key);
+            yield;
+        }
+        for (const [unit, ns] of this._unitNs) {
+            if (unitPids.has(unit)) out.set(unit, ns);
+            else this._unitNs.delete(unit);
+            yield;
+        }
     }
 
     /**
@@ -142,34 +195,32 @@ export class GpuUsageSampler {
         this.cancel();
         const now = GLib.get_monotonic_time();
         const reading = ++this._reading;
-        const seen = new Set();
-        const live = new Set();
         const out = new Map();
-        const todo = [];
-        for (const [unit, pids] of unitPids) for (const pid of pids) todo.push([unit, pid]);
-        return new Promise(resolve => {
+        this._work = this._collect(unitPids, now, reading, out);
+        return new Promise((resolve, reject) => {
             this._finish = resolve;
-            let i = 0;
-            const step = () => {
-                for (const end = Math.min(i + BATCH, todo.length); i < end; i++) {
-                    const [unit, pid] = todo[i];
-                    live.add(pid);
-                    const ns = this._readPid(pid, now, seen);
-                    if (ns > 0) this._unitNs.set(unit, (this._unitNs.get(unit) ?? 0) + ns);
+            this._idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                try {
+                    const began = GLib.get_monotonic_time();
+                    for (let operations = 0; operations < SLICE_OPERATIONS; operations++) {
+                        if (this._work.next().done) {
+                            this._work = null;
+                            this._idleId = 0;
+                            this._finish = null;
+                            resolve(out);
+                            return GLib.SOURCE_REMOVE;
+                        }
+                        if (GLib.get_monotonic_time() - began >= SLICE_US) break;
+                    }
+                    return GLib.SOURCE_CONTINUE;
+                } catch (e) {
+                    this._work = null;
+                    this._idleId = 0;
+                    this._finish = null;
+                    reject(e);
+                    return GLib.SOURCE_REMOVE;
                 }
-                if (i < todo.length) return GLib.SOURCE_CONTINUE;
-                this._idleId = 0;
-                this._finish = null;
-                for (const pid of this._pids.keys()) if (!live.has(pid)) this._pids.delete(pid);
-                for (const [key, client] of this._clients) if (reading - client.reading > CLIENT_KEPT_READINGS) this._clients.delete(key);
-                for (const [unit, ns] of this._unitNs) {
-                    if (unitPids.has(unit)) out.set(unit, ns);
-                    else this._unitNs.delete(unit);
-                }
-                resolve(out);
-                return GLib.SOURCE_REMOVE;
-            };
-            this._idleId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, step);
+            });
         });
     }
 }

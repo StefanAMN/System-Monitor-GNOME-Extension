@@ -1609,3 +1609,53 @@ Owner: track only one GPU, or let the GPU tab show both. Chosen: show them all. 
 **Proof:** lint clean; unit 667 passed; test-compat 50 passed with all of it (test-unit, test-headless, test-ui, test-i18n, test-zip). New checks fail without their fix: network (`[10,20]` instead of `[1010,120]`), xe (`i915`, 0 %, no clocks), Xorg, and in the shell `alerts causes` (memory cause `undefined`). The clock parser gave ids 0-11 on this machine's real `/proc/cpuinfo`.
 
 **Not run:** a real core taken offline (needs root; a fixture stands in), a real `xe` GPU (none here; a fixture built from the kernel source stands in), a real X11 session for the Xorg entry (unit check of `canEnd` only).
+
+## Telemetry accuracy and bounded tracking work (2026-11-06)
+
+Owner approved implementing all eight audit findings and tracking improvements.
+Target: unprivileged Linux, GNOME Shell 46–51. Keep raw collection separate from
+history, alerts and display; preserve saved ledger v2 compatibility. Original
+ledger, tracker and baseline unit fixtures were copied to /tmp before editing.
+
+| Milestone | Changes | Verification |
+|---|---|---|
+| Collector accounting | Preserve I/O baselines across denied/transient reads, verify PID start times around I/O, refresh cgroup membership independent of CPU, represent missing/partial/warmup package power as unavailable | collector-audit fixtures; legacy unit suite; tracking CPU-cost benchmark |
+| GPU accounting | Correct NVIDIA VRAM/fan units; adaptive descriptor discovery, PID identity and duplicate-client handling; 64-operation / 2 ms idle slices, close iterators on cancellation | gpu-audit fixtures incl. large fd table/cancel; cached and forced-discovery profiling |
+| Tracking engine | Stop-generation guards, concurrent GPU/I/O, independently retain nonCPU history, reject malformed saved history | tracking-audit fixtures incl. staged stop, missing CPU, damaged-file recovery and v1/v2 roundtrip |
+| Poll freshness | Timestamp and classify fresh/cached/stale results, deliver late results once, isolate process request contexts; parallel independent pressure/throttle/power collection | sampling-audit fixtures; live shell stuck-collector and interval checks |
+| Presentation | Graph gaps and no alert evidence for held samples; delayed-reading age in tooltips/details/a11y; explain existing immediate raw-reading option | unit tests, real-pointer UI driver, rendered screenshots, i18n checks |
+
+Implementation is integrated; final regression, headless/UI, and performance
+checks are in progress. Hardware-specific NVIDIA/AMD readings remain fixture-only.
+
+Verification checkpoint: the final full UI rerun passed the new concurrency and
+stale-reading assertions, then hit the existing moving-top-bar alert-hover check
+while the new network scenario had left its popup open. Restoring that popup state
+was followed by a focused-run setup failure on its first card click (the full run
+had already passed that click). Paused retries to inspect compositor screenshots
+and first-open layout timing; these are UI synchronization/test-isolation issues,
+not a kernel-counter API mismatch. Next proof: establish the same settled first-open
+state in the focused driver, verify actual pointer targets, then rerun the targeted
+scenario before the remaining packaging/i18n/overhead checks.
+Focused UI setup still failed the same card-click assertion after explicitly hiding
+Activities. Stopped further retries: mapped allocation alone does not establish
+pointer delivery. Next diagnostic records pointer coordinates/hit actor and the
+actual press/release event sequence, and compares with the already-passing full
+suite's first-open helper. No production telemetry changes are being made for this
+harness-only failure.
+
+Focused UI root cause confirmed from screenshots: the first virtual pointer starts
+at the Activities hot corner. Initializing/moving it to the desktop before hiding
+Activities gives the focused run the same setup as the full driver. Restoring the
+network popup's closed state fixes the following alert-hover scenario. The focused
+run now passes concurrency, real-pointer network opening, stale age/dimming/gaps,
+recovery, alert hover/notification, and raw/smoothed display checks. Full UI already
+passed on the initial integrated tree (dark/light and disable/re-enable included).
+
+Final source unit run: 787 checks passed (667 existing + 120 new); churn retained
+12 file descriptors before/after. Lint and syntax passed. The host saved ledger
+parsed successfully (128 buckets) without writing it. Twenty-sample collector
+benchmark with forced GPU descriptor rescans: 32.66 ms CPU / sample at 30 s,
+0.109% of one core (63 session units / 162 processes); warm GPU reads alone were
+3.23 ms vs 25.28 ms including discovery. No claim of whole-shell overhead from
+these collector timings: the shell overhead driver remains a separate check.

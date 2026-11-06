@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-10-31 23:20+0200\n"
+"POT-Creation-Date: 2026-11-06 21:27+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,20 +19,20 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/extension.js:216
+#: src/extension.js:222
 msgid "Resource Pulse panel"
 msgstr ""
 
-#: src/lib/collectors/cpu.js:48 src/lib/collectors/cpu.js:129
-#: src/lib/collectors/cpu.js:265 src/ui/panel/dashboard.js:39
+#: src/lib/collectors/cpu.js:48 src/lib/collectors/cpu.js:158
+#: src/lib/collectors/cpu.js:288 src/ui/panel/dashboard.js:39
 msgid "Unknown CPU"
 msgstr ""
 
-#: src/lib/collectors/cpu.js:142 src/lib/collectors/cpu.js:271
+#: src/lib/collectors/cpu.js:171 src/lib/collectors/cpu.js:294
 msgid "Linux OS"
 msgstr ""
 
-#: src/lib/collectors/gpu.js:395
+#: src/lib/collectors/gpu.js:400
 msgid "No Active GPU"
 msgstr ""
 
@@ -123,12 +123,12 @@ msgstr ""
 
 #. Translators: hours and minutes of battery left, kept short for the top bar.
 #: src/lib/common/format.js:47 src/lib/common/format.js:54
-#: src/ui/panel/topbar.js:284
+#: src/ui/panel/topbar.js:294
 msgid "{h}h {m}m"
 msgstr ""
 
 #. Translators: how much a chart shows, kept short: "2m", "60s".
-#: src/lib/common/format.js:48 src/ui/panel/polling.js:55
+#: src/lib/common/format.js:48 src/ui/panel/polling.js:56
 msgid "{m}m"
 msgstr ""
 
@@ -173,27 +173,35 @@ msgstr ""
 msgid "AC · CPU package only"
 msgstr ""
 
+#: src/lib/common/present.js:43
+msgid "Waiting for a second energy reading"
+msgstr ""
+
 #: src/lib/common/present.js:45
+msgid "Some CPU package energy readings are unavailable"
+msgstr ""
+
+#: src/lib/common/present.js:49
 msgid ""
 "CPU energy counters are not readable.\n"
 "Settings › Troubleshooting shows how to make them readable."
 msgstr ""
 
-#: src/lib/common/present.js:62
+#: src/lib/common/present.js:66
 msgid ""
 "GPU not available\n"
 "No supported GPU was detected."
 msgstr ""
 
-#: src/lib/common/present.js:64
+#: src/lib/common/present.js:68
 msgid "VRAM: {percent}%"
 msgstr ""
 
-#: src/lib/common/present.js:65
+#: src/lib/common/present.js:69
 msgid "Temp: {temp}"
 msgstr ""
 
-#: src/lib/common/present.js:66 src/lib/common/settingsmodel.js:24
+#: src/lib/common/present.js:70 src/lib/common/settingsmodel.js:24
 #: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:20
 #: src/ui/panel/constants.js:64 src/ui/panel/dashboard.js:381
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:626
@@ -201,79 +209,87 @@ msgstr ""
 msgid "GPU"
 msgstr ""
 
-#: src/lib/common/present.js:66 src/lib/common/present.js:70
+#: src/lib/common/present.js:70 src/lib/common/present.js:74
 msgid "{gpu}: {percent}%"
 msgstr ""
 
-#: src/lib/common/present.js:69
+#: src/lib/common/present.js:73
 msgid "{gpu}: asleep"
 msgstr ""
 
 #. Translators: how old a chart point is, under the pointer; kept short.
-#: src/lib/common/present.js:201
+#: src/lib/common/present.js:205
 msgid "now"
 msgstr ""
 
-#: src/lib/common/present.js:202
+#: src/lib/common/present.js:206
 msgid "{s}s ago"
 msgstr ""
 
-#: src/lib/common/present.js:206
+#: src/lib/common/present.js:210
 msgid "{h}h ago"
 msgstr ""
 
-#: src/lib/common/present.js:206
+#: src/lib/common/present.js:210
 msgid "{h}h {m}m ago"
 msgstr ""
 
-#: src/lib/common/present.js:210
+#: src/lib/common/present.js:214
 msgid "{m}m ago"
 msgstr ""
 
-#: src/lib/common/present.js:210
+#: src/lib/common/present.js:214
 msgid "{m}m {s}s ago"
 msgstr ""
 
-#: src/lib/common/present.js:220
+#: src/lib/common/present.js:224
 msgid "no reading yet"
 msgstr ""
 
-#: src/lib/common/present.js:221
+#: src/lib/common/present.js:225
 msgid "not available"
 msgstr ""
 
-#: src/lib/common/present.js:222
+#: src/lib/common/present.js:226
 msgid "{n} hour"
 msgid_plural "{n} hours"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/lib/common/present.js:223
+#: src/lib/common/present.js:227
 msgid "{n} minute"
 msgid_plural "{n} minutes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/lib/common/present.js:227
+#: src/lib/common/present.js:231
 msgid "download"
 msgstr ""
 
-#: src/lib/common/present.js:228
+#: src/lib/common/present.js:232
 msgid "upload"
 msgstr ""
 
-#: src/lib/common/present.js:229
+#: src/lib/common/present.js:233
 msgid "per second"
 msgstr ""
 
-#: src/lib/common/present.js:230
+#: src/lib/common/present.js:234
 msgid "watts"
+msgstr ""
+
+#: src/lib/common/present.js:246
+msgid "Waiting for a new reading"
+msgstr ""
+
+#: src/lib/common/present.js:248
+msgid "Last reading {seconds} s ago · updates delayed"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:117
 #: src/ui/panel/constants.js:19 src/ui/panel/constants.js:61
 #: src/ui/panel/details.js:13 src/ui/panel/details.js:38
-#: src/ui/panel/overview.js:619 src/ui/panel/topbar.js:211
+#: src/ui/panel/overview.js:619 src/ui/panel/topbar.js:213
 msgid "CPU"
 msgstr ""
 
@@ -418,8 +434,8 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:93
 msgid ""
-"Values glide to each new reading; CPU, GPU, power, network and disk show "
-"their average over 10 s"
+"Values glide to each new reading and average CPU, GPU, power, network and "
+"disk over 10 s. Turn off for immediate raw readings"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:96 src/lib/common/settingsmodel.js:127
@@ -454,7 +470,7 @@ msgstr ""
 msgid "Gigabytes (GB)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:109 src/ui/panel/topbar.js:30
+#: src/lib/common/settingsmodel.js:109 src/ui/panel/topbar.js:32
 msgid "Alerts"
 msgstr ""
 
@@ -716,7 +732,7 @@ msgid ""
 msgstr ""
 
 #. Translators: an alert, such as "CPU 97 % for 3 min".
-#: src/lib/engine/alerts.js:162
+#: src/lib/engine/alerts.js:177
 msgid "{name} {value} for {minutes} min"
 msgstr ""
 
@@ -1062,11 +1078,11 @@ msgid ""
 msgstr ""
 
 #. Translators: chart ranges on a chip, kept short: one hour, 24 hours.
-#: src/lib/engine/longhistory.js:116
+#: src/lib/engine/longhistory.js:118
 msgid "1h"
 msgstr ""
 
-#: src/lib/engine/longhistory.js:117
+#: src/lib/engine/longhistory.js:119
 msgid "24h"
 msgstr ""
 
@@ -1153,11 +1169,11 @@ msgstr ""
 msgid "No alerts"
 msgstr ""
 
-#: src/ui/panel/alerts.js:117
+#: src/ui/panel/alerts.js:121
 msgid "{process} using {memory}"
 msgstr ""
 
-#: src/ui/panel/alerts.js:118
+#: src/ui/panel/alerts.js:122
 msgid "{process} using {cores} cores"
 msgstr ""
 
@@ -1275,11 +1291,11 @@ msgstr ""
 msgid "Idle"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:227
+#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:229
 msgid "{time} left"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:227
+#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:229
 msgid "{time} to full"
 msgstr ""
 
@@ -1347,7 +1363,7 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:59 src/ui/panel/polling.js:293
+#: src/ui/panel/details.js:59 src/ui/panel/polling.js:309
 msgid "live"
 msgstr ""
 
@@ -1578,7 +1594,7 @@ msgstr ""
 msgid "No supported GPU driver (nvidia-smi, amdgpu, i915 or xe)"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:521
+#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:528
 msgid "{chart} over time"
 msgstr ""
 
@@ -1690,7 +1706,7 @@ msgstr ""
 msgid "Fans"
 msgstr ""
 
-#: src/ui/panel/polling.js:55
+#: src/ui/panel/polling.js:56
 msgid "{s}s"
 msgstr ""
 
@@ -1814,76 +1830,80 @@ msgstr ""
 msgid "Resize the panel"
 msgstr ""
 
-#: src/ui/panel/topbar.js:114
+#: src/ui/panel/topbar.js:116
 msgid "{metric}: {value}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:211
+#: src/ui/panel/topbar.js:213
 msgid "Load: {load}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:212
+#: src/ui/panel/topbar.js:214
 msgid "Freq: {frequency}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:218
+#: src/ui/panel/topbar.js:220
 msgid ""
 "Used: {used} / {total}\n"
 "Available: {available}\n"
 "Swap: {swap}%"
 msgstr ""
 
-#: src/ui/panel/topbar.js:222
+#: src/ui/panel/topbar.js:224
 msgid ""
 "Battery not available\n"
 "No battery was detected."
 msgstr ""
 
-#: src/ui/panel/topbar.js:228
+#: src/ui/panel/topbar.js:230
 msgid ""
 "Battery: {percent}% ({state})\n"
 "Health: {health}% · Rate: {rate}W"
 msgstr ""
 
-#: src/ui/panel/topbar.js:236
+#: src/ui/panel/topbar.js:238
 msgid "Power draw not available"
 msgstr ""
 
-#: src/ui/panel/topbar.js:238
+#: src/ui/panel/topbar.js:240
 msgid "n/a on AC"
 msgstr ""
 
-#: src/ui/panel/topbar.js:239
+#: src/ui/panel/topbar.js:241
 msgid ""
 "System Draw: {system}\n"
 "CPU Package: {package}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:245
+#: src/ui/panel/topbar.js:247
 msgid ""
 "Space used on /: {percent}% ({free} free)\n"
 "Busy: {busy}% · Read {read} · Write {write}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:253
+#: src/ui/panel/topbar.js:255
 msgid ""
 "Download: {down}\n"
 "Upload: {up}\n"
 "Session: ↓ {sessionDown}  ↑ {sessionUp}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:257
+#: src/ui/panel/topbar.js:259
 msgid "Fan: {rpm} RPM"
 msgstr ""
 
-#: src/ui/panel/topbar.js:259
+#: src/ui/panel/topbar.js:261
 msgid ""
 "Temperature not available\n"
 "No readable hwmon or thermal-zone sensor was found."
 msgstr ""
 
-#: src/ui/panel/topbar.js:260
+#: src/ui/panel/topbar.js:262
 msgid "Package Temp: {temp}"
+msgstr ""
+
+#: src/ui/panel/topbar.js:271
+msgid "10 s average · turn off Smooth changes for immediate readings"
 msgstr ""
 
 #: src/ui/panel/widgets.js:401

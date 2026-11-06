@@ -137,6 +137,8 @@ GitHub Actions (`.github/workflows/ci.yml`):
 
 - **Several batteries**: they count as one (charge and rate combined); the Battery page lists each.
 - **GPU**: Intel, AMD and NVIDIA are supported, but only the Intel path has been run on real hardware, and the page for several GPUs has only run on simulated readings (no machine with two was at hand). Integrated GPUs report no dedicated memory, fan or power draw (and often no temperature or clock); the GPU page leaves those fields out. Up to four GPUs get a chart of their own; a further one has its card without a chart. The 1 h and 24 h charts of each GPU start when the extension is enabled.
+- **Reading freshness**: timed-out readings stay visible and dimmed, with their age in the tooltip and detail page. They create gaps in charts and do not advance alerts. Delayed results are consumed once when they arrive.
+- **Immediate feedback**: turn off Settings › Smooth changes for raw values at each sample; smoothing otherwise averages noisy metrics over 10 seconds. Faster sampling does not shorten that averaging window.
 - **Fast updates**: sub-second intervals have not been tried with a real NVIDIA card, and below about 1 s the extension costs more than its 1 % budget.
 - **Power draw**: on AC it comes from RAPL (CPU package only, not the whole machine) and needs read access to `energy_uj`, which most kernels restrict to root; while that is the case the preferences window (Settings › Troubleshooting) shows the two commands that fix it, to copy into a terminal (the extension never runs anything as root). On battery it is the battery's discharge rate.
 - **Temperature**: the top bar shows the CPU package sensor, else the first core, else the hottest sensor.
