@@ -113,6 +113,7 @@ The installed extension is a symlink to `src/` (`scripts/dev.sh` creates it).
 npm ci && ./scripts/dev.sh lint   # ESLint (development dependency only; the extension has no npm dependencies)
 ./scripts/dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
 ./scripts/dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
+RP_UI_AUDIT_ONLY=1 ./scripts/dev.sh test-ui   # focused slow-collector, freshness, concurrency and alert checks
 ./scripts/dev.sh test-i18n   # every string on screen goes through gettext: a source scan, the template is current, and the panel and window in a pseudo-language (⟦…⟧)
 ./scripts/dev.sh pot         # rewrite po/resource-pulse.pot after changing text (test-i18n fails until it is current)
 RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screenshots of every tab

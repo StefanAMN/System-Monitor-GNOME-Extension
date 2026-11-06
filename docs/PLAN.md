@@ -1671,3 +1671,21 @@ Translation coverage passed (241 panel labels / 9 pages, preferences pseudo-lang
 checks). A generated archive installed and stayed ACTIVE for 8 s in an isolated
 shell with a clean extension log. Final overhead measurement is running separately
 from the UI suites, including forced GPU discovery at each tracking sample.
+
+Final overhead/churn proof passed on GNOME Shell 50.1 (15 s measurement windows,
+no concurrent test shell): menu closed +0.80% of a core, tracking +0.137% (41.3 ms CPU
+per full sample), closed including tracking +0.94% against the 1% budget. Overview
++4.20%, CPU tab +2.07%, search +2.53%, all below the 5% open-panel budget. Actor
+counts after three identical open/close rounds: 1059 / 1059 / 1059. The deliberate
+0.25 s setting costs more (+4.07% closed / +8.87% CPU tab), still an explicit user
+choice; the default cadence remains 2 s. No 20-minute memory soak was run.
+
+All eight audit fixes and the proposed tracking upgrades are implemented. Latest
+unit checks total 788 (667 existing + 121 new), including the final age annotation
+case. Full UI, focused UI, i18n, and archive-install checks passed as described above;
+the archive is rebuilt once more from the final source before delivery. Real AMD,
+NVIDIA, multiple-package partial-power failures, PID-reuse races and missing CPU
+controller cases were covered by fixtures, not by corresponding physical hardware.
+Resume verification: `./scripts/dev.sh test-unit`,
+`RP_UI_AUDIT_ONLY=1 ./scripts/dev.sh test-ui`, `./scripts/dev.sh test-i18n`,
+`RP_OVERHEAD_WINDOW=15 ./scripts/dev.sh test-overhead 0`, `./scripts/dev.sh test-zip`.
