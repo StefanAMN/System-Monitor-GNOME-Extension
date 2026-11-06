@@ -242,7 +242,9 @@ const SAMPLE_SOURCES = { memory: 'mem', battery: 'bat', power: 'pwr', disk: 'dsk
 export function sampleNote(data, metric, nowUs) {
     const source = SAMPLE_SOURCES[metric] ?? metric;
     const sample = data.samples?.[source];
-    if (!sample || sample.status === 'fresh' || sample.status === 'cached') return '';
+    if (!sample) return '';
+    const recent = Number.isFinite(sample.sampledAt) && nowUs - sample.sampledAt <= 3e6;
+    if (recent && (sample.status === 'fresh' || sample.status === 'cached')) return '';
     if (!Number.isFinite(sample.sampledAt)) return _('Waiting for a new reading');
     const seconds = Math.max(0, Math.floor((nowUs - sample.sampledAt) / 1e6));
     return fill(_('Last reading {seconds} s ago · updates delayed'), { seconds });

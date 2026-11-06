@@ -464,7 +464,7 @@ export class PollingMethods {
                     ioDenied = held.ioDenied;
                 } else {
                     const procResult = await read('processes',
-                        () => this._proc.sample(mem.total, isDetailedMem, filter ? SEARCH_ROWS : PROCESS_ROWS, this._gapUs / 1e6, { io: isDetailedDsk, filter }), null, `${procSort}:${filter}`);
+                        () => this._proc.sample(mem.total, isDetailedMem, filter ? SEARCH_ROWS : PROCESS_ROWS, this._gapUs / 1e6, { io: isDetailedDsk, filter }), null, `${this._processEpoch ?? 0}:${procSort}:${filter}`);
                     if (gen !== this._gen) return;
                     // null: the sampler was destroyed or is still reading.
                     // CPU and disk rates need two readings; memory is valid from the first.
@@ -481,6 +481,8 @@ export class PollingMethods {
             } else if (!isOpen) {
                 // Deltas across a closed menu would be averages over minutes.
                 this._proc.reset();
+                // Late rows from before this reset are not current on reopen.
+                this._processEpoch = (this._processEpoch ?? 0) + 1;
             }
 
             const data = { cpu, mem, bat, pwr, dsk, net, thm, gpu, psi, throttle, processes, procSort, procFilter, ioDenied };

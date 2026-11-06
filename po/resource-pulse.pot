@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-06 21:27+0200\n"
+"POT-Creation-Date: 2026-11-06 21:42+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -278,11 +278,11 @@ msgstr ""
 msgid "watts"
 msgstr ""
 
-#: src/lib/common/present.js:246
+#: src/lib/common/present.js:248
 msgid "Waiting for a new reading"
 msgstr ""
 
-#: src/lib/common/present.js:248
+#: src/lib/common/present.js:250
 msgid "Last reading {seconds} s ago · updates delayed"
 msgstr ""
 
@@ -1594,7 +1594,7 @@ msgstr ""
 msgid "No supported GPU driver (nvidia-smi, amdgpu, i915 or xe)"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:528
+#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:531
 msgid "{chart} over time"
 msgstr ""
 

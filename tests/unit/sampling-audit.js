@@ -106,7 +106,9 @@ const loop = new GLib.MainLoop(null, false);
     buckets.add(10, 60e6); buckets.advance(120e6); buckets.add(99, 61e6);
     check(Number.isNaN(buckets.get(buckets.length - 1)) && buckets.get(0) === 10, 'late measurements cannot contaminate a later time bucket');
 
-    check(sampleNote(data(stale), 'cpu', 6e6).includes('5 s') && sampleNote(data(fresh), 'cpu', 6e6) === '', 'stale explanation preserves the last measured age');
+    check(sampleNote(data(stale), 'cpu', 6e6).includes('5 s') && sampleNote(data(fresh), 'cpu', 1e6) === '', 'stale explanation preserves the last measured age');
+
+    check(sampleNote(data(fresh), 'cpu', 6e6).includes('5 s'), 'late-ready measurements show their age even when newly consumed');
 
     const stats = new RunningStats();
     stats.add(10, 1e6); stats.add(20, 3e6); stats.breakInterval();

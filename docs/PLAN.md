@@ -1659,3 +1659,15 @@ benchmark with forced GPU descriptor rescans: 32.66 ms CPU / sample at 30 s,
 0.109% of one core (63 session units / 162 processes); warm GPU reads alone were
 3.23 ms vs 25.28 ms including discovery. No claim of whole-shell overhead from
 these collector timings: the shell overhead driver remains a separate check.
+
+Additional final review: process-result cache contexts now include a reset epoch,
+so a delayed list from before menu close cannot reappear as current after reopen.
+A newly consumed late result still shows its actual age rather than losing the
+age annotation merely because it was not consumed before. Sampling regressions
+now total 27; all dedicated checks and lint passed. Missing power observations also
+break the session-mean interval instead of weighting a stale value across the gap.
+
+Translation coverage passed (241 panel labels / 9 pages, preferences pseudo-language
+checks). A generated archive installed and stayed ACTIVE for 8 s in an isolated
+shell with a clean extension log. Final overhead measurement is running separately
+from the UI suites, including forced GPU discovery at each tracking sample.
