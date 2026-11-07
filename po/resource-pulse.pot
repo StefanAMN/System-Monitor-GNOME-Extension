@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-06 21:42+0200\n"
+"POT-Creation-Date: 2026-11-07 17:23+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/extension.js:222
+#: src/extension.js:241
 msgid "Resource Pulse panel"
 msgstr ""
 
@@ -204,7 +204,7 @@ msgstr ""
 #: src/lib/common/present.js:70 src/lib/common/settingsmodel.js:24
 #: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:20
 #: src/ui/panel/constants.js:64 src/ui/panel/dashboard.js:381
-#: src/ui/panel/details.js:14 src/ui/panel/overview.js:626
+#: src/ui/panel/details.js:14 src/ui/panel/overview.js:638
 #: src/ui/panel/pages/gpu.js:213
 msgid "GPU"
 msgstr ""
@@ -288,47 +288,47 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:117
 #: src/ui/panel/constants.js:19 src/ui/panel/constants.js:61
-#: src/ui/panel/details.js:13 src/ui/panel/details.js:38
-#: src/ui/panel/overview.js:619 src/ui/panel/topbar.js:213
+#: src/ui/panel/details.js:13 src/ui/panel/details.js:40
+#: src/ui/panel/overview.js:631 src/ui/panel/topbar.js:213
 msgid "CPU"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:101
 #: src/lib/common/settingsmodel.js:122 src/lib/engine/agentreport.js:21
 #: src/ui/panel/constants.js:19 src/ui/panel/constants.js:62
-#: src/ui/panel/details.js:13 src/ui/panel/overview.js:620
+#: src/ui/panel/details.js:13 src/ui/panel/overview.js:632
 #: src/ui/prefs/diagnostics.js:24 src/ui/prefs/tracking.js:555
 msgid "Memory"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:17 src/lib/engine/agentreport.js:22
 #: src/ui/panel/constants.js:19 src/ui/panel/constants.js:70
-#: src/ui/panel/details.js:13 src/ui/panel/overview.js:621
+#: src/ui/panel/details.js:13 src/ui/panel/overview.js:633
 #: src/ui/prefs/diagnostics.js:25 src/ui/prefs/tracking.js:540
 msgid "Battery"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:18 src/ui/panel/constants.js:19
-#: src/ui/panel/details.js:13 src/ui/panel/overview.js:625
+#: src/ui/panel/details.js:13 src/ui/panel/overview.js:637
 #: src/ui/panel/pages/gpu.js:73
 msgid "Power"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:19 src/ui/panel/constants.js:20
-#: src/ui/panel/details.js:14 src/ui/panel/overview.js:622
+#: src/ui/panel/details.js:14 src/ui/panel/overview.js:634
 #: src/ui/prefs/tracking.js:567
 msgid "Disk"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:20 src/lib/engine/agentreport.js:23
 #: src/lib/engine/agentreport.js:173 src/ui/panel/constants.js:20
-#: src/ui/panel/details.js:14 src/ui/panel/overview.js:623
+#: src/ui/panel/details.js:14 src/ui/panel/overview.js:635
 #: src/ui/prefs/diagnostics.js:26 src/ui/prefs/tracking.js:579
 msgid "Network"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:21 src/ui/panel/details.js:14
-#: src/ui/panel/overview.js:624
+#: src/ui/panel/overview.js:636
 msgid "Thermal"
 msgstr ""
 
@@ -442,7 +442,7 @@ msgstr ""
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:63
 #: src/ui/panel/constants.js:95 src/ui/panel/pages/gpu.js:68
 #: src/ui/panel/pages/gpu.js:121 src/ui/panel/pages/gpu.js:219
-#: src/ui/prefs/tracking.js:601
+#: src/ui/panel/pages/incidents.js:16 src/ui/prefs/tracking.js:601
 msgid "Temperature"
 msgstr ""
 
@@ -1354,24 +1354,28 @@ msgid_plural "Yours only · {n} system processes need administrator rights"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/panel/details.js:29
+#: src/ui/panel/details.js:15 src/ui/panel/overview.js:580
+msgid "Slowdowns"
+msgstr ""
+
+#: src/ui/panel/details.js:30
 msgid "Back to the overview"
 msgstr ""
 
-#: src/ui/panel/details.js:42 src/ui/panel/overview.js:592
+#: src/ui/panel/details.js:44 src/ui/panel/overview.js:604
 #: src/ui/prefs/window.js:44
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:59 src/ui/panel/polling.js:309
+#: src/ui/panel/details.js:62 src/ui/panel/polling.js:338
 msgid "live"
 msgstr ""
 
-#: src/ui/panel/details.js:62
+#: src/ui/panel/details.js:65
 msgid "Last {span}"
 msgstr ""
 
-#: src/ui/panel/details.js:62
+#: src/ui/panel/details.js:65
 msgid "Recent samples"
 msgstr ""
 
@@ -1379,27 +1383,27 @@ msgstr ""
 msgid "System Overview"
 msgstr ""
 
-#: src/ui/panel/overview.js:578
+#: src/ui/panel/overview.js:590
 msgid "Refresh now"
 msgstr ""
 
-#: src/ui/panel/overview.js:652
+#: src/ui/panel/overview.js:664
 msgid "Intel Processor"
 msgstr ""
 
-#: src/ui/panel/overview.js:653
+#: src/ui/panel/overview.js:665
 msgid "Cores & Threads"
 msgstr ""
 
-#: src/ui/panel/overview.js:663 src/ui/panel/pages/cpu.js:67
+#: src/ui/panel/overview.js:675 src/ui/panel/pages/cpu.js:67
 msgid "Uptime"
 msgstr ""
 
-#: src/ui/panel/overview.js:668 src/ui/panel/pages/cpu.js:55
+#: src/ui/panel/overview.js:680 src/ui/panel/pages/cpu.js:55
 msgid "Load Average"
 msgstr ""
 
-#: src/ui/panel/overview.js:673
+#: src/ui/panel/overview.js:685
 msgid "OS"
 msgstr ""
 
@@ -1594,7 +1598,7 @@ msgstr ""
 msgid "No supported GPU driver (nvidia-smi, amdgpu, i915 or xe)"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:531
+#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:565
 msgid "{chart} over time"
 msgstr ""
 
@@ -1604,6 +1608,96 @@ msgstr ""
 
 #: src/ui/panel/pages/gpu.js:256
 msgid "asleep"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:15
+msgid "CPU load"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:15
+msgid "Disk busy"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:15
+msgid "Memory used"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:15
+msgid "Swap used"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:16
+msgid "CPU wait"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:16
+msgid "I/O wait"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:16
+msgid "Memory wait"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:18
+msgid "CPU pressure"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:18
+msgid "I/O pressure"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:18
+msgid "Manual"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:18
+msgid "Memory pressure"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:33
+msgid "Unknown time"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:33
+msgid "{date} · {trigger}"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:41
+msgid "Each capture keeps one minute before the trigger and 30 seconds after."
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:48
+msgid "Record now"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:63
+msgid "Recent captures"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:64
+msgid "No captures yet"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:73
+msgid "Capture timeline"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:75
+msgid ""
+"Each 2-second slot shows its highest recorded reading. The dashed line marks "
+"the trigger. Gaps indicate missing readings."
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:89
+msgid "{metric} before and after the trigger"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:109
+msgid "Recording · {seconds} s remaining"
+msgstr ""
+
+#: src/ui/panel/pages/incidents.js:110
+msgid "Finishing capture…"
 msgstr ""
 
 #: src/ui/panel/pages/memory.js:12
@@ -1906,11 +2000,11 @@ msgstr ""
 msgid "10 s average · turn off Smooth changes for immediate readings"
 msgstr ""
 
-#: src/ui/panel/widgets.js:401
+#: src/ui/panel/widgets.js:426
 msgid "no data"
 msgstr ""
 
-#: src/ui/panel/widgets.js:402
+#: src/ui/panel/widgets.js:427
 msgid "{average} avg, {peak} peak"
 msgstr ""
 

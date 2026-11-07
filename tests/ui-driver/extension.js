@@ -1181,6 +1181,168 @@ async function batteryTracking(rp) {
     check(!rp._tracker, 'tracking: still running after being switched off');
 }
 
+async function openSlowdowns(rp) {
+    await clickActor(rp._indicator);
+    check(rp._indicator.menu.isOpen && rp._activeTab === 'overview', 'slowdowns: pointer did not open the overview');
+    await scrollIntoView(rp, rp._incidentEntryButton);
+    await clickActor(rp._incidentEntryButton);
+    check(rp._activeTab === 'incidents' && rp._detailSections.incidents.is_mapped(),
+        'slowdowns: overview button did not open the incident page');
+    check(!rp._detailRangeBox.visible && rp._incidentCaptureButton.is_mapped(),
+        'slowdowns: live range selector is visible or the capture button is missing');
+}
+
+async function closeSlowdowns(rp) {
+    await scrollIntoView(rp, rp._detailBackBtn);
+    await clickActor(rp._detailBackBtn);
+    check(rp._activeTab === 'overview', 'slowdowns: back button did not return to the overview');
+    rp._indicator.menu.close();
+    await sleep(400);
+}
+
+// Feed pressure counters through regular polls. The pointer drives page
+// navigation, capture, and selection just as it does for a normal user.
+async function slowdownRecorder(rp) {
+    const waitFor = async (predicate, ms, message) => {
+        const until = GLib.get_monotonic_time() + ms * 1000;
+        while (!predicate() && GLib.get_monotonic_time() < until) await sleep(100);
+        check(predicate(), message);
+    };
+    const psi = rp._psi.sample;
+    let since = GLib.get_monotonic_time();
+    let total = 10e6;
+    let readings = 0;
+    let stalled = false;
+    let gap = false;
+    rp._psi.sample = async () => {
+        const now = GLib.get_monotonic_time();
+        total += Math.floor((now - since) * (stalled ? 0.5 : 0.02));
+        since = now;
+        readings++;
+        if (gap) return null;
+        return {
+            cpu: { some: 2, full: 0 }, memory: { some: 1, full: 0 }, io: { some: 1, full: 0 },
+            totals: { cpu: { some: total, full: 0 }, memory: { some: 10e6, full: 0 }, io: { some: 10e6, full: 0 } },
+        };
+    };
+    const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+    const scheme = iface.get_string('color-scheme');
+    let manual;
+    let pollingPaused = false;
+    try {
+        await rp._incidentsReady;
+        iface.set_string('color-scheme', 'prefer-dark');
+        // Move away from the hot corner before dismissing Activities.
+        pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+        await sleep(300);
+        Main.overview.hide();
+        for (let i = 0; i < 30 && (Main.overview.visible || Main.overview.animationInProgress); i++) await sleep(100);
+        await waitFor(() => readings >= 2, 7000, 'slowdowns: regular polls did not establish a pressure baseline');
+        await openSlowdowns(rp);
+        check(rp._incidentEmpty.visible && !rp._incidentTimeline.visible, 'slowdowns: no empty history state');
+        await shot('slowdowns-empty-dark');
+        await closeSlowdowns(rp);
+        const count = rp._incidents.captures.length;
+        stalled = true;
+        await waitFor(() => rp._incidents.active?.trigger === 'cpu', 7000, 'slowdowns: CPU pressure did not start an automatic capture');
+        stalled = false;
+        // The manual path below exercises the full post-trigger window.
+        // Shorten only this automatic fixture to stay within the test budget.
+        rp._incidents.active.end = GLib.get_monotonic_time() + 1000000;
+        await waitFor(() => rp._incidents.captures.length > count, 7000, 'slowdowns: automatic capture did not finish');
+        const automatic = rp._incidents.captures[0];
+        check(automatic.trigger === 'cpu', 'slowdowns: automatic capture lost its cause');
+
+        await openSlowdowns(rp);
+        check(rp._incidentRows[0]?.label.includes('CPU pressure') && rp._incidentCaptureButton.label === 'Record now',
+            'slowdowns: the automatic trigger label or manual recording action is missing');
+        await scrollIntoView(rp, rp._incidentCaptureButton);
+        await clickActor(rp._incidentCaptureButton);
+        const active = rp._incidents.active;
+        check(active?.trigger === 'manual' && active.end - GLib.get_monotonic_time() > 25e6,
+            'slowdowns: clicking Capture did not start the manual recording window');
+        check(rp._incidentStatusLabel.visible && rp._incidentStatusLabel.text.startsWith('Recording') &&
+            !rp._incidentCaptureButton.reactive && !rp._incidentCaptureButton.can_focus && rp._incidentCaptureButton.opacity < 255,
+            'slowdowns: no recording status or duplicate captures are still possible');
+        await shot('slowdowns-recording-dark');
+        await sleep(2300);
+        gap = true;
+        await sleep(4500);
+        gap = false;
+        // The longest configured poll cadence can miss the capture deadline.
+        // Suspend periodic polls near the end so only the one-shot can finish.
+        const pauseAt = active.end - 3500000;
+        await sleep(Math.max(1, Math.ceil((pauseAt - GLib.get_monotonic_time()) / 1000)));
+        check(rp._timeoutId && rp._incidentFinishId, 'slowdowns: periodic polling or the finish timer is missing');
+        GLib.source_remove(rp._timeoutId);
+        rp._timeoutId = null;
+        pollingPaused = true;
+        await waitFor(() => !rp._pollInFlight, 3000, 'slowdowns: last regular poll did not drain');
+        check(rp._incidents.active === active, 'slowdowns: regular poll finished before the deadline');
+        const lastPoll = rp._lastPollTime;
+        await waitFor(() => rp._incidents.captures[0]?.trigger === 'manual', 9000, 'slowdowns: manual capture did not finish without periodic polls');
+        check(rp._lastPollTime === lastPoll && !rp._incidentFinishId, 'slowdowns: finish timer needed another regular poll or remained armed');
+        check(GLib.get_monotonic_time() >= active.end && rp._incidents.captures[1] === automatic,
+            'slowdowns: capture finished early or the list is out of order');
+        rp._startPolling();
+        pollingPaused = false;
+        manual = rp._incidents.captures[0];
+        await waitFor(() => rp._incidentRows.length >= 2, 4000, 'slowdowns: completed captures did not appear in the list');
+        await scrollIntoView(rp, rp._incidentRows[1]);
+        await clickActor(rp._incidentRows[1]);
+        check(rp._incidentSelected === automatic, 'slowdowns: clicking the older capture did not switch timelines');
+        await scrollIntoView(rp, rp._incidentRows[0]);
+        await clickActor(rp._incidentRows[0]);
+        check(rp._incidentSelected === manual, 'slowdowns: clicking the latest capture did not show its timeline');
+        await shot('slowdowns-completed-dark');
+
+        const withGap = rp._incidentCharts.get('cpuWait');
+        const points = Array.from({ length: 15 }, (_unused, i) => withGap.history.get(31 + i));
+        const first = points.findIndex(Number.isFinite);
+        const last = points.findLastIndex(Number.isFinite);
+        check(first >= 0 && last > first && points.slice(first + 1, last).some(Number.isNaN) &&
+            withGap.sampleSeconds === 2 && withGap.options.relativeStartSeconds === -60,
+            'slowdowns: the chart lost its measurement gap or its fixed incident window');
+        await scrollIntoView(rp, withGap);
+        check(withGap.is_mapped() && withGap.width > 0 && withGap.height > 0, 'slowdowns: timeline has no mapped allocation');
+        check(cutOffLabels(rp._detailSections.incidents).length === 0, 'slowdowns: incident labels are cut off in dark mode');
+        await shot('slowdowns-gap-dark');
+
+        iface.set_string('color-scheme', 'prefer-light');
+        await sleep(800);
+        checkTheme(rp, true, 'slowdowns light');
+        check(cutOffLabels(rp._detailSections.incidents).length === 0, 'slowdowns: incident labels are cut off in light mode');
+        await shot('slowdowns-gap-light');
+        await scrollIntoView(rp, rp._detailBackBtn);
+        await shot('slowdowns-completed-light');
+        await closeSlowdowns(rp);
+    } finally {
+        rp._psi.sample = psi;
+        if (pollingPaused) rp._startPolling();
+        iface.set_string('color-scheme', scheme);
+    }
+
+    const path = `${GLib.get_user_data_dir()}/resource-pulse/incidents.json`;
+    const file = Gio.File.new_for_path(path);
+    await waitFor(() => file.query_exists(null), 4000, 'slowdowns: capture history was not saved');
+    Main.extensionManager.disableExtension(TARGET);
+    await sleep(500);
+    Main.extensionManager.enableExtension(TARGET);
+    await sleep(1500);
+    const reopened = Main.extensionManager.lookup(TARGET)?.stateObj;
+    check(reopened?._indicator, 'slowdowns: extension did not re-enable');
+    await reopened._incidentsReady;
+    check(reopened._incidents.captures[0]?.at === manual.at && reopened._incidents.captures[0]?.trigger === 'manual',
+        'slowdowns: newest capture was not restored from disk');
+    await openSlowdowns(reopened);
+    await scrollIntoView(reopened, reopened._incidentRows[0]);
+    await clickActor(reopened._incidentRows[0]);
+    check(reopened._incidentSelected?.at === manual.at, 'slowdowns: restored capture cannot be opened');
+    await closeSlowdowns(reopened);
+    console.log('RP-UITEST slowdowns: automatic trigger, full manual window finished without a poll, timeline gap, and restored capture');
+}
+
 // Hardware reads independent of the GPU must start before a slow GPU answers.
 async function independentCollectors(rp) {
     const poll = rp._poll;
@@ -1978,8 +2140,9 @@ async function translationCoverage(rp) {
     look(rp._alertText(), 'alerts');
     check(rp._topBarWidgets.cpu.box.accessible_name.includes('⟦'), `coverage: the pseudo-language is not loaded (CPU named '${rp._topBarWidgets.cpu.box.accessible_name}')`);
     let texts = 0;
+    const pages = [...TABS, 'incidents'];
     rp._indicator.menu.open();
-    for (const tab of TABS) {
+    for (const tab of pages) {
         rp._activeTab = tab;
         rp._updateTabVisibility();
         // Process lists need two samples.
@@ -1990,7 +2153,7 @@ async function translationCoverage(rp) {
         scan(rp._indicator.menu.box, `${tab} page`);
     }
     rp._indicator.menu.close();
-    console.log(`RP-UITEST coverage: ${texts} panel labels read on ${TABS.length} pages`);
+    console.log(`RP-UITEST coverage: ${texts} panel labels read on ${pages.length} pages`);
     check(found.size === 0, `coverage: untranslated: ${[...found].map(([text, where]) => `${where}: '${text}'`).join('; ')}`);
 
     // The window, in its own process.
@@ -2010,6 +2173,12 @@ async function translationCoverage(rp) {
 }
 
 async function run() {
+    if (GLib.getenv('RP_UI_INCIDENTS_ONLY') === '1') {
+        const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
+        check(rp?._indicator, 'target extension not enabled');
+        await slowdownRecorder(rp);
+        return;
+    }
     await sleep(1500);
     enabledAt = GLib.get_monotonic_time() - 4000000;
     let ext = Main.extensionManager.lookup(TARGET);
@@ -2064,6 +2233,8 @@ async function run() {
     await clickThrough(ext.stateObj, 'first open');
     await cycleTabs(ext.stateObj, 1, 'dark');
     check(Object.keys(ext.stateObj._detailSections).length === 8, 'detail pages missing after visiting every tab');
+    await openSlowdowns(ext.stateObj);
+    await closeSlowdowns(ext.stateObj);
     ext.stateObj._indicator.menu.open();
     await sleep(300);
     checkTheme(ext.stateObj, false, 'dark');

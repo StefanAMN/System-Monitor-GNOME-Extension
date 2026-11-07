@@ -12,6 +12,7 @@ import { VERTICAL } from './compat.js';
 const PAGE_TITLES = translated({
     cpu: N_('CPU'), memory: N_('Memory'), battery: N_('Battery'), power: N_('Power'),
     disk: N_('Disk'), network: N_('Network'), thermal: N_('Thermal'), gpu: N_('GPU'),
+    incidents: N_('Slowdowns'),
 });
 
 export class DetailsMethods {
@@ -26,7 +27,8 @@ export class DetailsMethods {
         // Top bar for CPU detail header (matches Right Panel header)
         this._detailHeader = new St.BoxLayout({ style: 'margin-bottom: 14px; spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
 
-        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: _('Back to the overview') });
+        const backBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, can_focus: true, accessible_name: _('Back to the overview') });
+        this._detailBackBtn = backBtn;
         backBtn.add_child(new St.Icon({ icon_name: 'go-previous-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' }));
         backBtn.connect('clicked', () => {
             this._activeTab = 'overview';
@@ -52,6 +54,7 @@ export class DetailsMethods {
         this._detailHeader.add_child(this._detailHeaderTitleBox);
         // Range of the page's charts: the live samples, the last hour, the last day.
         const rangeBox = new St.BoxLayout({ style_class: 'rp-chip-bg rp-range-box', y_align: Clutter.ActorAlign.CENTER });
+        this._detailRangeBox = rangeBox;
         this._rangeButtons = {};
         for (const range of Object.keys(RANGES)) {
             const button = new St.Button({
@@ -91,6 +94,7 @@ export class DetailsMethods {
             network: () => this._buildNetworkDetails(),
             thermal: () => this._buildThermalDetails(),
             gpu:     () => this._buildGpuDetails(),
+            incidents: () => this._buildIncidentDetails(),
         };
 
         this._menuContainer.add_child(this._detailArea);
@@ -122,7 +126,7 @@ export class DetailsMethods {
         // Detail data (sensor list, mounts, processes) is only sampled for
         // the visible tab: fetch it now instead of after up to one interval.
         // _poll() itself coalesces bursts (keyboard navigation, re-renders).
-        if (this._menuOpen) this._poll();
+        if (this._menuOpen && this._activeTab !== 'incidents') this._poll();
         if (this._activeTab === 'overview') {
             if (!this._overviewPage.visible) {
                 this._overviewPage.opacity = 0;
@@ -147,9 +151,20 @@ export class DetailsMethods {
             }
             
             // Set header title & icon dynamically
-            this._setMetricIcon(this._detailHeaderIcon, this._activeTab);
-            this._detailHeaderIcon.style_class = `rp-c-${this._activeTab}`;
+            const incidents = this._activeTab === 'incidents';
+            if (incidents) {
+                this._detailHeaderIcon.icon_name = 'document-open-recent-symbolic';
+                this._detailHeaderIcon.fallback_gicon = null;
+            } else {
+                this._setMetricIcon(this._detailHeaderIcon, this._activeTab);
+            }
+            this._detailHeaderIcon.style_class = incidents ? 'rp-fg-dim' : `rp-c-${this._activeTab}`;
             this._detailHeaderTitle.text = PAGE_TITLES[this._activeTab];
+            this._detailRangeBox.visible = !incidents;
+            if (incidents) {
+                this._sampleStatusLabel.visible = false;
+                this._updateIncidentPage();
+            }
 
             for (const [key, section] of Object.entries(this._detailSections || {})) {
                 if (section) section.visible = (key === this._activeTab);

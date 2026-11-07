@@ -1689,3 +1689,42 @@ controller cases were covered by fixtures, not by corresponding physical hardwar
 Resume verification: `./scripts/dev.sh test-unit`,
 `RP_UI_AUDIT_ONLY=1 ./scripts/dev.sh test-ui`, `./scripts/dev.sh test-i18n`,
 `RP_OVERHEAD_WINDOW=15 ./scripts/dev.sh test-overhead 0`, `./scripts/dev.sh test-zip`.
+
+## Slowdown recorder (2026-11-07)
+
+| Milestone | Implementation and proof |
+|---|---|
+| Collect and correlate | Reuse scheduled poll snapshots on unprivileged Linux. Read cumulative PSI totals from the existing files, calculate stall shares from monotonic deltas, and leave stale, reset and unavailable measurements as gaps. Exercise synthetic stalls, missing and delayed observations, cadence changes, and counter resets in unit fixtures. |
+| Capture and retain | Buffer a bounded rolling history and capture 60 s before and 30 s after a trigger. Verify fixed storage, automatic hysteresis, manual capture during cooldown, retention, private atomic saves, and corrupt/missing file behavior. |
+| Replay | Add a Slowdowns page to the panel with manual capture, saved incident selection and aligned graphs. Open, record and replay with real compositor pointer events, inspect light/dark screenshots, and verify disable/re-enable reloads a completed capture. |
+| Measure | Run the Shell overhead and churn driver with the recorder enabled. Verify the unit suite, translation catalog and packaged extension. |
+
+Existing telemetry stores are untouched. The recorder uses separate versioned
+local storage and needs no extra recurring file reads or timers. The new store
+has no pre-existing schema to migrate. The first capture version records system
+metrics and gaps from the existing cadence.
+
+The detector uses the interval share of PSI `some`. It starts at 25% CPU or
+10% memory/I/O pressure with at least 100 ms of measured stalls. A recovery
+below half the threshold re-arms that resource, and automatic capture has a
+120 s cooldown after an incident. The 30 s post-trigger window ends on the
+first eligible poll, or on a one-shot deadline with 3 s for in-flight samples.
+Completed captures persist. An in-progress capture ends when the extension is
+disabled. The rolling numeric buffer uses 4 KiB and the separate private store
+keeps five captures with a 64 KiB read cap.
+
+Proof on GNOME Shell 50.1: 831 unit checks passed. The focused driver injected
+cumulative pressure through the regular poll, observed a closed-menu trigger,
+started a full manual window with a real pointer click, removed regular polling
+before the deadline, and verified that the one-shot finished and persisted it.
+Real clicks replayed the capture after re-enable. Dark and light screenshots
+showed the relative axes, trigger marker, and a deliberately missing PSI interval.
+
+Fifteen-second Shell overhead windows at the default 2 s cadence measured
++0.67% of one core with the menu closed and +0.88% including tracking. Open
+overview and CPU pages measured +4.93% and +3.73%. Three churn rounds ended
+with 1066, 1061, and 1061 actors. The overhead run used a zero-second soak.
+
+Lint and pseudo translation coverage passed, including the Slowdowns page.
+The rebuilt 81-file archive installed and stayed active for 8 s in an isolated
+Shell with a clean extension log.

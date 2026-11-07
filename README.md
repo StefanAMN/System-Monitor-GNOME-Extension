@@ -20,6 +20,7 @@ Resource Pulse is a modern system resource monitoring extension for GNOME Shell 
 - **System Load**: How much of the time programs were waiting for the CPU, memory or the disk (the kernel's pressure figures), on those pages.
 - **Pause, Lower Priority, End**: The ⋮ on a process row opens a line right under it: Pause / Resume, Lower priority (niceness 10; a user cannot raise it back, so the button then goes away) and End…, which asks first, then asks the process (or the whole group, e.g. all of a browser's processes) to quit, and offers Force quit if it does not. While the line is open the rows keep their order. Paused groups come first in the CPU list with a pause icon, so they can be found and resumed. Only your own processes; never the shell or other parts of the session.
 - **1 h / 24 h Charts**: Every detail chart switches between the recent samples, the last hour (per minute) and the last day (per quarter hour), with the average and the peak; times nothing was read show as gaps.
+- **Slowdown recorder**: Open **Slowdowns** from the panel overview. A CPU, memory, or I/O pressure spike starts a capture automatically, and **Record now** starts one manually. Replay the previous 60 seconds and the next 30 on aligned charts for CPU, memory, swap, disk activity, temperature, and pressure. Each two-second slot shows the highest available raw reading, and missing samples leave gaps. The five latest completed captures are saved locally in `~/.local/share/resource-pulse/incidents.json`.
 - **Disk Users**: The Disk page lists the processes reading and writing right now.
 - **Process Search**: The CPU, Memory and Disk pages each have a field that filters their process list by name: every process is searched, not only the busiest five, and up to ten matches are shown. Closing the panel ends the search.
 - **Data per Day and Month**: The Network page shows today's and this month's traffic on physical interfaces, kept in `~/.local/share/resource-pulse/network-usage.json` (62 days).
@@ -113,6 +114,7 @@ The installed extension is a symlink to `src/` (`scripts/dev.sh` creates it).
 npm ci && ./scripts/dev.sh lint   # ESLint (development dependency only; the extension has no npm dependencies)
 ./scripts/dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
 ./scripts/dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
+RP_UI_INCIDENTS_ONLY=1 ./scripts/dev.sh test-ui # automatic capture, pointer controls, gaps and reload
 RP_UI_AUDIT_ONLY=1 ./scripts/dev.sh test-ui   # focused slow-collector, freshness, concurrency and alert checks
 ./scripts/dev.sh test-i18n   # every string on screen goes through gettext: a source scan, the template is current, and the panel and window in a pseudo-language (⟦…⟧)
 ./scripts/dev.sh pot         # rewrite po/resource-pulse.pot after changing text (test-i18n fails until it is current)

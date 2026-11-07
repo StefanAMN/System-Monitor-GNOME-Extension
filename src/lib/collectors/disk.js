@@ -151,6 +151,7 @@ export class DiskSampler {
             let readBytes = 0;
             let writeBytes = 0;
             let maxDiskIoPercent = 0;
+            let ioSampled = false;
             const disks = new Map();
             let now = GLib.get_monotonic_time();
 
@@ -164,6 +165,7 @@ export class DiskSampler {
                     // the next, and one removed does not hide the others' traffic.
                     const prev = this._prevDisks.get(disk.name);
                     if (!prev) continue;
+                    ioSampled ||= deltaTimeMs > 0 && disk.ioTicks >= prev.ioTicks;
                     readBytes += counterDelta(disk.sectorsRead, prev.sectorsRead) * 512;
                     writeBytes += counterDelta(disk.sectorsWritten, prev.sectorsWritten) * 512;
                     const util = ioUtilization(disk.ioTicks, prev.ioTicks, deltaTimeMs);
@@ -211,6 +213,7 @@ export class DiskSampler {
                 readRate: readRate,
                 writeRate: writeRate,
                 diskPercent: diskPercent,
+                ioSampled,
                 maxSpeed: this._maxSpeed
             };
         } catch (e) {

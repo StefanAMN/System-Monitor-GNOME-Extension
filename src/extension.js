@@ -22,6 +22,8 @@ import { ProcessSampler } from './lib/collectors/process.js';
 import { ledgerPath } from './lib/engine/batterytracker.js';
 import { BatteryLedger, saveLedger } from './lib/engine/batteryledger.js';
 import { PeakScale } from './lib/common/present.js';
+import { IncidentRecorder } from './lib/engine/incidents.js';
+import { IncidentStore } from './lib/engine/incidentstore.js';
 import { CollectorSamples } from './lib/engine/samples.js';
 import { RingBuffer } from './lib/engine/ringbuffer.js';
 import { AlertMonitor } from './lib/engine/alerts.js';
@@ -51,6 +53,7 @@ import { PowerPage } from './ui/panel/pages/power.js';
 import { DiskPage } from './ui/panel/pages/disk.js';
 import { NetworkPage } from './ui/panel/pages/network.js';
 import { ThermalPage } from './ui/panel/pages/thermal.js';
+import { IncidentPage } from './ui/panel/pages/incidents.js';
 import { GpuPage } from './ui/panel/pages/gpu.js';
 import { DashboardMethods } from './ui/panel/dashboard.js';
 import { AccessibilityMethods } from './ui/panel/a11y.js';
@@ -153,6 +156,22 @@ export default class ResourcePulseExtension extends Extension {
                 ? `ResourcePulse: ${key} sample failed: ${error.message}`
                 : `ResourcePulse: ${key} collector is late; showing its last value`));
 
+        const incidentRecorder = this._incidents = new IncidentRecorder();
+        const incidentStore = this._incidentStore = new IncidentStore();
+        const incidentGen = this._gen;
+        this._incidentFinishId = 0;
+        this._incidentsLoaded = false;
+        this._incidentsReady = incidentStore.load().then(captures => {
+            const completedWhileLoading = incidentRecorder.captures.length > 0;
+            incidentRecorder.restore(captures);
+            if (incidentGen === this._gen) {
+                this._incidentsLoaded = true;
+                if (this._menuOpen && this._activeTab === 'incidents') this._updateIncidentPage();
+            }
+            if (completedWhileLoading) return incidentStore.save(incidentRecorder.captures);
+            return null;
+        }).catch(e => logOnce(`ResourcePulse: cannot load slowdown captures: ${e.message}`));
+
         // Time-series history: fixed-capacity buffers owned here, painted by sparklines.
         this._hist = {};
         for (const key of HISTORY_KEYS) this._hist[key] = new RingBuffer(HISTORY_CAPACITY);
@@ -184,7 +203,7 @@ export default class ResourcePulseExtension extends Extension {
         this._indicator.connect('destroy', () => {
             this._indicatorGone = true;
             this._gen++;
-            for (const key of ['_timeoutId', '_deferredPollId', '_glideId', '_fitIdleId', '_sizeIdleId', '_tooltipIdleId', '_causeTimerId']) {
+            for (const key of ['_timeoutId', '_deferredPollId', '_glideId', '_fitIdleId', '_sizeIdleId', '_tooltipIdleId', '_causeTimerId', '_incidentFinishId']) {
                 if (this[key]) GLib.source_remove(this[key]);
                 this[key] = 0;
             }
@@ -598,4 +617,4 @@ export default class ResourcePulseExtension extends Extension {
     }
 }
 
-installMethods(ResourcePulseExtension, [SharedMethods, SizingMethods, PollingMethods, TopbarMethods, AlertsMethods, ProcessesMethods, OverviewMethods, DetailsMethods, CpuPage, MemoryPage, BatteryPage, PowerPage, DiskPage, NetworkPage, ThermalPage, GpuPage, DashboardMethods, AccessibilityMethods]);
+installMethods(ResourcePulseExtension, [SharedMethods, SizingMethods, PollingMethods, TopbarMethods, AlertsMethods, ProcessesMethods, OverviewMethods, DetailsMethods, CpuPage, MemoryPage, BatteryPage, PowerPage, DiskPage, NetworkPage, ThermalPage, GpuPage, IncidentPage, DashboardMethods, AccessibilityMethods]);

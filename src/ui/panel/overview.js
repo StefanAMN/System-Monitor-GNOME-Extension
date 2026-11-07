@@ -570,10 +570,22 @@ export class OverviewMethods {
     _buildOverview() {
         this._overviewPage = new St.BoxLayout({ ...VERTICAL, x_expand: true, y_expand: true });
 
-        // Header container (System Overview, Refresh, Menu)
+        // Header container (System Overview, Slowdowns, Refresh, Settings)
         const headerBox = new St.BoxLayout({ style: 'margin-bottom: 12px;', y_align: Clutter.ActorAlign.CENTER });
         const titleLbl = new St.Label({ text: _('System Overview'), style_class: 'rp-fg', style: 'font-size: 1.3em; font-weight: bold;', x_expand: true });
         headerBox.add_child(titleLbl);
+
+        const incidentsBtn = new St.Button({
+            style_class: 'rp-range rp-chip-bg', style: 'margin-right: 6px;',
+            label: _('Slowdowns'), accessible_name: _('Slowdowns'), reactive: true, can_focus: true,
+        });
+        incidentsBtn.connect('clicked', () => {
+            this._activeTab = 'incidents';
+            this._updateTabVisibility();
+        });
+        this._incidentEntryButton = incidentsBtn;
+        this._addClickAnimations(incidentsBtn);
+        headerBox.add_child(incidentsBtn);
 
         const refreshBtn = new St.Button({ style_class: 'rp-chip-bg', style: 'border-radius: 99px; padding: 6px;', reactive: true, accessible_name: _('Refresh now') });
         const refreshIcon = new St.Icon({ icon_name: 'view-refresh-symbolic', style_class: 'rp-fg', style: 'icon-size: 16px;' });

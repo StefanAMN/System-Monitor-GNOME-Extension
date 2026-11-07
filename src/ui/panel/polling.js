@@ -172,6 +172,35 @@ export class PollingMethods {
         });
     }
 
+    _captureIncident() {
+        const started = this._incidents.startManual(GLib.get_monotonic_time(), Date.now());
+        if (started) {
+            this._scheduleIncidentFinish();
+            this._updateIncidentPage();
+        }
+        return started;
+    }
+
+    _scheduleIncidentFinish() {
+        if (this._incidentFinishId || !this._incidents.active) return;
+        // Leave time for an in-flight reading measured before the deadline.
+        // At the longest cadence there may be no periodic poll in this grace period.
+        const remainingMs = Math.ceil((this._incidents.active.end - GLib.get_monotonic_time()) / 1000);
+        this._incidentFinishId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, Math.max(1, remainingMs + POLL_DEADLINE_MS), () => {
+            this._incidentFinishId = 0;
+            if (this._incidents.finish(GLib.get_monotonic_time())) this._saveIncidents();
+            if (this._menuOpen && this._activeTab === 'incidents') this._updateIncidentPage();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _saveIncidents() {
+        if (this._incidentFinishId) GLib.source_remove(this._incidentFinishId);
+        this._incidentFinishId = 0;
+        // Startup merges and writes any captures completed during the file read.
+        if (this._incidentsLoaded) this._incidentStore.save(this._incidents.captures);
+    }
+
     _pushHistory(key, value, now, sampledAt = now) {
         // A metric that was not sampled for a while (unpinned with the menu
         // closed) restarts its graph instead of joining stale and fresh points.
@@ -498,11 +527,16 @@ export class PollingMethods {
                 else this._pwrStats.breakInterval();
             }
             if (tick || this._recordPending) {
+                if (this._incidents.observe(data, GLib.get_monotonic_time(), Date.now(), this._gapUs))
+                    this._saveIncidents();
+                else
+                    this._scheduleIncidentFinish();
                 this._recordHistory(data, shown, now);
                 const fresh = Object.fromEntries(Object.entries(need).map(([key, wanted]) => [key, wanted && freshSample(data, key)]));
                 this._recordLong(data, fresh, now);
             }
             this._lastData = data;
+            if (this._menuOpen && this._activeTab === 'incidents') this._updateIncidentPage();
             this._present(data);
             this._updateAlerts(data, now);
             // Fetch the second reading now instead of at the next tick.

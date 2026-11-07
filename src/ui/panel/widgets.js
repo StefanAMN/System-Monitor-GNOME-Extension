@@ -180,6 +180,11 @@ function niceCeil(value) {
     return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * pow;
 }
 
+function relativeSeconds(seconds) {
+    const sign = seconds < 0 ? '-' : seconds > 0 ? '+' : '';
+    return `${sign}${Math.abs(seconds)} s`;
+}
+
 /**
  * Renders a RingBuffer it does not own; the newest sample sits on the right edge.
  * The buffer is filled by the polling engine, this widget only paints.
@@ -207,6 +212,7 @@ export const Sparkline = GObject.registerClass({
             paddingBottom: 0,
             maxVal: 100,        // top of a fixed scale, floor of an auto scale
             autoScale: false,
+            relativeStartSeconds: null, // a captured timeline, with its trigger at 0
             formatValue: v => `${Math.round(v)}%`
         }, options);
         this.sampleSeconds = 0;
@@ -268,6 +274,7 @@ export const Sparkline = GObject.registerClass({
 
         const graphW = w - padL - padR;
         const graphH = h - padT - padB;
+        const relative = Number.isFinite(opt.relativeStartSeconds) && this.sampleSeconds > 0;
 
         let max = opt.maxVal;
         if (opt.autoScale) {
@@ -313,18 +320,35 @@ export const Sparkline = GObject.registerClass({
                 cr.setSourceRGBA(fg[0], fg[1], fg[2], gridAlpha);
             }
 
-            // X-axis labels: real time span on the left, "now" on the right
+            // The live history ends at now. A saved capture uses trigger-relative time.
+            const leftLabel = relative ? relativeSeconds(opt.relativeStartSeconds) : this.spanLabel;
+            const endSeconds = opt.relativeStartSeconds + (hist.capacity - 1) * this.sampleSeconds;
+            const rightLabel = relative ? relativeSeconds(endSeconds) : 'now';
             cr.setSourceRGBA(fg[0], fg[1], fg[2], 0.65);
-            if (this.spanLabel) {
-                const extL = cr.textExtents(this.spanLabel);
+            if (leftLabel) {
+                const extL = cr.textExtents(leftLabel);
                 cr.moveTo(padL, padT + graphH + extL.height + 4);
-                cr.showText(this.spanLabel);
+                cr.showText(leftLabel);
             }
 
-            const lblRight = 'now';
-            const extR = cr.textExtents(lblRight);
+            const extR = cr.textExtents(rightLabel);
             cr.moveTo(padL + graphW - extR.width, padT + graphH + extR.height + 4);
-            cr.showText(lblRight);
+            cr.showText(rightLabel);
+
+            if (relative && opt.relativeStartSeconds < 0 && endSeconds > 0) {
+                const x = padL + graphW * (-opt.relativeStartSeconds / (endSeconds - opt.relativeStartSeconds));
+                const label = relativeSeconds(0);
+                const ext = cr.textExtents(label);
+                cr.moveTo(x - ext.width / 2, padT + graphH + ext.height + 4);
+                cr.showText(label);
+                cr.save();
+                cr.setSourceRGBA(fg[0], fg[1], fg[2], 0.55);
+                cr.setDash([3, 3], 0);
+                cr.moveTo(x, padT);
+                cr.lineTo(x, padT + graphH);
+                cr.stroke();
+                cr.restore();
+            }
         }
 
         const n = hist.length;
@@ -397,10 +421,11 @@ export const Sparkline = GObject.registerClass({
                 cr.fill();
             }
 
-            const ago = this.sampleSeconds > 0 ? ` · ${agoLabel(n - 1 - hover, this.sampleSeconds)}` : '';
+            const time = relative ? relativeSeconds(opt.relativeStartSeconds + (hist.capacity - n + hover) * this.sampleSeconds)
+                : this.sampleSeconds > 0 ? agoLabel(n - 1 - hover, this.sampleSeconds) : '';
             let value = has ? opt.formatValue(raw) : _('no data');
             if (has && hist.peakAt) value = fill(_('{average} avg, {peak} peak'), { average: value, peak: opt.formatValue(hist.peakAt(hover)) });
-            const text = `${value}${ago}`;
+            const text = time ? `${value} · ${time}` : value;
             cr.setFontSize(10);
             cr.selectFontFace('Sans', Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
             const ext = cr.textExtents(text);
