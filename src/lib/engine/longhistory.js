@@ -2,7 +2,7 @@
 // (1 minute over the last hour, 15 minutes over the last day), each holding
 // the average and the peak of the samples that fell into it. Engine layer.
 //
-// Memory is fixed at construction (two Float64Arrays per series). A bucket
+// Memory is fixed at construction. A bucket
 // with no sample, because the metric was not read then, is NaN and drawn as
 // a gap, never as a zero.
 //
@@ -20,18 +20,20 @@ export class BucketSeries {
         this.bucketUs = bucketUs;
         this.capacity = capacity;
         // Closed buckets, oldest first from (head - closed).
-        this._avg = new Float64Array(capacity);
+        this._sums = new Float64Array(capacity);
+        this._weights = new Float64Array(capacity);
         this._peak = new Float64Array(capacity);
         this._head = 0;
         this._closed = 0;
         this._openIndex = -1;
         this._sum = 0;
-        this._n = 0;
+        this._weight = 0;
         this._max = -Infinity;
     }
 
-    _pushClosed(avg, peak) {
-        this._avg[this._head] = avg;
+    _pushClosed(sum, weight, peak) {
+        this._sums[this._head] = sum;
+        this._weights[this._head] = weight;
         this._peak[this._head] = peak;
         this._head = (this._head + 1) % this.capacity;
         if (this._closed < this.capacity) this._closed++;
@@ -45,13 +47,13 @@ export class BucketSeries {
             return;
         }
         if (index <= this._openIndex) return;
-        this._pushClosed(this._n > 0 ? this._sum / this._n : NaN, this._n > 0 ? this._max : NaN);
+        this._pushClosed(this._sum, this._weight, this._weight > 0 ? this._max : NaN);
         // More empty buckets than fit would only overwrite each other.
         const empty = Math.min(index - this._openIndex - 1, this.capacity);
-        for (let i = 0; i < empty; i++) this._pushClosed(NaN, NaN);
+        for (let i = 0; i < empty; i++) this._pushClosed(0, 0, NaN);
         this._openIndex = index;
         this._sum = 0;
-        this._n = 0;
+        this._weight = 0;
         this._max = -Infinity;
     }
 
@@ -62,8 +64,37 @@ export class BucketSeries {
         this.advance(now);
         if (!Number.isFinite(value)) return;
         this._sum += value;
-        this._n++;
+        this._weight++;
         if (value > this._max) this._max = value;
+    }
+
+    /**
+     * A per-second rate covers an interval, not just its endpoint. Split the
+     * measured time across the retained buckets it overlaps, including one
+     * already closed while waiting for the next counter read.
+     */
+    addRate(value, end, elapsedUs) {
+        if (!Number.isFinite(value) || !Number.isFinite(end) || !Number.isFinite(elapsedUs) || elapsedUs <= 0) return;
+        const start = Math.max(0, end - elapsedUs);
+        if (end <= start) return;
+        const width = this.bucketUs;
+        if (this._openIndex < 0) this.advance(Math.max(start, (Math.floor(end / width) - this.capacity + 1) * width));
+        this.advance(end);
+        const first = Math.max(Math.floor(start / width), this._openIndex - this.length + 1);
+        const last = Math.ceil(end / width) - 1;
+        for (let index = first; index <= last; index++) {
+            const time = Math.min(end, (index + 1) * width) - Math.max(start, index * width);
+            if (index === this._openIndex) {
+                this._sum += value * time;
+                this._weight += time;
+                this._max = Math.max(this._max, value);
+            } else {
+                const slot = (this._head - (this._openIndex - index) + this.capacity) % this.capacity;
+                this._sums[slot] += value * time;
+                this._peak[slot] = this._weights[slot] > 0 ? Math.max(this._peak[slot], value) : value;
+                this._weights[slot] += time;
+            }
+        }
     }
 
     /** Buckets shown: the closed ones that fit plus the open one. */
@@ -72,23 +103,21 @@ export class BucketSeries {
         return Math.min(this.capacity, this._closed + 1);
     }
 
-    _at(array, open, i) {
-        const n = this.length;
-        if (i < 0 || i >= n) return NaN;
-        if (i === n - 1) return open;
-        // n - 1 closed buckets are shown, the newest of them just before head.
-        const back = (n - 1) - i;
-        return array[(this._head - back + this.capacity) % this.capacity];
-    }
-
     /** Average of bucket i (0 = oldest shown); NaN for a bucket without samples. */
     get(i) {
-        return this._at(this._avg, this._n > 0 ? this._sum / this._n : NaN, i);
+        const n = this.length;
+        if (i < 0 || i >= n) return NaN;
+        if (i === n - 1) return this._weight > 0 ? this._sum / this._weight : NaN;
+        const slot = (this._head - (n - 1 - i) + this.capacity) % this.capacity;
+        return this._weights[slot] > 0 ? this._sums[slot] / this._weights[slot] : NaN;
     }
 
     /** Highest sample in bucket i; NaN for a bucket without samples. */
     peakAt(i) {
-        return this._at(this._peak, this._n > 0 ? this._max : NaN, i);
+        const n = this.length;
+        if (i < 0 || i >= n) return NaN;
+        if (i === n - 1) return this._weight > 0 ? this._max : NaN;
+        return this._peak[(this._head - (n - 1 - i) + this.capacity) % this.capacity];
     }
 
     /** Highest peak shown, for the chart's scale (0 when there is none). */
@@ -106,7 +135,7 @@ export class BucketSeries {
         this._closed = 0;
         this._openIndex = -1;
         this._sum = 0;
-        this._n = 0;
+        this._weight = 0;
         this._max = -Infinity;
     }
 }

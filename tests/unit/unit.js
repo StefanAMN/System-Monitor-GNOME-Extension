@@ -645,6 +645,31 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     eq([agoLabel(90, 60), agoLabel(3, 900), agoLabel(1, 60)], ['1h 30m ago', '45m ago', '1m ago'], 'ago: hours for the long ranges');
 }
 
+// Network and disk rates remain per second, with measured time as the weight.
+{
+    const S = 1e6;
+    const b = new BucketSeries(60 * S, 4);
+    b.addRate(60, 50 * S, 1 * S);
+    b.addRate(120, 55 * S, 5 * S);
+    eq([b.get(0), b.peakAt(0)], [110, 120], 'rate buckets: weight unequal readings by measured duration');
+    b.advance(65 * S);
+    b.addRate(180, 65 * S, 10 * S);
+    eq([b.get(0), b.get(1), b.peakAt(0)], [1560 / 11, 180, 180],
+        'rate buckets: split a late interval across both sides of a bucket boundary');
+    b.advance(180 * S);
+    b.addRate(0, 180 * S, 5 * S);
+    eq([b.get(2), b.peakAt(2), Number.isNaN(b.get(3))], [0, 0, true],
+        'rate buckets: measured zero and uncovered time are distinct at an exact boundary');
+    b.addRate(999, 180 * S, 0);
+    eq(Number.isNaN(b.get(3)), true, 'rate buckets: a warmup read does not count as an interval');
+    b.advance(600 * S);
+    b.addRate(999, 60 * S, 60 * S);
+    eq(b.max(), 0, 'rate buckets: results before the retained window are ignored');
+    b.addRate(250, 600 * S, 600 * S);
+    eq([b.length, b.get(0), b.get(2), Number.isNaN(b.get(3))], [4, 250, 250, true],
+        'rate buckets: a sparse reading covers only the retained interval and stays a rate');
+}
+
 // ── network data per day ──
 {
     const u = new NetUsage();

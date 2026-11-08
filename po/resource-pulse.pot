@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-08 07:15+0200\n"
+"POT-Creation-Date: 2026-11-08 22:44+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -128,7 +128,7 @@ msgid "{h}h {m}m"
 msgstr ""
 
 #. Translators: how much a chart shows, kept short: "2m", "60s".
-#: src/lib/common/format.js:48 src/ui/panel/polling.js:57
+#: src/lib/common/format.js:48 src/ui/panel/polling.js:60
 msgid "{m}m"
 msgstr ""
 
@@ -202,8 +202,8 @@ msgid "Temp: {temp}"
 msgstr ""
 
 #: src/lib/common/present.js:70 src/lib/common/settingsmodel.js:24
-#: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:20
-#: src/ui/panel/constants.js:64 src/ui/panel/dashboard.js:382
+#: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:21
+#: src/ui/panel/constants.js:65 src/ui/panel/dashboard.js:382
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:638
 #: src/ui/panel/pages/gpu.js:213
 msgid "GPU"
@@ -287,7 +287,7 @@ msgid "Last reading {seconds} s ago · updates delayed"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:117
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:61
+#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:62
 #: src/ui/panel/details.js:13 src/ui/panel/details.js:40
 #: src/ui/panel/overview.js:631 src/ui/panel/pages/incidents.js:22
 #: src/ui/panel/topbar.js:213
@@ -296,7 +296,7 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:101
 #: src/lib/common/settingsmodel.js:122 src/lib/engine/agentreport.js:21
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:62
+#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:63
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:632
 #: src/ui/panel/pages/incidents.js:23 src/ui/prefs/diagnostics.js:24
 #: src/ui/prefs/tracking.js:556
@@ -304,26 +304,26 @@ msgid "Memory"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:17 src/lib/engine/agentreport.js:22
-#: src/ui/panel/constants.js:19 src/ui/panel/constants.js:70
+#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:71
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:633
 #: src/ui/prefs/diagnostics.js:25 src/ui/prefs/tracking.js:541
 msgid "Battery"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:18 src/ui/panel/constants.js:19
+#: src/lib/common/settingsmodel.js:18 src/ui/panel/constants.js:20
 #: src/ui/panel/details.js:13 src/ui/panel/overview.js:637
 #: src/ui/panel/pages/gpu.js:73
 msgid "Power"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:19 src/ui/panel/constants.js:20
+#: src/lib/common/settingsmodel.js:19 src/ui/panel/constants.js:21
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:634
 #: src/ui/prefs/tracking.js:568
 msgid "Disk"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:20 src/lib/engine/agentreport.js:23
-#: src/lib/engine/agentreport.js:173 src/ui/panel/constants.js:20
+#: src/lib/engine/agentreport.js:173 src/ui/panel/constants.js:21
 #: src/ui/panel/details.js:14 src/ui/panel/overview.js:635
 #: src/ui/prefs/diagnostics.js:26 src/ui/prefs/tracking.js:580
 msgid "Network"
@@ -441,8 +441,8 @@ msgid ""
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:96 src/lib/common/settingsmodel.js:127
-#: src/ui/panel/constants.js:20 src/ui/panel/constants.js:63
-#: src/ui/panel/constants.js:95 src/ui/panel/pages/gpu.js:68
+#: src/ui/panel/constants.js:21 src/ui/panel/constants.js:64
+#: src/ui/panel/constants.js:96 src/ui/panel/pages/gpu.js:68
 #: src/ui/panel/pages/gpu.js:121 src/ui/panel/pages/gpu.js:219
 #: src/ui/panel/pages/incidents.js:17 src/ui/prefs/tracking.js:602
 msgid "Temperature"
@@ -1080,11 +1080,11 @@ msgid ""
 msgstr ""
 
 #. Translators: chart ranges on a chip, kept short: one hour, 24 hours.
-#: src/lib/engine/longhistory.js:118
+#: src/lib/engine/longhistory.js:147
 msgid "1h"
 msgstr ""
 
-#: src/lib/engine/longhistory.js:119
+#: src/lib/engine/longhistory.js:148
 msgid "24h"
 msgstr ""
 
@@ -1179,88 +1179,88 @@ msgstr ""
 msgid "{process} using {cores} cores"
 msgstr ""
 
-#: src/ui/panel/constants.js:61
+#: src/ui/panel/constants.js:62
 msgid "CPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:62
+#: src/ui/panel/constants.js:63
 msgid "Memory is almost full"
 msgstr ""
 
-#: src/ui/panel/constants.js:63
+#: src/ui/panel/constants.js:64
 msgid "The processor is hot"
 msgstr ""
 
-#: src/ui/panel/constants.js:64
+#: src/ui/panel/constants.js:65
 msgid "GPU usage is high"
 msgstr ""
 
-#: src/ui/panel/constants.js:65
+#: src/ui/panel/constants.js:66
 msgid "Disk /"
 msgstr ""
 
-#: src/ui/panel/constants.js:65
+#: src/ui/panel/constants.js:66
 msgid "Disk space is running out"
 msgstr ""
 
-#: src/ui/panel/constants.js:69
+#: src/ui/panel/constants.js:70
 msgid "The system is short of memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:69 src/ui/panel/pages/memory.js:29
+#: src/ui/panel/constants.js:70 src/ui/panel/pages/memory.js:29
 #: src/ui/prefs/tracking.js:561
 msgid "Waiting for memory"
 msgstr ""
 
-#: src/ui/panel/constants.js:70
+#: src/ui/panel/constants.js:71
 msgid "The battery is low"
 msgstr ""
 
-#: src/ui/panel/constants.js:72
+#: src/ui/panel/constants.js:73
 msgid "Slowed by heat"
 msgstr ""
 
-#: src/ui/panel/constants.js:72
+#: src/ui/panel/constants.js:73
 msgid "The processor slows down to cool"
 msgstr ""
 
-#: src/ui/panel/constants.js:93
+#: src/ui/panel/constants.js:94
 msgid "Battery charge"
 msgstr ""
 
-#: src/ui/panel/constants.js:93
+#: src/ui/panel/constants.js:94
 msgid "Battery charge rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:93
+#: src/ui/panel/constants.js:94
 msgid "CPU usage"
 msgstr ""
 
-#: src/ui/panel/constants.js:93
+#: src/ui/panel/constants.js:94
 msgid "Memory use"
 msgstr ""
 
-#: src/ui/panel/constants.js:93
+#: src/ui/panel/constants.js:94
 msgid "Power draw"
 msgstr ""
 
-#: src/ui/panel/constants.js:94
+#: src/ui/panel/constants.js:95
 msgid "Disk read rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:94
+#: src/ui/panel/constants.js:95
 msgid "Disk write rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:94
+#: src/ui/panel/constants.js:95
 msgid "Download rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:94
+#: src/ui/panel/constants.js:95
 msgid "Upload rate"
 msgstr ""
 
-#: src/ui/panel/constants.js:95
+#: src/ui/panel/constants.js:96
 msgid "GPU usage"
 msgstr ""
 
@@ -1369,7 +1369,7 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:62 src/ui/panel/polling.js:366
+#: src/ui/panel/details.js:62 src/ui/panel/polling.js:340
 msgid "live"
 msgstr ""
 
@@ -1509,11 +1509,11 @@ msgid "Core {n}"
 msgstr ""
 
 #: src/ui/panel/pages/disk.js:14
-msgid "Read Rate (MB/s)"
+msgid "Read Rate"
 msgstr ""
 
 #: src/ui/panel/pages/disk.js:22
-msgid "Write Rate (MB/s)"
+msgid "Write Rate"
 msgstr ""
 
 #: src/ui/panel/pages/disk.js:30
@@ -1628,7 +1628,7 @@ msgstr ""
 msgid "No supported GPU driver (nvidia-smi, amdgpu, i915 or xe)"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:593
+#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:566
 msgid "{chart} over time"
 msgstr ""
 
@@ -1894,7 +1894,7 @@ msgstr ""
 msgid "Fans"
 msgstr ""
 
-#: src/ui/panel/polling.js:57
+#: src/ui/panel/polling.js:60
 msgid "{s}s"
 msgstr ""
 

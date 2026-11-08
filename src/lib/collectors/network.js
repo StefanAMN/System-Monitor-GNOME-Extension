@@ -92,11 +92,13 @@ export class NetworkSampler {
         try {
             const content = readProcFile('/proc/net/dev');
             const now = GLib.get_monotonic_time();
-            const deltaTime = this._prevTime > 0 ? (now - this._prevTime) / 1000000 : 0;
+            const elapsedUs = this._prevTime > 0 ? now - this._prevTime : 0;
+            const deltaTime = elapsedUs / 1e6;
 
             const interfaces = {};
             let totalRxRate = 0;
             let totalTxRate = 0;
+            let rateSampled = false;
 
             const seq = ++this._seq;
 
@@ -114,6 +116,7 @@ export class NetworkSampler {
                     this._sessionTx += counterDelta(txBytes, carried.txBytes);
                 }
                 if (prev && deltaTime > 0) {
+                    if (!isVirtual && rxBytes >= prev.rxBytes && txBytes >= prev.txBytes) rateSampled = true;
                     const deltaRx = counterDelta(rxBytes, prev.rxBytes);
                     const deltaTx = counterDelta(txBytes, prev.txBytes);
                     rxRate = deltaRx / deltaTime;
@@ -154,6 +157,8 @@ export class NetworkSampler {
 
             return {
                 interfaces: interfaces,
+                rateEndUs: now,
+                rateElapsedUs: rateSampled ? elapsedUs : 0,
                 sessionRx: this._sessionRx,
                 sessionTx: this._sessionTx,
                 total: {

@@ -1,4 +1,5 @@
 // Constants shared by the panel modules (moved from extension.js).
+import { formatSpeed } from '../../lib/common/format.js';
 import { N_, translated } from '../../lib/common/i18n.js';
 
 // ─── Polling / history constants ─────────────────────────────────────────────
@@ -77,8 +78,8 @@ export const GPU_CHARTS = 4;
 export const HISTORY_KEYS = ['cpu', 'mem', 'bat', 'batRate', 'pwr', 'dskRead', 'dskWrite', 'netRx', 'netTx', 'thm', 'gpu'];
 
 export const WATT_SCALE = { autoScale: true, maxVal: 10, formatValue: v => `${v < 10 ? v.toFixed(1) : Math.round(v)}W` };
-export const MBS_SCALE = { autoScale: true, maxVal: 1, formatValue: v => (v < 10 ? v.toFixed(1) : `${Math.round(v)}`) };
-export const KBS_SCALE = { autoScale: true, maxVal: 10, formatValue: v => (v >= 1000 ? `${(v / 1000).toFixed(1)}M` : `${Math.round(v)}K`) };
+const MBS_SCALE = { autoScale: true, maxVal: 1, paddingLeft: 64, formatValue: v => formatSpeed(v * 1e6) };
+const KBS_SCALE = { autoScale: true, maxVal: 10, paddingLeft: 64, formatValue: v => formatSpeed(v * 1000) };
 // Per-history axis: unit of the stored samples and the floor of the auto scale.
 export const SPARK_SCALES = {
     batRate: WATT_SCALE,

@@ -11,7 +11,7 @@ export class DiskPage {
         
         // Read Rate Sparkline
         const readCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
-        readCard.add_child(new St.Label({ text: _('Read Rate (MB/s)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        readCard.add_child(new St.Label({ text: _('Read Rate'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._dskReadSparkline = this._newSparkline('dskRead', 80, { showGrid: true, color: [0.96, 0.83, 0.18, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskReadSparkline.x_expand = true;
         readCard.add_child(this._dskReadSparkline);
@@ -19,7 +19,7 @@ export class DiskPage {
 
         // Write Rate Sparkline
         const writeCard = new St.BoxLayout({ style_class: 'rp-surface', style: 'border-radius: 12px; padding: 12px;', ...VERTICAL });
-        writeCard.add_child(new St.Label({ text: _('Write Rate (MB/s)'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
+        writeCard.add_child(new St.Label({ text: _('Write Rate'), style_class: 'rp-fg-dim', style: 'font-size: 0.9em; font-weight: 600; margin-bottom: 4px;' }));
         this._dskWriteSparkline = this._newSparkline('dskWrite', 80, { showGrid: true, color: [0.88, 0.11, 0.14, 1.0], fillOpacity: 0.1, paddingLeft: 30, paddingBottom: 15 });
         this._dskWriteSparkline.x_expand = true;
         writeCard.add_child(this._dskWriteSparkline);

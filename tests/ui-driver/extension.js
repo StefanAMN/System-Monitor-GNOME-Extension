@@ -1537,6 +1537,115 @@ async function stuckCollector(rp) {
 
 }
 
+// Feed controlled temperatures and transfer rates through the regular poll.
+async function componentChartHistory(rp) {
+    const values = history => Array.from({ length: history.length }, (_, i) => history.get(i));
+    const until = async (predicate, message) => {
+        for (let i = 0; i < 80 && !predicate(); i++) await sleep(100);
+        check(predicate(), message);
+    };
+    const click = async actor => {
+        await scrollIntoView(rp, actor);
+        await clickActor(actor);
+    };
+    const open = async tab => {
+        await click(rp._summaryCards[tab].box);
+        check(rp._activeTab === tab, `charts: pointer did not open ${tab}`);
+    };
+    const back = () => click(rp._detailBackBtn);
+    // The combined suite can have real traffic in its current long bucket.
+    // Start with an empty transfer history after any earlier poll drains.
+    await until(() => !rp._pollInFlight, 'charts: the prior poll did not drain');
+    for (const key of ['netRx', 'netTx', 'dskRead', 'dskWrite']) {
+        rp._hist[key].clear();
+        rp._long.hour[key].clear();
+        rp._long.day[key].clear();
+    }
+    const pins = rp._settings.get_strv('pinned-metrics');
+    const thm = rp._thm.sample;
+    const net = rp._net.sample;
+    const dsk = rp._dsk.sample;
+    let temperature = 43;
+    rp._thm.sample = async detailed => ({ packageTemp: temperature, sensors: [{ label: 'Fixture', temp: temperature }], fans: [], detailed });
+    rp._net.sample = async () => ({
+        total: { rxRate: 120000, txRate: 40000 }, interfaces: {},
+        rateEndUs: GLib.get_monotonic_time(), rateElapsedUs: 1e6,
+    });
+    rp._dsk.sample = async detailed => ({
+        readRate: 2500000, writeRate: 1000000, diskPercent: 5, ioSampled: true, mounts: [], detailed,
+        rateEndUs: GLib.get_monotonic_time(), rateElapsedUs: 1e6,
+    });
+    try {
+        rp._settings.set_strv('pinned-metrics', ['cpu', 'memory']);
+        pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+        await sleep(300);
+        Main.overview.hide();
+        for (let i = 0; i < 30 && (Main.overview.visible || Main.overview.animationInProgress); i++) await sleep(100);
+        await clickActor(rp._indicator);
+        await open('network');
+        await until(() => values(rp._hist.netRx).includes(120), 'charts: network fixture did not land');
+        await back();
+        await open('thermal');
+        await until(() => values(rp._hist.thm).includes(43), 'charts: thermal fixture did not land');
+        await back();
+        await open('thermal');
+        check(values(rp._thmSparkline.history).includes(43), 'charts: leaving the Thermal page lost a recorded point');
+        await back();
+        await clickActor(rp._indicator);
+        check(!rp._menuOpen, 'charts: pointer did not close the panel');
+        temperature = 51;
+        await sleep(6800);
+        const closedNetwork = values(rp._hist.netRx);
+        check(closedNetwork.includes(120) && closedNetwork.slice(-2).every(Number.isNaN),
+            'charts: skipped network ticks must leave gaps while preserving the earlier readings');
+        temperature = 56;
+        await clickActor(rp._indicator);
+        await open('thermal');
+        await until(() => values(rp._hist.thm).includes(56), 'charts: thermal did not resume');
+        const temperatures = values(rp._thmSparkline.history);
+        check([43, 51, 56].every(value => temperatures.includes(value)),
+            `charts: Thermal history did not survive closing the panel: ${temperatures}`);
+        await back();
+        await open('network');
+        check(values(rp._netRxSparkline.history).includes(120), 'charts: reopening Network lost a recorded point');
+
+        for (const [tab, sparkName, expected, formatted] of [
+            ['network', '_netRxSparkline', 120, '120.0 KB/s'],
+            ['disk', '_dskReadSparkline', 2.5, '2.5 MB/s'],
+        ]) {
+            if (rp._activeTab !== tab) {
+                await back();
+                await open(tab);
+            }
+            const spark = rp[sparkName];
+            for (const range of ['live', 'hour', 'day', 'live']) {
+                await click(rp._rangeButtons[range]);
+                const series = range === 'live' ? rp._hist : rp._long[range];
+                check(rp._range === range && spark.history === series[spark.histKey], `charts: ${tab} did not switch to ${range}`);
+                await until(() => values(spark.history).some(value => Math.abs(value - expected) < 1e-9),
+                    `charts: ${tab} ${range} rescaled a per-second rate`);
+                check(spark.options.formatValue(expected) === formatted, `charts: ${tab} ${range} rate is missing its per-second unit`);
+                if (range === 'hour') {
+                    await scrollIntoView(rp, spark);
+                    const [x, y] = spark.get_transformed_position();
+                    pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + spark.width - 3, y + spark.height / 2);
+                    await sleep(200);
+                    check(spark._hoverX > spark.width / 2, `charts: ${tab} chart did not receive the hover`);
+                    await shot(`component-history-${tab}-hour`);
+                }
+            }
+        }
+        console.log('RP-UITEST charts: thermal history retained, network gaps, and per-second rates across live, hour and day');
+    } finally {
+        rp._thm.sample = thm;
+        rp._net.sample = net;
+        rp._dsk.sample = dsk;
+        rp._settings.set_strv('pinned-metrics', pins);
+        rp._indicator.menu.close();
+    }
+}
+
 // The 1 h / 24 h range with real clicks on the detail header, the network
 // day totals, and the Disk page's top list with a process writing to disk.
 async function historyAndUsage(rp) {
@@ -2371,11 +2480,19 @@ async function translationCoverage(rp) {
 }
 
 async function run() {
+    if (GLib.getenv('RP_UI_CHARTS_ONLY') === '1') {
+        const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
+        check(rp?._indicator, 'target extension not enabled');
+        await componentChartHistory(rp);
+        return;
+    }
     if (GLib.getenv('RP_UI_TRACKING_ONLY') === '1') {
         const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
         check(rp?._indicator, 'target extension not enabled');
         await slowdownRecorder(rp);
-        await prefsWindow(Main.extensionManager.lookup(TARGET).stateObj, 'workload');
+        const reopened = Main.extensionManager.lookup(TARGET).stateObj;
+        await componentChartHistory(reopened);
+        await prefsWindow(reopened, 'workload');
         return;
     }
     if (GLib.getenv('RP_UI_WORKLOAD_ONLY') === '1') {

@@ -208,6 +208,7 @@ export class DiskSampler {
             let writeBytes = 0;
             let maxDiskIoPercent = 0;
             let ioSampled = false;
+            let rateSampled = false;
             const disks = new Map();
             const drives = detailed ? [] : null;
             let now = GLib.get_monotonic_time();
@@ -224,6 +225,8 @@ export class DiskSampler {
                     if (drives) drives.push(driveIoStats(disk, prev, deltaTimeMs));
                     if (!prev || disk.major !== prev.major || disk.minor !== prev.minor) continue;
                     ioSampled ||= deltaTimeMs > 0 && disk.ioTicks >= prev.ioTicks;
+                    rateSampled ||= deltaTimeMs > 0 && disk.sectorsRead >= prev.sectorsRead &&
+                        disk.sectorsWritten >= prev.sectorsWritten;
                     readBytes += counterDelta(disk.sectorsRead, prev.sectorsRead) * 512;
                     writeBytes += counterDelta(disk.sectorsWritten, prev.sectorsWritten) * 512;
                     const util = ioUtilization(disk.ioTicks, prev.ioTicks, deltaTimeMs);
@@ -237,16 +240,14 @@ export class DiskSampler {
             let writeRate = 0;
             let diskPercent = 0;
 
-            if (this._prevTime > 0) {
-                const deltaTime = (now - this._prevTime) / 1000000;
-                if (deltaTime > 0) {
-                    readRate = readBytes / deltaTime;
-                    writeRate = writeBytes / deltaTime;
+            const elapsedUs = this._prevTime > 0 ? now - this._prevTime : 0;
+            if (elapsedUs > 0) {
+                const deltaTime = elapsedUs / 1e6;
+                readRate = readBytes / deltaTime;
+                writeRate = writeBytes / deltaTime;
 
-                    // Busiest device's active time (io_ticks), the same figure
-                    // iostat reports as %util.
-                    diskPercent = Math.max(0, Math.min(100, maxDiskIoPercent));
-                }
+                // Busiest device's active time (io_ticks), as in iostat %util.
+                diskPercent = Math.max(0, Math.min(100, maxDiskIoPercent));
             }
 
             this._prevDisks = disks;
@@ -272,6 +273,8 @@ export class DiskSampler {
                 writeRate: writeRate,
                 diskPercent: diskPercent,
                 ioSampled,
+                rateEndUs: now,
+                rateElapsedUs: rateSampled ? elapsedUs : 0,
                 drives,
                 maxSpeed: this._maxSpeed
             };

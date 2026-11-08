@@ -7,7 +7,7 @@ import { appBottlenecks } from '../../lib/engine/appbottlenecks.js';
 import { BatteryTracker } from '../../lib/engine/batterytracker.js';
 import { powerReadout, thermalUnavailable, sampleNote } from '../../lib/common/present.js';
 import { RANGES, BucketSeries } from '../../lib/engine/longhistory.js';
-import { SAMPLE_KEYS, freshSample, recordLiveSample, historyMetric } from '../../lib/engine/samples.js';
+import { SAMPLE_KEYS, freshSample, recordLiveSample } from '../../lib/engine/samples.js';
 import { RingBuffer } from '../../lib/engine/ringbuffer.js';
 import { DisplayAverage, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
 import { saveNetUsage, netUsagePath } from '../../lib/engine/netusage.js';
@@ -50,8 +50,11 @@ export class PollingMethods {
         this._glideUs = Math.min(intervalMs * 1000, GLIDE_MAX_US);
         this._gapUs = Math.max(2.5 * intervalMs * 1000, MIN_GAP_US);
 
-        // Samples taken at another cadence would distort the time axis.
-        for (const key of this._histKeys) this._hist[key].clear();
+        // Samples taken at another cadence would distort the live time axis.
+        if (this._sampleSeconds !== interval) {
+            for (const key of this._histKeys) this._hist[key].clear();
+            this._historyAt = null;
+        }
         const span = Math.round(interval * HISTORY_CAPACITY);
         // Translators: how much a chart shows, kept short: "2m", "60s".
         const spanLabel = span > 60 && span % 60 === 0 ? fill(_('{m}m'), { m: span / 60 }) : fill(_('{s}s'), { s: span });
@@ -229,43 +232,56 @@ export class PollingMethods {
         if (this._incidentsLoaded) this._incidentStore.save(this._incidents.captures);
     }
 
-    _pushHistory(key, value, now, sampledAt = now) {
-        // A metric that was not sampled for a while (unpinned with the menu
-        // closed) restarts its graph instead of joining stale and fresh points.
-        const last = this._histStamp[key] || 0;
-        if (last && now - last > this._gapUs) this._hist[key].clear();
-        this._histStamp[key] = now;
-        recordLiveSample(this._hist[key], value, sampledAt, now, this._sampleSeconds * 1e6);
-    }
+    _recordHistory(data, now, tick) {
+        const intervalUs = this._sampleSeconds * 1e6;
+        const missed = tick && this._historyAt !== null
+            ? Math.max(0, Math.round((now - this._historyAt) / intervalUs) - 1) : 0;
+        if (tick) this._historyAt = now;
+        const { hour, day } = this._long;
+        const record = (key, value, metric, rate = null) => {
+            const sample = data.samples[metric];
+            if (!sample.fresh || (rate && !(rate.rateElapsedUs > 0))) value = NaN;
+            const at = rate?.rateEndUs ?? sample.sampledAt ?? now;
+            if (tick) recordLiveSample(this._hist[key], value, at, now, intervalUs, missed);
 
-    _recordHistory(data, need, now) {
-        const MB = 1000000;
-        const push = (key, value, metric) => this._pushHistory(key, freshSample(data, metric) ? value : NaN, now, data.samples?.[metric]?.sampledAt ?? now);
-        if (need.cpu) push('cpu', data.cpu.total, 'cpu');
-        if (need.mem) push('mem', data.mem.percent, 'mem');
-        if (need.bat && data.bat.present) {
-            push('bat', data.bat.percent, 'bat');
-            push('batRate', data.bat.energyRate || 0, 'bat');
-        }
-        if (need.pwr)
-            push('pwr', powerReadout(data.pwr).value ?? NaN, 'pwr');
-        if (need.dsk) {
-            push('dskRead', data.dsk.readRate / MB, 'dsk');
-            push('dskWrite', data.dsk.writeRate / MB, 'dsk');
-        }
-        if (need.net) {
-            push('netRx', data.net.total.rxRate / 1000, 'net');
-            push('netTx', data.net.total.txRate / 1000, 'net');
-        }
-        if (need.thm) push('thm', thermalUnavailable(data.thm) ? NaN : data.thm.packageTemp, 'thm');
-        if (need.gpu && data.gpu.present) {
-            push('gpu', data.gpu.percent, 'gpu');
-            if (data.gpu.gpus?.length > 1) {
-                for (const g of data.gpu.gpus) {
-                    const hist = this._gpuHistKey(g.key);
-                    if (hist) push(hist, g.percent, 'gpu');
+            if (Number.isFinite(value)) {
+                if (rate) {
+                    hour[key].addRate(value, at, rate.rateElapsedUs);
+                    day[key].addRate(value, at, rate.rateElapsedUs);
+                } else {
+                    hour[key].add(value, at);
+                    day[key].add(value, at);
                 }
             }
+            if (tick) {
+                hour[key].advance(now);
+                day[key].advance(now);
+            }
+        };
+
+        // An on-demand read moves the transfer counters' baselines too.
+        // Include its interval in the long ranges without adding a live tick.
+        const { dsk, net } = data;
+        record('dskRead', dsk.readRate / 1e6, 'dsk', dsk);
+        record('dskWrite', dsk.writeRate / 1e6, 'dsk', dsk);
+        record('netRx', net.total.rxRate / 1000, 'net', net);
+        record('netTx', net.total.txRate / 1000, 'net', net);
+        if (!tick) return;
+
+        const { cpu, mem, bat, pwr, thm, gpu } = data;
+        record('cpu', cpu.cores?.length ? cpu.total : NaN, 'cpu');
+        record('mem', mem.total > 0 ? mem.percent : NaN, 'mem');
+        record('bat', bat.present ? bat.percent : NaN, 'bat');
+        record('batRate', bat.present ? bat.energyRate || 0 : NaN, 'bat');
+        record('pwr', data.samples.pwr.fresh ? powerReadout(pwr).value ?? NaN : NaN, 'pwr');
+        record('thm', thermalUnavailable(thm) ? NaN : thm.packageTemp, 'thm');
+        record('gpu', gpu.present ? gpu.percent : NaN, 'gpu');
+        const gpus = gpu.present ? gpu.gpus : null;
+        if (gpus?.length > 1) {
+            for (const device of gpus) this._gpuHistKey(device.key);
+        }
+        for (const [key, hist] of this._gpuHist) {
+            record(hist, gpus?.find(device => device.key === key)?.percent ?? NaN, 'gpu');
         }
     }
 
@@ -284,48 +300,6 @@ export class PollingMethods {
         }
         this._histKeys.push(hist);
         return hist;
-    }
-
-    /**
-     * Feed the 1 h / 24 h buckets with what this poll read; series of
-     * metrics not read now only move on in time (their empty buckets become
-     * gaps).
-     */
-    _recordLong(data, need, now) {
-        const MB = 1000000;
-        const values = {};
-        if (need.cpu) values.cpu = data.cpu.total;
-        if (need.mem) values.mem = data.mem.percent;
-        if (need.bat && data.bat.present) {
-            values.bat = data.bat.percent;
-            values.batRate = data.bat.energyRate || 0;
-        }
-        if (need.pwr && (data.pwr.raplSupported || data.pwr.systemPower !== null))
-            values.pwr = data.pwr.systemPower ?? data.pwr.packagePower ?? NaN;
-        if (need.dsk) {
-            values.dskRead = data.dsk.readRate / MB;
-            values.dskWrite = data.dsk.writeRate / MB;
-        }
-        if (need.net) {
-            values.netRx = data.net.total.rxRate / 1000;
-            values.netTx = data.net.total.txRate / 1000;
-        }
-        if (need.thm && !thermalUnavailable(data.thm)) values.thm = data.thm.packageTemp;
-        if (need.gpu && data.gpu.present) {
-            values.gpu = data.gpu.percent;
-            if (data.gpu.gpus?.length > 1) {
-                for (const g of data.gpu.gpus) {
-                    const hist = this._gpuHistKey(g.key);
-                    if (hist) values[hist] = g.percent;
-                }
-            }
-        }
-        for (const series of Object.values(this._long)) {
-            for (const key of this._histKeys) {
-                if (key in values) series[key].add(values[key], data.samples?.[historyMetric(key)]?.sampledAt ?? now);
-                series[key].advance(now);
-            }
-        }
     }
 
     /** Add this reading's traffic to today's total; save now and then. */
@@ -434,8 +408,8 @@ export class PollingMethods {
                 pwr: isOpen || pinned.includes('power')
             };
             // Alerts also watch what is not shown: the cheap metrics on every
-            // poll, disk space and the GPU less often. Graphs record only
-            // what is shown, so their time axis stays continuous.
+            // poll, disk space and the GPU less often. History uses the
+            // fresh readings from this schedule, including background reads.
             const due = (key, every) => now - this._alertSampled[key] >= every;
             const need = {
                 ...shown,
@@ -554,15 +528,14 @@ export class PollingMethods {
                 if (draw !== null) this._pwrStats.add(draw, data.samples.pwr.sampledAt);
                 else this._pwrStats.breakInterval();
             }
-            if (tick || this._recordPending) {
+            const record = tick || this._recordPending;
+            if (record) {
                 if (this._incidents.observe(data, GLib.get_monotonic_time(), Date.now(), this._gapUs))
                     this._saveIncidents();
                 else
                     this._scheduleIncidentFinish();
-                this._recordHistory(data, shown, now);
-                const fresh = Object.fromEntries(Object.entries(need).map(([key, wanted]) => [key, wanted && freshSample(data, key)]));
-                this._recordLong(data, fresh, now);
             }
+            this._recordHistory(data, now, record);
             this._lastData = data;
             if (this._menuOpen && this._activeTab === 'incidents') this._updateIncidentPage();
             this._present(data);

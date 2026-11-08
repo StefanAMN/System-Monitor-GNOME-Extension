@@ -102,6 +102,14 @@ const loop = new GLib.MainLoop(null, false);
     recordLiveSample(delayedHistory, 30, 2e6, 3e6, 1e6);
     check(delayedHistory.get(1) === 30 && Number.isNaN(delayedHistory.get(2)), 'late results fill their past missing tick rather than inventing a current reading');
     check(!delayedHistory.fillGap(0, 99) && delayedHistory.get(0) === 10, 'late results never overwrite an existing measurement');
+    const skipped = new RingBuffer(5);
+    recordLiveSample(skipped, 43, 2e6, 2e6, 2e6);
+    recordLiveSample(skipped, 56, 8e6, 8e6, 2e6, 2);
+    check(skipped.length === 4 && skipped.get(0) === 43 && Number.isNaN(skipped.get(1)) &&
+        Number.isNaN(skipped.get(2)) && skipped.get(3) === 56, 'missed ticks add gaps without clearing live history');
+    recordLiveSample(skipped, 57, 1e9, 1e9, 2e6, 999);
+    check(skipped.length === 5 && Number.isNaN(skipped.get(0)) && skipped.get(4) === 57,
+        'large gaps expire the old values within the fixed retention');
     const buckets = new BucketSeries(60e6, 4);
     buckets.add(10, 60e6); buckets.advance(120e6); buckets.add(99, 61e6);
     check(Number.isNaN(buckets.get(buckets.length - 1)) && buckets.get(0) === 10, 'late measurements cannot contaminate a later time bucket');

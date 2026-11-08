@@ -1853,3 +1853,43 @@ and advance the panel without waiting for an intervening poll.
   test reached 361 processes and returned to its original 12 descriptors.
   The prior production commit's full compatibility matrix and soak passed
   in GitHub Actions. This audit reran the focused compatibility tests.
+
+## Component chart rates and retention
+
+| Change | Verification |
+|---|---|
+| Keep fixed live rings through navigation, and advance genuinely unsampled periods with gaps | Drive the unpinned Thermal and Network pages with real pointer input, close past the old reset threshold, and reopen. Verify previously recorded points remain in range, Thermal keeps recording, and skipped Network ticks are gaps. |
+| Average transfer rates by actual measured time in the long ranges | Exercise unequal counter intervals, bucket boundaries, late readings, missing coverage, and idle rates in engine fixtures. Check Network and Disk across the live, hour and day controls. |
+| Keep collection cost bounded | Reuse scheduled Linux collector results, retain the existing slow-read cadence for unpinned resources, and verify unit tests, Shell CPU overhead and menu churn. |
+
+The baseline pointer test reproduced the reset after closing the unpinned
+Thermal panel for 6.8 seconds: only the new 56 °C point remained. The fixed
+test finds the 43 °C point before closing, 51 °C while closed, and 56 °C after
+reopening. It also verifies gaps for Network ticks skipped while closed.
+At the same refresh interval the live rings are retained. Changing the
+refresh interval still restarts the live axis at the new cadence.
+
+Network and disk now expose the monotonic duration of a usable counter
+interval. The hour/day charts include both scheduled and on-demand rate reads
+and weight rates by measured duration. For an interval spanning multiple
+buckets, the measured rate is allocated in proportion to its time overlap.
+Uncovered buckets remain gaps. Temperature, charge and other point samples
+still use the existing sample averages in long ranges. No extra Linux file
+reads or recurring timers were added.
+
+The focused GNOME Shell 50.1 pointer test passed. The Network hover and axis
+showed 120.0 KB/s and the Disk read hover showed 2.5 MB/s in the 1 h range.
+The test checked the same rate units in the 2 m and 24 h ranges. Lint and
+906 unit checks passed. Unit coverage includes measured zero, uneven timing,
+late intervals crossing a bucket, and gaps expiring at capacity.
+
+The focused chart case passed in GNOME Shell 46 and 51 containers. The
+combined GNOME Shell 50.1 tracking suite passed the recorder, chart and
+32 workload checks. Pseudo-language coverage read 245 panel labels across
+10 pages, and the rebuilt 86-file ZIP stayed active for eight seconds in
+an isolated Shell with a clean extension log.
+
+The short overhead test at a two-second refresh measured +0.47% of one core
+with the menu closed and +0.54% including tracking. Open overview and CPU
+measured +1.53% and +0.93%. Each of the three churn rounds ended with 1148
+actors. The run used 15-second windows and a zero-second soak.

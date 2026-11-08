@@ -98,16 +98,11 @@ export function freshSample(data, key) {
 }
 
 /** Preserve the live time axis, placing a delayed sample into its missing tick. */
-export function recordLiveSample(history, value, sampledAt, now, intervalUs) {
+export function recordLiveSample(history, value, sampledAt, now, intervalUs, missed = 0) {
+    for (let i = 0; i < Math.min(missed, history.capacity - 1); i++) history.pushGap();
     const back = Number.isFinite(sampledAt) && intervalUs > 0
         ? Math.max(0, Math.round((now - sampledAt) / intervalUs)) : 0;
     if (!Number.isFinite(value) || back > 0) history.pushGap();
     else history.push(value);
     if (back > 0) history.fillGap(history.length - 1 - back, value);
-}
-
-const HISTORY_METRICS = { batRate: 'bat', dskRead: 'dsk', dskWrite: 'dsk', netRx: 'net', netTx: 'net' };
-export function historyMetric(key) {
-    if (key.startsWith('gpu')) return 'gpu';
-    return HISTORY_METRICS[key] ?? key;
 }

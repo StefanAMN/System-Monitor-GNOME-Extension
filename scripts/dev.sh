@@ -872,7 +872,7 @@ cmd_help() {
     echo -e "  ${GREEN}test-compat [ver..]${RESET} Run the unit, Shell UI, tracking, translation and ZIP tests on other GNOME Shell versions in containers (default 46-51; needs docker)"
     echo -e "  ${GREEN}lint${RESET}               Run ESLint (needs 'npm ci' once)"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
-    echo -e "  ${GREEN}test-tracking-ui${RESET}   Drive Slowdowns recording and workload comparison with real clicks"
+    echo -e "  ${GREEN}test-tracking-ui${RESET}   Drive component charts, Slowdowns and workload comparison with real clicks"
     echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 1200) for leaks"
     echo -e "  ${GREEN}test-soak [sec]${RESET}    Only the soak's memory checks: heap census by kind, RSS, fds, actors (RP_SOAK_LEAK=1 plants a leak)"
     echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk, read, proc, power, battery)"
@@ -925,7 +925,7 @@ case "${1:-reload}" in
         cmd_test_ui
         ;;
     test-tracking-ui)
-        RP_UI_TRACKING_ONLY=1 cmd_test_ui 180
+        RP_UI_TRACKING_ONLY=1 cmd_test_ui 240
         ;;
     test-soak)
         cmd_test_soak "${2:-1200}"
