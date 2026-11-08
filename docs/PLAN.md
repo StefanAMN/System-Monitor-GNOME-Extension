@@ -1790,3 +1790,66 @@ Implementation and focused proof on GNOME Shell 50.1:
   30 s), the difference was +0.04% of a core in this short run. Overview,
   CPU and CPU search measured +3.50%, +2.45% and +2.50%. Each of three
   60-cycle menu churn rounds ended at 1148 actors. No long soak was run.
+
+## Code and test audit (2026-11-08)
+
+| Work | Verification |
+|---|---|
+| Review the collector, history, and Shell paths | Reproduce issues with isolated GJS fixtures or the compositor. Record affected files and expected behavior. |
+| Add tracking integration coverage to the compatibility suite | Use real pointer actions for workload range selection and Slowdowns replay. Drive automatic pressure, a full manual capture, the poll-independent deadline, and restoration in a fresh sandbox. Verify on the host and in Fedora GNOME containers. |
+| Compare complete translation IDs | Exercise changed multiline and plural identifiers plus formatting-only changes. Run pseudo-language UI coverage with its catalog confined to the test sandbox. |
+| Detect early Shell exit and report timeouts | Exercise the driver with a Shell process that exits immediately and verify the verdict and log tail. Run the normal driver to confirm successful behavior. |
+
+The audit keeps production sampling and the persisted data formats unchanged.
+
+### Production findings and regression cases
+
+| Priority | Finding | Reproduction and proposed check |
+|---|---|---|
+| P1 | Battery history writes race with clear and reload (`batteryledger.js`, `saveLedger`, `loadLedger`). | Twelve of twelve real Gio tests with an older 500-hour save and a newer empty save restored all cleared buckets. Immediate reload also read stale data in all twelve trials. Serialize writes and make reads wait for the newest pending save per path. |
+| P1 | One stalled collector freezes all battery tracking (`batterytracker.js`, `tick`). | Hold the power promise unresolved. Three subsequent ticks skipped all collectors and wrote no buckets. Run healthy collectors independently and record missing coverage for the stalled metric. |
+| P2 | App IDs can alter the ledger's object prototype (`batteryledger.js`, `_add` and foreground attribution). | Ingest an app scope identified as `__proto__` in an isolated GJS process. The process mutates `Object.prototype`. A `constructor` entry can acquire nonfinite foreground time and fail to reload. Exercise both through ingest, focus changes and save/reload. |
+| P2 | A stale action target can bypass the protected-name guard (`processcontrol.js`, `groupState` and `liveMembers`). | Start an owned shell, open its action row, and have it exec a test binary named Xwayland. The PID/start time remain the same. The stale row still accepts the process while a fresh row protects it. Revalidate current process identity and protected name at dispatch. |
+| P2 | A stalled mount query freezes Disk rates (`disk.js`, `sample`). | Prime the overview, leave the detailed filesystem query pending, and advance a diskstats fixture over several polls. The detailed call never publishes fresh disk counters and later calls are held. Keep disk counters independent of filesystem info and check the overview-to-Disk transition. |
+| P2 | A missing pressure file disables every pressure resource permanently (`pressure.js` and `machineusage.js`). | With CPU and I/O readable, omit memory for one sample, then restore it. Both samplers returned null until replaced. Verify partial results and recovery in the same instance. |
+| P2 | Recorder prehistory can lose valid samples when rebinned (`incidents.js`, `_append` and `_record`). | Record CPU 90 at 40.1 s and 40 at 41.2 s, then trigger at 100.8 s. The old peak is outside the window and the first slot is null, though the 41.2 s point is inside. Also test two points in one absolute bin that belong to separate trigger-relative bins. |
+| P2 | Comparison coverage can produce false improvements (`batteryledger.js`, disk deltas and `hourStart`). | A device reset turned an unchanged 60,000 B/min workload into a reported 10% decrease at 100% coverage. Under Europe/Bucharest, two repeated local hours went into one 7,200-second bucket and reported a false 45% CPU decrease. Verify coverage on counter resets and distinct offsets at the DST fallback. |
+| P2 | Battery removal looks like energy consumption (`batterytracker.js`, sample ingestion). | Removing a pack changed total energy from 50 to 29.9 Wh. The tracker recorded 20.1 Wh over 30 s, while the surviving pack lost 0.1 Wh. Verify a baseline break on battery topology changes and preserve the pack identities. |
+| P2 | Memory can read too low when available memory is exactly zero (`memory.js`). | With 10,000 kB total, zero `MemAvailable`, and 2,000 kB in the legacy fallback sum, the sampler showed 80% used. Verify 100% for zero and the legacy fallback for an absent field. |
+| P2 | Another mount can masquerade as root disk usage (`disk.js`, `dashboard.js`, `topbar.js`, `alerts.js`). | Make the root query fail with /home readable at 99%. The alert engine treats the first remaining mount as root and returns a 99% root alert. Verify root lookup by mount point on every display and alert path. |
+
+Additional reproduced cases are clear retaining the previous battery baseline,
+preferences displaying an unlinked ledger, an MSR RAPL alias hiding usable MMIO,
+a cached throttle CPU disappearing while a sibling still reports, a removed
+cgroup I/O device masking the surviving device's deltas, mixed battery flows
+reporting 25 W charging for +5 W and −20 W, and a process scan starting after
+destruction when sysconf resolves late. Cover these with clear/reload,
+alias/device hotplug, signed-rate, and destroy-before-read fixtures.
+
+Additional source-level UI candidates are stale process results after a rapid
+close/reopen, old per-drive rows briefly painted on reopen, a countdown coupled
+to the 30-second polling cadence, disk points missing from some captures when
+disk is unpinned, and a process row rebinding to a different target between
+pointer press and release. Add compositor tests that control the pending sample
+and advance the panel without waiting for an intervening poll.
+
+### Test changes and results
+
+- Added `test-tracking-ui` to the default compatibility suite. It drives
+  automatic and manual slowdown capture, gaps, restored app rankings and
+  workload range selection through the compositor. A fresh recorder keeps
+  host pressure out of the fixture. The GTK test scrolls its target into the
+  dropdown viewport before clicking. The focused suite passed locally on
+  GNOME Shell 50.1 and in the GNOME 46–51 Fedora images.
+- The catalog comparator accepts formatting-only changes and rejects edited
+  continuation lines or plural identifiers. The pseudo-language suite passed
+  locally with 251 panel labels across 10 pages and all five preferences
+  checks. The source checkout's compiled catalog was unchanged.
+- An injected Shell exit produced the exit diagnostic in 12 seconds
+  including syntax checks. A mock driver with partial progress and no
+  verdict printed the timeout and the last progress line. Both probes
+  returned failure as intended.
+- Lint and all 898 baseline unit checks passed. The local process-churn
+  test reached 361 processes and returned to its original 12 descriptors.
+  The prior production commit's full compatibility matrix and soak passed
+  in GitHub Actions. This audit reran the focused compatibility tests.

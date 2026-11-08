@@ -1635,6 +1635,11 @@ async function workloadOnly() {
         ok(await until(() => (popover = findAll(row, child => child instanceof Gtk.Popover && child.get_mapped())[0])),
             `workload (pointer): ${name} opens its choices`);
         if (!popover) return;
+        // GtkListView can allocate rows outside the clipped popover viewport.
+        // Bring the test target into view before asking the compositor to click it.
+        const choices = findAll(popover, child => child instanceof Gtk.ListView && child.get_mapped())[0];
+        choices?.scroll_to(selected, Gtk.ListScrollFlags.NONE, null);
+        await sleep(250);
         const target = row.model.get_string(selected);
         let label;
         ok(await until(() => (label = findAll(popover, child => child instanceof Gtk.Label && child.label === target && child.get_mapped())[0])),
@@ -1653,7 +1658,12 @@ async function workloadOnly() {
         const [px, py] = popover.get_surface_transform();
         const surface = popover.get_surface();
         await act(`PREFS-CHECK CLICK ${name}-choice ${Math.round(surface.get_position_x() + px + p.x)} ${Math.round(surface.get_position_y() + py + p.y)}`);
-        ok(await until(() => row.selected === selected && !popover.get_mapped()), `workload (pointer): ${name} selected entry ${selected}`);
+        const changed = await until(() => row.selected === selected && !popover.get_mapped());
+        ok(changed, `workload (pointer): ${name} selected entry ${row.selected}, expected ${selected}`);
+        if (!changed) {
+            print(`PREFS-CHECK SHOW workload-${name}-selection-failed`);
+            await sleep(1500);
+        }
     };
 
     try {

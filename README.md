@@ -117,7 +117,7 @@ The installed extension is a symlink to `src/` (`scripts/dev.sh` creates it).
 npm ci && ./scripts/dev.sh lint   # ESLint (development dependency only; the extension has no npm dependencies)
 ./scripts/dev.sh test-unit   # parsers, deltas, ring buffer, process-churn run
 ./scripts/dev.sh test-ui     # real clicks on every tab, light/dark switch, disable/enable cycle in an isolated headless shell; fails on any JS error in the log
-RP_UI_INCIDENTS_ONLY=1 ./scripts/dev.sh test-ui # automatic capture, pointer controls, gaps and reload
+./scripts/dev.sh test-tracking-ui # capture, replay, persistence and workload selection with real clicks
 RP_UI_AUDIT_ONLY=1 ./scripts/dev.sh test-ui   # focused slow-collector, freshness, concurrency and alert checks
 ./scripts/dev.sh test-i18n   # every string on screen goes through gettext: a source scan, the template is current, and the panel and window in a pseudo-language (⟦…⟧)
 ./scripts/dev.sh pot         # rewrite po/resource-pulse.pot after changing text (test-i18n fails until it is current)
@@ -127,7 +127,7 @@ RP_KEEP=1 ./scripts/dev.sh test-ui   # same, and keeps the sandbox with screensh
 ./scripts/dev.sh test-soak           # only the soak: live JavaScript objects counted by kind (a leak grows in both halves), RSS, fds, actors
 RP_SOAK_LEAK=1 ./scripts/dev.sh test-soak   # the same with a planted leak (one object kept per reading), which must fail
 ./scripts/dev.sh test-zip            # pack, install that zip into an isolated shell and check it runs with a clean log
-./scripts/dev.sh test-compat         # unit, headless, UI, translation and packed-zip tests on GNOME Shell 46-51 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one)
+./scripts/dev.sh test-compat         # unit, headless, panel, tracking, translation and packed-zip tests on GNOME Shell 46-51 in Fedora containers (needs docker; ./scripts/dev.sh test-compat 46 for one)
 ./scripts/dev.sh benchmark all       # accuracy against synthetic load: CPU, memory, disk write/read, process list, step response,
                              # power/thermal response, battery vs upower (works from any directory)
 ```

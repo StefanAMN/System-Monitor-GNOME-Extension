@@ -73,17 +73,26 @@ extract_pot() {
         --sort-by-file -o "$1" $files)
 }
 
-# A pseudo-language "xx" in src/locale: every string of the sources wrapped
-# in ⟦ ⟧, so a test can tell a translated string from one that is not.
+# Canonical gettext identifiers, including continuation lines and plural forms.
+# Ignore metadata, source references and differences in line wrapping.
+catalog_ids() {
+    LC_ALL=C msgcat --no-wrap --sort-output "$1" | awk '
+        /^msg(ctxt|id|id_plural) / { id = 1; print; next }
+        /^"/ && id { print; next }
+        { id = 0 }
+    '
+}
+
+# A pseudo-language "xx" in the test sandbox, with every string wrapped in
+# ⟦ ⟧ so the UI check can spot untranslated text.
 pseudo_translation() {
-    local tmp
+    local catalog="$1" locale_dir="$2" tmp
     tmp="$(mktemp -d)"
-    extract_pot "$tmp/all.pot"
-    msginit --no-translator --locale=xx -i "$tmp/all.pot" -o - 2>/dev/null \
+    msginit --no-translator --locale=xx -i "$catalog" -o - 2>/dev/null \
         | sed 's|"Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\\n"|"Plural-Forms: nplurals=2; plural=(n != 1);\\n"|' \
         | msgen - | msgfilter --keep-header -o "$tmp/xx.po" sed -e 's/^/⟦/' -e 's/$/⟧/'
-    mkdir -p "$EXT_DIR/locale/xx/LC_MESSAGES"
-    msgfmt -c -o "$EXT_DIR/locale/xx/LC_MESSAGES/$GETTEXT_DOMAIN.mo" "$tmp/xx.po"
+    mkdir -p "$locale_dir/xx/LC_MESSAGES"
+    msgfmt -c -o "$locale_dir/xx/LC_MESSAGES/$GETTEXT_DOMAIN.mo" "$tmp/xx.po"
     rm -rf "$tmp"
 }
 
@@ -425,8 +434,14 @@ cmd_test_zip() {
 # Run the extension plus a test driver extension in an isolated headless
 # shell until the driver logs RP-UITEST DONE/FAIL or TIMEOUT seconds pass.
 run_driver() {
-    local DRIVER_DIR="$1" DRIVER_UUID="$2" TIMEOUT="$3"
+    local DRIVER_DIR="$1" DRIVER_UUID="$2" TIMEOUT="$3" PSEUDO_CATALOG="${4:-}"
     make_sandbox
+    if [ -n "$PSEUDO_CATALOG" ]; then
+        local installed="$SANDBOX/data/gnome-shell/extensions/$UUID"
+        unlink "$installed"
+        cp -R "$EXT_DIR" "$installed"
+        pseudo_translation "$PSEUDO_CATALOG" "$installed/locale"
+    fi
     ln -s "$REPO_DIR/tests/$DRIVER_DIR" "$SANDBOX/data/gnome-shell/extensions/$DRIVER_UUID"
     # A third-party GTK theme as the user stylesheet, which GTK ranks above
     # every application stylesheet; the preferences window must keep its look.
@@ -448,14 +463,25 @@ run_driver() {
         SHELL_PID=$!
         trap "kill $SHELL_PID 2>/dev/null; wait $SHELL_PID 2>/dev/null" EXIT INT TERM
         sleep 3
-        gnome-extensions enable "'"$UUID"'"
+        shell_alive() {
+            if ! kill -0 "$SHELL_PID" 2>/dev/null; then
+                echo "GNOME Shell exited before the driver finished" >&2
+                return 1
+            fi
+        }
+        shell_alive && gnome-extensions enable "'"$UUID"'" || exit 1
         sleep 1
-        gnome-extensions enable "'"$DRIVER_UUID"'"
+        shell_alive && gnome-extensions enable "'"$DRIVER_UUID"'" || exit 1
         for _ in $(seq 1 "'"$TIMEOUT"'"); do
-            grep -qE "RP-UITEST (DONE|FAIL)" "'"$LOG"'" && break
+            if grep -qE "RP-UITEST (DONE|FAIL)" "'"$LOG"'"; then
+                sleep 1
+                exit 0
+            fi
+            shell_alive || exit 1
             sleep 1
         done
-        sleep 1
+        echo "Driver timed out after "'"$TIMEOUT"'" seconds" >&2
+        exit 1
     ' >> "$SANDBOX/session.log" 2>&1 || true
     stop_log_stream
 }
@@ -469,9 +495,10 @@ driver_passed() {
 driver_failure_details() {
     echo "$BAD" | head -n 40
     grep -A12 "RP-UITEST FAIL" "$LOG" | head -n 30 || true
-    if ! grep -q "RP-UITEST" "$LOG"; then
-        echo "  (driver never finished: timed out; end of the shell log follows)"
-        grep -v "^$" "$LOG" | tail -n 25
+    if ! grep -qE "RP-UITEST (DONE|FAIL)" "$LOG"; then
+        echo "  No driver verdict. End of the session and shell logs follows."
+        tail -n 12 "$SANDBOX/session.log"
+        tail -n 25 "$LOG"
     fi
 }
 
@@ -500,25 +527,20 @@ cmd_test_i18n() {
         log_error "Literal text on screen without gettext (above)."
         exit 1
     fi
-    # The committed template must list what the sources translate now.
-    local tmp
+    local tmp now committed
     tmp="$(mktemp -d)"
     extract_pot "$tmp/now.pot"
-    # (No diff: the test images have coreutils, not diffutils.)
-    local now committed
-    now="$(grep -E '^msg(id|_plural)' "$tmp/now.pot")"
-    committed="$(grep -E '^msg(id|_plural)' "$REPO_DIR/po/$GETTEXT_DOMAIN.pot")"
+    now="$(catalog_ids "$tmp/now.pot")"
+    committed="$(catalog_ids "$REPO_DIR/po/$GETTEXT_DOMAIN.pot")"
     if [ "$now" != "$committed" ]; then
-        log_error "po/$GETTEXT_DOMAIN.pot is out of date: run ./scripts/dev.sh pot (left: sources, right: template)"
-        comm -3 <(sort <<< "$now") <(sort <<< "$committed") | head -n 20
+        log_error "po/$GETTEXT_DOMAIN.pot is out of date: run ./scripts/dev.sh pot"
         rm -rf "$tmp"
         exit 1
     fi
-    rm -rf "$tmp"
-    pseudo_translation
 
     local SANDBOX LOG BAD
-    RP_UI_LANGUAGE=xx run_driver ui-driver rp-ui-driver@resource-pulse.test 300
+    RP_UI_LANGUAGE=xx run_driver ui-driver rp-ui-driver@resource-pulse.test 300 "$tmp/now.pot"
+    rm -rf "$tmp"
     if driver_passed; then
         grep -o "RP-UITEST coverage: .*" "$LOG" | sed 's/^/  /' || true
         log_success "Every string on screen is translated (pseudo-language)"
@@ -538,8 +560,8 @@ cmd_test_ui() {
     compile_schemas
 
     local SANDBOX LOG BAD
-    # About 5 minutes on a laptop; more under software rendering on a runner.
-    run_driver ui-driver rp-ui-driver@resource-pulse.test 540
+    # The full suite took about nine minutes on the development machine.
+    run_driver ui-driver rp-ui-driver@resource-pulse.test "${1:-660}"
 
     if driver_passed; then
         log_success "UI test passed${RP_KEEP:+ (screenshots: $SANDBOX/shots)}"
@@ -636,7 +658,8 @@ compat_fedora() {
 compat_failure() {
     local clean pat found
     clean="$(sed 's/\x1b\[[0-9;]*m//g' "$1")"
-    for pat in 'RP-UITEST FAIL|PREFS-CHECK FAIL|^FAIL ' "$BAD_LOG_PATTERN" '\[ERROR\]'; do
+    for pat in 'RP-UITEST FAIL|PREFS-CHECK FAIL|^FAIL ' "$BAD_LOG_PATTERN" \
+        '^GNOME Shell exited before the driver finished$|^Driver timed out after' '\[ERROR\]'; do
         if found="$(grep -m1 -E "$pat" <<< "$clean")"; then
             # Without the line number and the shell's log prefix.
             sed -E 's/^[0-9]+: ?//; s/^[A-Za-z ]+-Message: [0-9:.]+: //' <<< "$found"
@@ -667,7 +690,7 @@ cmd_test_compat() {
     fi
     local SUMMARY=() FAILS=() EXTRA=()
     # RP_COMPAT_TESTS="test-soak 1200" (comma-separated) runs other tests.
-    local TESTS=("test-unit" "test-headless 8" "test-ui" "test-i18n" "test-zip")
+    local TESTS=("test-unit" "test-headless 8" "test-ui" "test-tracking-ui" "test-i18n" "test-zip")
     if [ -n "${RP_COMPAT_TESTS:-}" ]; then IFS=',' read -r -a TESTS <<< "$RP_COMPAT_TESTS"; fi
     if [ "${RP_COMPAT_NO_BATTERY:-0}" = "1" ]; then
         EXTRA=(--tmpfs /sys/class/power_supply)
@@ -846,9 +869,10 @@ cmd_help() {
     echo -e "  ${GREEN}test, window${RESET}       Launch a dedicated windowed GNOME Shell 50 test session (opens a Wayland window)"
     echo -e "  ${GREEN}test-headless [sec]${RESET} Enable in an isolated headless shell for [sec] (default 5) and scan its log"
     echo -e "  ${GREEN}test-unit${RESET}          Run parser / ring buffer / delta unit tests plus a process-churn test under gjs"
-    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run test-unit, test-headless, test-ui, test-i18n and test-zip on other GNOME Shell versions in containers (default 46-51; needs docker)"
+    echo -e "  ${GREEN}test-compat [ver..]${RESET} Run the unit, Shell UI, tracking, translation and ZIP tests on other GNOME Shell versions in containers (default 46-51; needs docker)"
     echo -e "  ${GREEN}lint${RESET}               Run ESLint (needs 'npm ci' once)"
     echo -e "  ${GREEN}test-ui${RESET}            Drive every tab with real clicks, light/dark, re-enable cycle; scan the shell log (RP_KEEP=1 keeps screenshots)"
+    echo -e "  ${GREEN}test-tracking-ui${RESET}   Drive Slowdowns recording and workload comparison with real clicks"
     echo -e "  ${GREEN}test-overhead [sec]${RESET} Shell CPU with the extension off/on/open, menu churn, then a [sec] soak (default 1200) for leaks"
     echo -e "  ${GREEN}test-soak [sec]${RESET}    Only the soak's memory checks: heap census by kind, RSS, fds, actors (RP_SOAK_LEAK=1 plants a leak)"
     echo -e "  ${GREEN}benchmark [suite]${RESET}  Run synthetic hardware load benchmark (all, static, dynamic, cpu, mem, disk, read, proc, power, battery)"
@@ -899,6 +923,9 @@ case "${1:-reload}" in
         ;;
     test-ui|ui)
         cmd_test_ui
+        ;;
+    test-tracking-ui)
+        RP_UI_TRACKING_ONLY=1 cmd_test_ui 180
         ;;
     test-soak)
         cmd_test_soak "${2:-1200}"

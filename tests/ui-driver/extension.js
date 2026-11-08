@@ -1271,12 +1271,20 @@ async function closeSlowdowns(rp) {
 // Feed pressure counters through regular polls. The pointer drives page
 // navigation, capture, and selection just as it does for a normal user.
 async function slowdownRecorder(rp) {
+    await rp._incidentsReady;
+    const root = Main.extensionManager.lookup(TARGET).path;
+    const { IncidentRecorder } = await import(`file://${root}/lib/engine/incidents.js`);
+    // Host pressure may already have triggered a recording before the fixture starts.
+    rp._cancelIncidentApps();
+    if (rp._incidentFinishId) GLib.source_remove(rp._incidentFinishId);
+    rp._incidentFinishId = 0;
+    rp._incidents = new IncidentRecorder();
     const waitFor = async (predicate, ms, message) => {
         const until = GLib.get_monotonic_time() + ms * 1000;
         while (!predicate() && GLib.get_monotonic_time() < until) await sleep(100);
         check(predicate(), message);
     };
-    const { AppBottleneckSampler } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/collectors/appbottlenecks.js`);
+    const { AppBottleneckSampler } = await import(`file://${root}/lib/collectors/appbottlenecks.js`);
     const fixture = GLib.dir_make_tmp('rp-slowdown-apps-XXXXXX');
     const scope = `${fixture}/app-gnome-org.example.Fixture-123.scope`;
     GLib.mkdir_with_parents(scope, 0o700);
@@ -1317,7 +1325,6 @@ async function slowdownRecorder(rp) {
     let manual;
     let pollingPaused = false;
     try {
-        await rp._incidentsReady;
         iface.set_string('color-scheme', 'prefer-dark');
         // Move away from the hot corner before dismissing Activities.
         pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
@@ -2364,6 +2371,13 @@ async function translationCoverage(rp) {
 }
 
 async function run() {
+    if (GLib.getenv('RP_UI_TRACKING_ONLY') === '1') {
+        const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
+        check(rp?._indicator, 'target extension not enabled');
+        await slowdownRecorder(rp);
+        await prefsWindow(Main.extensionManager.lookup(TARGET).stateObj, 'workload');
+        return;
+    }
     if (GLib.getenv('RP_UI_WORKLOAD_ONLY') === '1') {
         const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
         check(rp?._indicator, 'target extension not enabled');
