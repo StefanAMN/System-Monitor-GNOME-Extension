@@ -1,5 +1,5 @@
-// Top-process lists (CPU, Memory, Disk), and from them pausing, lowering the
-// priority of and ending processes.
+// Top-process lists (CPU, Memory, Disk), with one-shot memory inspection,
+// pausing, priority changes and ending processes.
 // Methods of the extension (installed by extension.js); `this` is the extension.
 import GLib from 'gi://GLib';
 import Atk from 'gi://Atk';
@@ -10,6 +10,7 @@ import Pango from 'gi://Pango';
 import { ensureActorVisibleInScrollView } from 'resource:///org/gnome/shell/misc/animationUtils.js';
 
 import { canEnd, liveMembers, signalProcesses, groupState, reniceProcesses, LOWER_NICE } from '../../lib/actions/processcontrol.js';
+import { ProcessMemoryInspector } from '../../lib/collectors/processmemory.js';
 import { ProgressBar } from './widgets.js';
 import { formatBytes, formatSpeed } from '../../lib/common/format.js';
 import { PROCESS_ROWS } from './constants.js';
@@ -94,6 +95,20 @@ export class ProcessesMethods {
         const label = new St.Label({ style_class: 'rp-fg', style: 'font-size: 0.85em;', x_expand: true });
         label.clutter_text.line_wrap = true;
         label.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+        const inspect = new St.Button({
+            style_class: 'rp-chip-bg rp-proc-action', label: _('Inspect memory'), can_focus: true,
+            visible: false, x_align: Clutter.ActorAlign.END,
+        });
+        const memoryBox = new St.BoxLayout({ ...VERTICAL, visible: false });
+        const memoryRows = new St.BoxLayout({ ...VERTICAL });
+        const privateRow = this._detailRow(_('Private resident'));
+        const sharedRow = this._detailRow(_('Proportional shared'));
+        const pssRow = this._detailRow(_('Proportional total (PSS)'));
+        for (const row of [privateRow, sharedRow, pssRow]) memoryRows.add_child(row.row);
+        const coverage = new St.Label({ style_class: 'rp-fg-dim', style: 'font-size: 0.85em;', x_expand: true });
+        this._wrapLabel(coverage);
+        memoryBox.add_child(memoryRows);
+        memoryBox.add_child(coverage);
         const buttons = new St.BoxLayout({ style: 'spacing: 8px;', x_align: Clutter.ActorAlign.END });
         const pause = new St.Button({ style_class: 'rp-chip-bg rp-proc-action', label: _('Pause'), can_focus: true, visible: false });
         const lower = new St.Button({ style_class: 'rp-chip-bg rp-proc-action', label: _('Lower priority'), can_focus: true, visible: false });
@@ -101,8 +116,12 @@ export class ProcessesMethods {
         const cancel = new St.Button({ style_class: 'rp-chip-bg rp-end-cancel', label: _('Cancel'), can_focus: true });
         for (const b of [pause, lower, confirm, cancel]) buttons.add_child(b);
         box.add_child(label);
+        box.add_child(inspect);
+        box.add_child(memoryBox);
         box.add_child(buttons);
-        const bar = { box, label, pause, lower, confirm, cancel, target: null, step: 'idle', run: 0 };
+        const memory = { box: memoryBox, rows: memoryRows, privateRow, sharedRow, pssRow, coverage };
+        const bar = { box, label, inspect, memory, pause, lower, confirm, cancel, target: null, step: 'idle', run: 0 };
+        inspect.connect('clicked', () => this._inspectProcessMemory(bar));
         confirm.connect('clicked', () => {
             if (bar.step === 'menu') this._askEnd(bar, bar.target);
             else if (bar.step === 'confirm') this._endGroup(bar, 'TERM');
@@ -117,25 +136,34 @@ export class ProcessesMethods {
         cancel.connect('clicked', () => {
             // Not ending it after all: back to what can be done with it.
             if (bar.step === 'confirm' || bar.step === 'force') this._showMenu(bar);
+            else if (bar.step === 'memory') {
+                this._cancelProcessMemoryInspection();
+                this._showMenu(bar);
+                bar.inspect.grab_key_focus();
+                this._revealEndBar(bar);
+            }
             else this._hideEndBar(bar);
         });
-        for (const b of [pause, lower, confirm, cancel]) this._addClickAnimations(b);
+        for (const b of [inspect, pause, lower, confirm, cancel]) this._addClickAnimations(b);
         return bar;
     }
 
-    _hideEndBar(bar) {
+    _hideEndBar(bar, poll = true) {
+        if (this._memoryInspection === bar) this._cancelProcessMemoryInspection();
         bar.run++;
         bar.step = 'idle';
         bar.target = null;
         bar.frozen = null;
         bar.box.visible = false;
         // The list goes back to its order now, not at the next tick.
-        if (this._menuOpen) this._poll();
+        if (poll && this._menuOpen) this._poll();
     }
 
-    _showEndBar(bar, text, { confirm = null, cancel = null, pause = null, lower = null } = {}) {
+    _showEndBar(bar, text, { confirm = null, cancel = null, pause = null, lower = null, inspect = false } = {}) {
         bar.label.text = text;
         bar.label.visible = !!text;
+        bar.inspect.visible = inspect;
+        bar.memory.box.visible = false;
         bar.pause.visible = !!pause;
         if (pause) bar.pause.label = pause;
         bar.lower.visible = !!lower;
@@ -159,6 +187,7 @@ export class ProcessesMethods {
             this._hideEndBar(bar);
             return;
         }
+        this._cancelProcessMemoryInspection();
         bar.run++;
         bar.widgetsKey = widgetsKey;
         bar.list = container;
@@ -185,19 +214,72 @@ export class ProcessesMethods {
 
     /** What can be done with the process; `note` when the last try failed. */
     _showMenu(bar, note = '') {
+        if (!canEnd(bar.target, this._selfPid)) {
+            bar.step = 'menu';
+            this._showEndBar(bar, note, { inspect: true, cancel: _('Close') });
+            return;
+        }
         const { mine, paused, nice } = groupState(bar.target.members, this._uid);
         if (mine.length === 0) {
-            this._noneLeft(bar);
+            this._noneLeft(bar, true);
             return;
         }
         bar.step = 'menu';
         bar.paused = paused;
         this._showEndBar(bar, note, {
+            inspect: true,
             pause: paused ? _('Resume') : _('Pause'),
             // Lowered already: an unprivileged user cannot raise it back.
             lower: nice < LOWER_NICE ? _('Lower priority') : null,
             confirm: _('End…'),
         });
+    }
+
+    _cancelProcessMemoryInspection() {
+        this._memoryInspector?.cancel();
+        if (this._memoryInspection) this._memoryInspection.run++;
+        this._memoryInspection = null;
+    }
+
+    _closeProcessMemoryPage(mode) {
+        const bar = this._actionBar(mode);
+        if (bar?.step === 'memory') this._hideEndBar(bar, false);
+    }
+
+    async _inspectProcessMemory(bar) {
+        if (bar.step !== 'menu') return;
+        const inspector = this._memoryInspector ??= new ProcessMemoryInspector();
+        if (inspector.busy) {
+            this._showMenu(bar, _('The previous memory reading is finishing. Try again shortly.'));
+            return;
+        }
+        const run = ++bar.run;
+        const gen = this._gen;
+        const { comm, members } = bar.target;
+        bar.step = 'memory';
+        this._showEndBar(bar, fill(_('Reading memory for {process}…'), { process: comm }), { cancel: _('Cancel') });
+        bar.cancel.grab_key_focus();
+        this._memoryInspection = bar;
+        const result = await inspector.sample(members);
+        if (gen !== this._gen || run !== bar.run || this._memoryInspection !== bar) return;
+        this._memoryInspection = null;
+
+        const measured = result?.measured ?? 0;
+        const total = result?.total ?? members.length;
+        this._showEndBar(bar, fill(measured ? _('Memory for {process}') : _('Memory readings unavailable for {process}'), { process: comm }),
+            { cancel: _('Back to actions') });
+        const memory = bar.memory;
+        memory.box.visible = true;
+        memory.rows.visible = measured > 0;
+        if (measured > 0) {
+            const useGiB = this._settings.get_string('unit-mem') === 'GiB';
+            memory.privateRow.val.text = formatBytes(result.privateBytes, useGiB);
+            memory.sharedRow.val.text = formatBytes(result.sharedBytes, useGiB);
+            memory.pssRow.val.text = formatBytes(result.pss, useGiB);
+        }
+        const coverage = fill(ngettext('{measured} of {total} process measured', '{measured} of {total} processes measured', total), { measured, total });
+        memory.coverage.text = `${coverage}\n${_('Totals cover the measured processes with this name. Shared memory is divided among the processes using it.')}`;
+        this._revealEndBar(bar);
     }
 
     /** The row shows a change now, not at the next reading. */
@@ -210,17 +292,18 @@ export class ProcessesMethods {
     }
 
     /** No process of the group is left that is ours to act on. */
-    _noneLeft(bar) {
+    _noneLeft(bar, inspect = false) {
         const { comm } = bar.target;
         const { others } = liveMembers(bar.target.members, this._uid);
-        bar.step = 'done';
+        bar.step = inspect ? 'menu' : 'done';
         this._showEndBar(bar, others > 0
             ? fill(_('{process} belongs to another user and cannot be ended from here.'), { process: comm })
-            : fill(_('{process} has already exited.'), { process: comm }), { cancel: _('Close') });
+            : fill(_('{process} has already exited.'), { process: comm }), { cancel: _('Close'), inspect });
     }
 
     /** Stop (SIGSTOP) or continue (SIGCONT) the group's own processes; the line stays open. */
     async _pauseGroup(bar, pause) {
+        if (!canEnd(bar.target, this._selfPid)) return;
         const run = ++bar.run;
         const { comm } = bar.target;
         const { mine } = groupState(bar.target.members, this._uid);
@@ -239,6 +322,7 @@ export class ProcessesMethods {
 
     /** Lower the priority of the group's own processes (niceness LOWER_NICE); the line stays open. */
     async _lowerGroup(bar) {
+        if (!canEnd(bar.target, this._selfPid)) return;
         const run = ++bar.run;
         const { comm } = bar.target;
         const { mine } = groupState(bar.target.members, this._uid);
@@ -254,6 +338,7 @@ export class ProcessesMethods {
 
     /** Ending: ask first. */
     _askEnd(bar, group) {
+        if (!canEnd(group, this._selfPid)) return;
         bar.run++;
         bar.target = { comm: group.comm, count: group.count, members: group.members.map(m => ({ ...m })) };
         bar.step = 'confirm';
@@ -266,6 +351,7 @@ export class ProcessesMethods {
 
     /** Ask the processes to quit (TERM), or force them (KILL), then report what is left. */
     async _endGroup(bar, signal) {
+        if (!canEnd(bar.target, this._selfPid)) return;
         const run = ++bar.run;
         const gen = this._gen;
         const { comm } = bar.target;
@@ -344,7 +430,7 @@ export class ProcessesMethods {
                 statLbl.x_align = Clutter.ActorAlign.END;
                 item.add_child(statLbl);
 
-                // Pause, lower priority or end: the line under the list.
+                // Inspection and controls open in the line under the row.
                 const endBtn = new St.Button({
                     style_class: 'rp-end-button',
                     can_focus: true,
@@ -391,12 +477,7 @@ export class ProcessesMethods {
             const named = proc.count > 1 ? fill(ngettext('{process}, {n} process', '{process}, {n} processes', proc.count), { process: proc.comm, n: proc.count }) : proc.comm;
             const who = proc.paused ? fill(_('{process}, paused'), { process: named }) : named;
             w.item.accessible_name = fill(SPOKEN_MODE[mode], { process: who, value: spokenValue(w.statLbl.text) });
-            // Hidden but still taking its room, so the values stay aligned.
-            const endable = canEnd(proc, this._selfPid);
-            w.endBtn.opacity = endable ? 255 : 0;
-            w.endBtn.reactive = endable;
-            w.endBtn.can_focus = endable;
-            w.endBtn.accessible_name = endable ? fill(_('Actions for {process}'), { process: who }) : '';
+            w.endBtn.accessible_name = fill(_('Actions for {process}'), { process: who });
         });
         if (bar?.box.visible) this._placeEndBar(bar);
     }

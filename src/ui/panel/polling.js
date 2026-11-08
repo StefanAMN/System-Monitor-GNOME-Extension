@@ -3,6 +3,7 @@
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 
+import { appBottlenecks } from '../../lib/engine/appbottlenecks.js';
 import { BatteryTracker } from '../../lib/engine/batterytracker.js';
 import { powerReadout, thermalUnavailable, sampleNote } from '../../lib/common/present.js';
 import { RANGES, BucketSeries } from '../../lib/engine/longhistory.js';
@@ -181,8 +182,34 @@ export class PollingMethods {
         return started;
     }
 
+    _cancelIncidentApps() {
+        if (this._incidentAppTimer) GLib.source_remove(this._incidentAppTimer);
+        this._incidentAppTimer = 0;
+        this._incidentApps?.cancel();
+    }
+
+    _sampleIncidentApps(capture) {
+        const isCurrent = () => this._incidents?.active === capture && !this._indicatorGone;
+        const report = e => logOnce(`ResourcePulse: app bottleneck sample: ${e.message}`);
+        this._incidentApps.begin().then(before => {
+            if (!before || !isCurrent()) return;
+            // The first read includes the kernel's recent PSI trend. Pair it
+            // with another just after the trigger, within the capture window.
+            this._incidentAppTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 6000, () => {
+                this._incidentAppTimer = 0;
+                if (isCurrent()) {
+                    this._incidentApps.end(before).then(after => {
+                        if (isCurrent()) capture.apps = appBottlenecks(before, after);
+                    }).catch(report);
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+        }).catch(report);
+    }
+
     _scheduleIncidentFinish() {
         if (this._incidentFinishId || !this._incidents.active) return;
+        this._sampleIncidentApps(this._incidents.active);
         // Leave time for an in-flight reading measured before the deadline.
         // At the longest cadence there may be no periodic poll in this grace period.
         const remainingMs = Math.ceil((this._incidents.active.end - GLib.get_monotonic_time()) / 1000);
@@ -195,6 +222,7 @@ export class PollingMethods {
     }
 
     _saveIncidents() {
+        this._cancelIncidentApps();
         if (this._incidentFinishId) GLib.source_remove(this._incidentFinishId);
         this._incidentFinishId = 0;
         // Startup merges and writes any captures completed during the file read.

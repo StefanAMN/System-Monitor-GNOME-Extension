@@ -49,24 +49,80 @@ function queryFilesystem(path) {
 const PHYSICAL_DISK = /^(sd[a-z]+|nvme\d+n\d+|vd[a-z]+|xvd[a-z]+|mmcblk\d+)$/;
 const INTERESTING_FS = ['ext4', 'btrfs', 'xfs', 'ntfs', 'ntfs3', 'vfat', 'exfat', 'fuseblk', 'f2fs', 'ext3', 'ext2', 'zfs', 'bcachefs'];
 
+function diskCounter(field) {
+    if (field === undefined) return undefined;
+    const value = Number(field);
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 /**
  * Whole physical disks from /proc/diskstats (partitions, loop, dm and zram
  * devices are left out so nothing is counted twice).
- * @returns {{name: string, sectorsRead: number, sectorsWritten: number, ioTicks: number}[]}
+ * Callers that only track transferred bytes do not need the request fields.
  */
-export function parseDiskstats(content) {
+export function parseDiskstats(content, withRequests = false) {
     const out = [];
     for (const line of content.split('\n')) {
         const parts = line.trim().split(/\s+/);
         if (parts.length < 13 || !PHYSICAL_DISK.test(parts[2])) continue;
-        out.push({
+        const disk = {
             name: parts[2],
             sectorsRead: parseInt(parts[5], 10) || 0,
             sectorsWritten: parseInt(parts[9], 10) || 0,
             ioTicks: parseInt(parts[12], 10) || 0
-        });
+        };
+        if (withRequests) {
+            disk.major = diskCounter(parts[0]);
+            disk.minor = diskCounter(parts[1]);
+            disk.reads = diskCounter(parts[3]);
+            disk.readMs = diskCounter(parts[6]);
+            disk.writes = diskCounter(parts[7]);
+            disk.writeMs = diskCounter(parts[10]);
+            disk.weightedIoMs = diskCounter(parts[13]);
+            // The kernel added discard and flush fields after the original
+            // read/write counters. An absent field is distinct from bad data.
+            disk.discards = diskCounter(parts[14]);
+            disk.discardMs = diskCounter(parts[17]);
+            disk.flushes = diskCounter(parts[18]);
+            disk.flushMs = diskCounter(parts[19]);
+        }
+        out.push(disk);
     }
     return out;
+}
+
+function requestDelta(current, previous, optional = false) {
+    if (optional && current === undefined && previous === undefined) return 0;
+    return Number.isFinite(current) && Number.isFinite(previous) && current >= previous ? current - previous : null;
+}
+
+/** Completed requests per second, their average wait, and average in-flight I/O. */
+export function driveIoStats(disk, prev, elapsedMs) {
+    const stats = { name: disk.name, iops: null, latencyMs: null, queueDepth: null };
+    if (!prev || !Number.isFinite(elapsedMs) || elapsedMs <= 0 ||
+        disk.major !== prev.major || disk.minor !== prev.minor ||
+        disk.sectorsRead < prev.sectorsRead || disk.sectorsWritten < prev.sectorsWritten ||
+        disk.ioTicks < prev.ioTicks) return stats;
+
+    const weighted = requestDelta(disk.weightedIoMs, prev.weightedIoMs);
+    if (weighted !== null) stats.queueDepth = weighted / elapsedMs;
+
+    const reads = requestDelta(disk.reads, prev.reads);
+    const writes = requestDelta(disk.writes, prev.writes);
+    const discards = requestDelta(disk.discards, prev.discards, true);
+    const flushes = requestDelta(disk.flushes, prev.flushes, true);
+    if (reads === null || writes === null || discards === null || flushes === null) return stats;
+    const completed = reads + writes + discards + flushes;
+    stats.iops = completed * 1000 / elapsedMs;
+    if (completed === 0) return stats;
+
+    const readMs = requestDelta(disk.readMs, prev.readMs);
+    const writeMs = requestDelta(disk.writeMs, prev.writeMs);
+    const discardMs = requestDelta(disk.discardMs, prev.discardMs, disk.discards === undefined);
+    const flushMs = requestDelta(disk.flushMs, prev.flushMs, disk.flushes === undefined);
+    if (readMs !== null && writeMs !== null && discardMs !== null && flushMs !== null)
+        stats.latencyMs = (readMs + writeMs + discardMs + flushMs) / completed;
+    return stats;
 }
 
 /**
@@ -153,18 +209,20 @@ export class DiskSampler {
             let maxDiskIoPercent = 0;
             let ioSampled = false;
             const disks = new Map();
+            const drives = detailed ? [] : null;
             let now = GLib.get_monotonic_time();
 
             try {
                 const diskstats = readProcFile(`${this._proc}/diskstats`);
                 now = GLib.get_monotonic_time();
                 const deltaTimeMs = this._prevTime > 0 ? (now - this._prevTime) / 1000 : 0;
-                for (const disk of parseDiskstats(diskstats)) {
+                for (const disk of parseDiskstats(diskstats, true)) {
                     disks.set(disk.name, disk);
                     // Per disk: one attached since the last reading counts from
                     // the next, and one removed does not hide the others' traffic.
                     const prev = this._prevDisks.get(disk.name);
-                    if (!prev) continue;
+                    if (drives) drives.push(driveIoStats(disk, prev, deltaTimeMs));
+                    if (!prev || disk.major !== prev.major || disk.minor !== prev.minor) continue;
                     ioSampled ||= deltaTimeMs > 0 && disk.ioTicks >= prev.ioTicks;
                     readBytes += counterDelta(disk.sectorsRead, prev.sectorsRead) * 512;
                     writeBytes += counterDelta(disk.sectorsWritten, prev.sectorsWritten) * 512;
@@ -214,6 +272,7 @@ export class DiskSampler {
                 writeRate: writeRate,
                 diskPercent: diskPercent,
                 ioSampled,
+                drives,
                 maxSpeed: this._maxSpeed
             };
         } catch (e) {
@@ -223,6 +282,7 @@ export class DiskSampler {
                 readRate: 0,
                 writeRate: 0,
                 diskPercent: 0,
+                drives: detailed ? [] : null,
                 maxSpeed: 100 * 1024 * 1024
             };
         }

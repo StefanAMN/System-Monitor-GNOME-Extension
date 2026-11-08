@@ -1728,3 +1728,65 @@ with 1066, 1061, and 1061 actors. The overhead run used a zero-second soak.
 Lint and pseudo translation coverage passed, including the Slowdowns page.
 The rebuilt 81-file archive installed and stayed active for 8 s in an isolated
 Shell with a clean extension log.
+
+## Advanced tracking priorities (2026-11-08)
+
+| Priority | Implementation and proof |
+|---|---|
+| Slowdown recorder | Preserve the existing manual/automatic trigger and 60 s / 30 s timeline. Re-run the real-pointer and storage tests including old captures. |
+| Per-app bottlenecks | Take bounded cgroup v2 snapshots only around a trigger. Separate the scope pressure ranking from CPU, memory and disk usage, with missing controller data visible. Verify monotonic deltas, reset/replacement handling, vanished scopes, grouping, and restored incident details. |
+| Drive responsiveness | Derive per-drive IOPS, average completion time and average queue depth from the same diskstats read, retaining disk identity and gaps across warmup, removal, or reset. Verify with parser fixtures, live disks and the Disk page. |
+| Workload comparison | Compare two aligned historical windows from Tracking with per-metric coverage. Verify rates, missing and legacy coverage, separated plugged-in/discharging time, and range selection in the actual preferences window. |
+| App memory | Read smaps_rollup only after opening an inspector for a selected process group. Verify proportional and private residency, partial permissions, transient and reused PIDs, and the row action with real pointer input. |
+| Observer budget | Re-run lint, the units and process churn, compositor and translation checks, archive installation, and the steady-state overhead test with tracking on. |
+
+The Linux cgroup, procfs and diskstats paths are unprivileged and optional where
+the kernel or policy disables access. The current recorder and tracking formats
+are snapshotted before extending them. Detailed memory and app-pressure reads
+add no recurring reads to the steady-state polling loop.
+
+Implementation and focused proof on GNOME Shell 50.1:
+
+- Slowdowns retains the old timelines and adds scope rankings from snapshots at
+  the trigger and about six seconds later. The rankings separate recent PSI,
+  interval PSI, and usage. CPU and disk are interval rates, while memory is a
+  cgroup charge snapshot. The disk fallback counts only readable, continuing
+  PID/start-time pairs and drops duplicate, replaced, and joining PIDs.
+  The integrated pointer test exercised a controlled PSI trigger and a full
+  manual capture, replayed independent wait and usage rankings, and verified
+  their persistence after re-enable. A live systemd CPU scope measured 99.98%
+  of one core with CPU counters readable for all 60 observed scopes. The
+  final live pair took 15.0 ms and 11.3 ms wall time in idle batches. Storage
+  keeps five private captures, with a 128 KiB read cap and ordered startup
+  merges across re-enable.
+- Disk uses the existing diskstats polling cadence. Detailed rows include
+  completed read, write, discard, and flush requests where reported, average
+  completion latency, and weighted average in-flight requests. A live 32 MiB
+  direct write yielded 32.21 MiB observed, 974.11 IOPS, 0.34 ms and 0.335
+  average queue depth. Pointer tests covered idle, active, and reopen states.
+- Tracking compares equal, completed periods from the existing five-minute
+  or hourly buckets. A delta needs 95% measured coverage in both periods.
+  Old memory and disk coverage remains usable. CPU and battery now record
+  matching coverage and numerators, with battery covering discharging
+  intervals. Existing bucket resolution applies, including the interval
+  assigned to the bucket containing its endpoint. The Orchis user-theme
+  pointer test passed 32 checks across both themes and the dropdowns.
+- The memory action reads one process at a time off the compositor thread.
+  It covers the selected same-name group and reports its readable members.
+  The pointer test measured two live processes, then one after an exit, and
+  verified navigation and protected-process actions. A 40-read live
+  single-process run measured 0.46 ms median and 0.78 ms p95 wall time.
+- All 898 unit checks passed, including churn with the FD count steady at 12.
+  The broader UI run found an environment-dependent assertion that the
+  single-core battery tracking fixture must outrank all user apps. The test
+  still requires its expected CPU time and a place in the ranking.
+- The complete compositor suite passed after the assertion change. The
+  burner recorded 6.06 CPU-seconds and ranked first in that run. The
+  translation check read 249 panel labels on 10 pages, and the 86-file ZIP
+  installed and stayed active for eight seconds with a clean extension log.
+- The 20-second overhead windows passed at the default two-second refresh.
+  The closed-menu difference was -0.10 percentage points against a 1.20%
+  idle Shell baseline. Including measured tracking cost (42.0 ms CPU every
+  30 s), the difference was +0.04% of a core in this short run. Overview,
+  CPU and CPU search measured +3.50%, +2.45% and +2.50%. Each of three
+  60-cycle menu churn rounds ended at 1148 actors. No long soak was run.

@@ -119,6 +119,8 @@ export class DetailsMethods {
         const hadFocus = this._focusInPanel();
         // A page opens at its top, not at the offset the last one was left at.
         if (this._shownTab !== this._activeTab) {
+            if (this._shownTab === 'disk') this._updateDriveStats(null);
+            this._closeProcessMemoryPage(this._shownTab);
             this._shownTab = this._activeTab;
             this._scrollView?.get_vadjustment().set_value(0);
         }

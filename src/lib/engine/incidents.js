@@ -131,9 +131,10 @@ export class IncidentRecorder {
     /** Complete even when a long polling interval leaves the deadline between polls. */
     finish(now) {
         if (!this.active || now < this.active.end) return null;
-        const { at, trigger: reason, rows } = this.active;
+        const { at, trigger: reason, rows, apps } = this.active;
         this.active = null;
         const capture = { at, trigger: reason, intervalSeconds: INCIDENT_STEP_SECONDS, rows };
+        if (apps) capture.apps = apps;
         this.captures.unshift(capture);
         if (this.captures.length > INCIDENT_LIMIT) this.captures.pop();
         return capture;

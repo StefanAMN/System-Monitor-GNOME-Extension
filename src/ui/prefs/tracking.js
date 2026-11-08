@@ -17,6 +17,7 @@ import { appInfo } from '../../lib/common/appnames.js';
 import { formatDuration, formatBytes, formatTemp } from '../../lib/common/format.js';
 import { _, fill, ngettext } from '../../lib/common/i18n.js';
 import { METRIC_COLORS } from './style.js';
+import { buildWorkloadComparison } from './workload.js';
 
 const HOUR_MS = 3600 * 1000;
 const APPS_SHOWN = 15;
@@ -778,6 +779,9 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         dialog.present(page.get_root());
     });
 
+    rows.workload = buildWorkloadComparison(settings, history);
+    page.add(rows.workload.group);
+
     // The components as tabs: each shows the whole page for one of them.
     const specsNow = () => componentSpecs(settings.get_string('unit-temp') || 'C');
     const tabsGroup = new Adw.PreferencesGroup();
@@ -960,6 +964,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
             ? _('Recording · {time}')
             : _('Recording · {time} · no power readings'), { time: formatDuration(hours * 3600) });
         rows.clearButton.sensitive = history.ledger.buckets.length > 0;
+        rows.workload.refresh();
 
         const component = COMPONENTS[rows.component.selected] ?? 'battery';
         renderHealth(component === 'battery');
@@ -1089,6 +1094,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         render();
     };
     const unitId = settings.connect('changed::unit-temp', render);
+    const memoryUnitId = settings.connect('changed::unit-mem', rows.workload.refresh);
     rows.batteryOnly.connect('notify::active', render);
     const trackingId = settings.connect('changed::battery-tracking', () => {
         history.requestFlush();
@@ -1104,6 +1110,7 @@ export function buildTrackingPage(settings, history, { fullWh = () => null, icon
         dispose: () => {
             settings.disconnect(trackingId);
             settings.disconnect(unitId);
+            settings.disconnect(memoryUnitId);
             unsubscribe();
         },
     };

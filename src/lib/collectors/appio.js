@@ -85,10 +85,11 @@ export class AppIoSampler {
 
     /**
      * @param {Array<{unit: string, usec: number, pids: number[]}>} units each unit's CPU time and processes
+     * @param {boolean} [pairedOnly] require a readable, stable pair and report measured zeroes
      * @returns {Promise<Map<string, {read: number, write: number}>>} bytes per
      *   unit since the previous call; empty on the first call
      */
-    sample(units) {
+    sample(units, pairedOnly = false) {
         this.cancel();
         const next = new Map();
         const out = new Map();
@@ -117,9 +118,10 @@ export class AppIoSampler {
                     // Migration to another unit is a new attribution baseline:
                     // its old unit's lifetime must not be assigned to the new one.
                     if (same && before.unit !== unit) continue;
+                    if (pairedOnly && (!same || io.read < before.read || io.write < before.write)) continue;
                     const read = same ? Math.max(0, io.read - before.read) : io.read;
                     const write = same ? Math.max(0, io.write - before.write) : io.write;
-                    if (read === 0 && write === 0) continue;
+                    if (!pairedOnly && read === 0 && write === 0) continue;
                     const sum = out.get(unit) ?? { read: 0, write: 0 };
                     sum.read += read;
                     sum.write += write;

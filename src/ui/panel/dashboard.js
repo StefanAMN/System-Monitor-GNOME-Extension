@@ -215,6 +215,7 @@ export class DashboardMethods {
             if (this._dskRead)  this._dskRead.val.text  = `${readMB.toFixed(2)} MB/s`;
             if (this._dskWrite) this._dskWrite.val.text = `${writeMB.toFixed(2)} MB/s`;
             if (this._dskUsage) this._dskUsage.val.text = `${Math.round(diskPct)}% (${totalMB.toFixed(1)} MB/s)`;
+            if (!frame && this._menuOpen && this._activeTab === 'disk') this._updateDriveStats(dsk.drives);
 
             // Only a detailed sample has the full mount list.
             if (this._menuOpen && this._activeTab === 'disk' && this._dskMountsBox && dsk.mounts && dsk.detailed) {

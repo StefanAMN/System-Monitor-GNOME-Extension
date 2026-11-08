@@ -3,10 +3,11 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 
 import { logOnce } from '../common/utils.js';
+import { BOTTLENECK_ID_LIMIT, BOTTLENECK_TOP } from './appbottlenecks.js';
 import { INCIDENT_LIMIT, INCIDENT_METRICS, INCIDENT_SLOTS, INCIDENT_STEP_SECONDS } from './incidents.js';
 
 const VERSION = 1;
-const MAX_BYTES = 64 * 1024;
+const MAX_BYTES = 128 * 1024;
 // GLib.DateTime can display through the last millisecond of year 9999.
 const MAX_DATE_MS = 253402300799999;
 const TRIGGERS = new Set(['manual', 'cpu', 'memory', 'io']);
@@ -15,6 +16,7 @@ const PRIORITY = GLib.PRIORITY_DEFAULT;
 // An old extension instance can still be writing after disable(). Share its
 // queue with the next instance, keeping only the latest waiting snapshot.
 const writes = new Map();
+const restores = new Map();
 
 export function incidentPath() {
     return GLib.build_filenamev([GLib.get_user_data_dir(), 'resource-pulse', 'incidents.json']);
@@ -49,8 +51,36 @@ async function makeParents(dir) {
     }
 }
 
-// Both directions project onto the same bounded shape. Never persist fields
-// outside the recorder's eight machine-wide measurements.
+function counts(values) {
+    return Array.isArray(values) && values.length === 3 &&
+        values.every(n => Number.isSafeInteger(n) && n >= 0);
+}
+
+function appSnapshot(apps) {
+    if (!counts(apps?.scopes) || typeof apps.estimated !== 'boolean' ||
+        !Array.isArray(apps.resources) || apps.resources.length !== 3) return null;
+    const resources = [];
+    for (const entry of apps.resources) {
+        if (!counts(entry?.coverage)) return null;
+        const resource = { coverage: [...entry.coverage] };
+        for (const key of ['recent', 'wait', 'usage']) {
+            if (!Array.isArray(entry[key]) || entry[key].length > BOTTLENECK_TOP) return null;
+            const list = [];
+            for (const app of entry[key]) {
+                if (typeof app?.id !== 'string' || !app.id || app.id.length > BOTTLENECK_ID_LIMIT ||
+                    !Number.isFinite(app.value) || app.value <= 0 || (key !== 'usage' && app.value > 100))
+                    return null;
+                list.push({ id: app.id, value: app.value });
+            }
+            resource[key] = list;
+        }
+        resources.push(resource);
+    }
+    return { scopes: [...apps.scopes], estimated: apps.estimated, resources };
+}
+
+// Both directions project onto a bounded shape. Version 1 timelines saved
+// before app rankings were introduced remain readable.
 function snapshots(captures) {
     if (!Array.isArray(captures)) throw new Error('invalid capture list');
     const result = [];
@@ -70,7 +100,10 @@ function snapshots(captures) {
             }
             rows.push(values);
         }
-        result.push({ at: capture.at, trigger: capture.trigger, intervalSeconds: INCIDENT_STEP_SECONDS, rows });
+        const snapshot = { at: capture.at, trigger: capture.trigger, intervalSeconds: INCIDENT_STEP_SECONDS, rows };
+        const apps = appSnapshot(capture.apps);
+        if (apps) snapshot.apps = apps;
+        result.push(snapshot);
     }
     // The recorder orders by capture creation. Wall time can go backwards.
     return result;
@@ -87,7 +120,7 @@ async function read(file) {
         throw error;
     }
     if (info.get_file_type() !== Gio.FileType.REGULAR) throw new Error('incident history is not a regular file');
-    if (info.get_size() > MAX_BYTES) throw new Error('incident history exceeds 64 KiB');
+    if (info.get_size() > MAX_BYTES) throw new Error('incident history exceeds 128 KiB');
 
     const stream = await asyncCall(file, 'read', PRIORITY, null);
     const bytes = new Uint8Array(MAX_BYTES + 1);
@@ -102,7 +135,7 @@ async function read(file) {
     } finally {
         await asyncCall(stream, 'close', PRIORITY, null);
     }
-    if (length > MAX_BYTES) throw new Error('incident history exceeds 64 KiB');
+    if (length > MAX_BYTES) throw new Error('incident history exceeds 128 KiB');
 
     const etag = info.get_etag();
     let doc;
@@ -152,6 +185,17 @@ export class IncidentStore {
         }
     }
 
+    /** Run startup load and merge in order across disable/re-enable. */
+    restore(merge) {
+        const done = (restores.get(this.path) ?? Promise.resolve()).then(() => this.load()).then(merge);
+        restores.set(this.path, done);
+        const clear = () => {
+            if (restores.get(this.path) === done) restores.delete(this.path);
+        };
+        done.then(clear, clear);
+        return done;
+    }
+
     /** Read the completed history, waiting for any earlier save of this path. */
     async load() {
         for (let queue = writes.get(this.path); queue; queue = writes.get(this.path))
@@ -172,7 +216,7 @@ export class IncidentStore {
         try {
             const contents = JSON.stringify({ version: VERSION, captures: snapshots(captures) });
             bytes = new GLib.Bytes(new TextEncoder().encode(contents));
-            if (bytes.get_size() > MAX_BYTES) throw new Error('incident history exceeds 64 KiB');
+            if (bytes.get_size() > MAX_BYTES) throw new Error('incident history exceeds 128 KiB');
         } catch (error) {
             this._report(error.message);
             return Promise.resolve(false);

@@ -29,6 +29,12 @@ async function run() {
 
     const old = capture(200);
     const latest = { ...capture(100, 'memory'), command: 'private data' };
+    latest.apps = {
+        scopes: [4, 3, 4], estimated: true,
+        resources: Array.from({ length: 3 }, () => ({
+            coverage: [3, 2, 2], recent: [{ id: 'org.example.Demo', value: 12, pid: 123 }], wait: [], usage: [],
+        })),
+    };
     const older = Array.from({ length: INCIDENT_LIMIT }, (_, i) => capture(99 - i));
     const saving = store.save([latest, old, ...older]);
     latest.rows[0][0] = 999;
@@ -38,6 +44,9 @@ async function run() {
         'history is capped and preserves creation order across a backward clock correction');
     check(restored[0].rows[0][0] === 0 && restored[0].rows[0][1] === null, 'save snapshots values and preserves missing measurements');
     check(!fileText(path).includes('private data'), 'only recorder fields reach the history file');
+    check(restored[0].apps.resources[0].recent[0].id === 'org.example.Demo' &&
+        !('pid' in restored[0].apps.resources[0].recent[0]) && !restored[1].apps,
+    'app rankings round-trip without process identities, and older captures still load');
     const file = Gio.File.new_for_path(path);
     const mode = () => file.query_info('unix::mode', Gio.FileQueryInfoFlags.NONE, null).get_attribute_uint32('unix::mode') & 0o777;
     check(mode() === 0o600, 'new history is private');
@@ -52,6 +61,17 @@ async function run() {
     check(restored.length === 1 && restored[0].at === 500, 'reopening waits for earlier writes');
     check(await first && await middle && await last, 'all accepted saves settle');
     check(mode() === 0o600, 'replacement also makes an existing history private');
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const oldStartup = store.restore(async captures => {
+        await gate;
+        await store.save([capture(550), ...captures]);
+    });
+    const newStartup = reopened.restore(captures => captures);
+    release();
+    await oldStartup;
+    check((await newStartup).map(c => c.at).join() === '550,500',
+        'a re-enable waits for the previous generation startup merge');
     const untouched = fileText(path);
     const invalid = capture(600);
     invalid.rows[0][0] = Infinity;
@@ -73,7 +93,7 @@ async function run() {
     GLib.file_set_contents(path, future);
     check((await store.load()).length === 0, 'unknown versions are unavailable');
     check(!await store.save([capture(800)]) && fileText(path) === future, 'unknown versions stay untouched');
-    const large = ' '.repeat(64 * 1024 + 1);
+    const large = ' '.repeat(128 * 1024 + 1);
     GLib.file_set_contents(path, large);
     check((await store.load()).length === 0, 'oversized input is rejected');
     check(!await store.save([capture(900)]) && fileText(path) === large, 'oversized input cannot be overwritten');

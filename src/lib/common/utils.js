@@ -7,12 +7,13 @@ const textDecoder = new TextDecoder('utf-8');
  * Asynchronously read a file and decode as UTF-8 string using a shared TextDecoder.
  * Fails soft by rejecting the promise.
  * @param {string} path
+ * @param {Gio.Cancellable|null} [cancellable]
  * @returns {Promise<string>}
  */
-export function readFileAsync(path) {
+export function readFileAsync(path, cancellable = null) {
     const file = Gio.File.new_for_path(path);
     return new Promise((resolve, reject) => {
-        file.load_contents_async(null, (obj, res) => {
+        file.load_contents_async(cancellable, (obj, res) => {
             try {
                 const [, contents] = obj.load_contents_finish(res);
                 resolve(textDecoder.decode(contents));

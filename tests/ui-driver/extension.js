@@ -223,6 +223,70 @@ async function clickThrough(rp, label) {
     await sleep(400);
 }
 
+async function diskDrivePerformance(rp) {
+    const waitFor = async (condition, message) => {
+        for (let i = 0; i < 40 && !condition(); i++) await sleep(100);
+        check(condition(), message);
+    };
+    const sample = rp._dsk.sample;
+    const fixture = [
+        { name: 'nvme0n1', iops: 120, latencyMs: 2.5, queueDepth: 0.75 },
+        { name: 'sda', iops: 0, latencyMs: null, queueDepth: 0 },
+    ];
+    let held = null;
+    let release = null;
+    rp._dsk.sample = async function (detailed) {
+        const result = await sample.call(this, detailed);
+        if (!detailed) return result;
+        if (held) await held;
+        return { ...result, drives: fixture };
+    };
+    const openDisk = async () => {
+        await scrollIntoView(rp, rp._summaryCards.disk.box);
+        await clickActor(rp._summaryCards.disk.box);
+        check(rp._activeTab === 'disk' && rp._detailSections.disk.is_mapped(), 'drive stats: pointer did not open Disk');
+    };
+    const back = async () => {
+        await scrollIntoView(rp, rp._detailBackBtn);
+        await clickActor(rp._detailBackBtn);
+        check(rp._activeTab === 'overview' && !rp._dskDriveList.visible, 'drive stats: leaving Disk did not hide previous readings');
+    };
+    try {
+        await clickActor(rp._indicator);
+        check(rp._indicator.menu.isOpen && rp._activeTab === 'overview', 'drive stats: pointer did not open the overview');
+        await openDisk();
+        await waitFor(() => rp._dskDriveList.visible && rp._dskDriveRows.length === 2,
+            'drive stats: two physical-drive groups did not appear');
+        const [nvme, sata] = rp._dskDriveRows;
+        check(nvme.name === 'nvme0n1' && nvme.iops.val.text === '120.00' &&
+            nvme.latency.val.text === '2.50 ms' && nvme.queue.val.text === '0.75',
+        'drive stats: active IOPS, latency or queue depth is wrong');
+        check(sata.name === 'sda' && sata.iops.val.text === '0.00' &&
+            sata.latency.val.text === 'No completed requests' && sata.queue.val.text === '0.00',
+        'drive stats: idle latency is displayed as a measurement');
+        await scrollIntoView(rp, sata.queue.row);
+        await shot('disk-drives');
+        await back();
+        await waitFor(() => rp._lastDsk?.drives === null, 'drive stats: overview should not build a drive breakdown');
+
+        held = new Promise(resolve => { release = resolve; });
+        await openDisk();
+        check(!rp._dskDriveList.visible && rp._dskDriveNote.visible,
+            'drive stats: reopening exposes old detail rows while the new sample is pending');
+        release();
+        held = null;
+        await waitFor(() => rp._dskDriveList.visible, 'drive stats: fresh sample did not replace the waiting state');
+        check(rp._dskDriveRows[0] === nvme, 'drive stats: unchanged physical devices rebuilt their rows');
+        await back();
+        console.log('RP-UITEST drive stats: pointer opening, active/idle values, hidden on reopen, rows reused');
+    } finally {
+        release?.();
+        rp._dsk.sample = sample;
+        rp._indicator.menu.close();
+        await sleep(400);
+    }
+}
+
 function luminance(color) {
     return (0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue) / 255;
 }
@@ -785,7 +849,7 @@ async function topBarFits(rp) {
 // fixture history; it prints a SHOW line for each page it puts on screen and
 // the driver screenshots it. Then the real window is opened from the panel,
 // with the pointer.
-async function prefsWindow(rp) {
+async function prefsWindow(rp, mode = '1200') {
     const here = GLib.path_get_dirname(GLib.filename_from_uri(import.meta.url)[0]);
     const root = Main.extensionManager.lookup(TARGET).path;
     const runtime = Gio.File.new_for_path(GLib.get_user_runtime_dir());
@@ -808,7 +872,7 @@ async function prefsWindow(rp) {
         const id = / ack=(\d+)$/.exec(line)?.[1];
         if (id) GLib.file_set_contents(`${ackDir}/${id}`, '');
     };
-    const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, '1200']);
+    const proc = launcher.spawnv(['gjs', '-m', `${here}/prefs-check.js`, root, mode]);
     const lines = new Gio.DataInputStream({ base_stream: proc.get_stdout_pipe() });
     const readLine = () => new Promise((resolve, reject) => lines.read_line_async(GLib.PRIORITY_DEFAULT, null, (obj, res) => {
         try {
@@ -866,6 +930,7 @@ async function prefsWindow(rp) {
         `prefs: ${verdict.join(' | ') || `no verdict (exit ${proc.get_exit_status()})`}`);
     console.log(`RP-UITEST ${verdict.join(' | ')}`);
     for (let i = 0; i < 20 && titled(); i++) await sleep(150);
+    if (mode === 'workload') return;
 
     // The real window, from the overview's menu button: all settings live there.
     rp._indicator.menu.open();
@@ -1156,9 +1221,12 @@ async function batteryTracking(rp) {
         // Born after the previous sample: counted from zero, about 6 s of one core.
         check(found && found.cpu > 4.5e6 && found.cpu < 7e6,
             `tracking: burner ${tag} got ${found ? (found.cpu / 1e6).toFixed(2) : 'no'} s of CPU (expected about 6)`);
-        check(byCpu[0]?.id === tag, `tracking: top app by CPU is ${byCpu[0]?.id}, not the burner`);
-        console.log(`RP-UITEST tracking: burner ${(found.cpu / 1e6).toFixed(2)} s CPU, ${(found.wh * 1000).toFixed(2)} mWh, ` +
-            `energy ${sum.hasEnergy ? 'measured' : 'not readable'}; next: ${byCpu.slice(1, 3).map(a => `${a.id} ${(a.cpu / 1e6).toFixed(2)} s`).join(', ')}`);
+        // The user's real session is measured as well. Another app can
+        // legitimately use more than a one-core burner during this interval.
+        const rank = byCpu.findIndex(a => a.id === tag) + 1;
+        check(rank > 0, 'tracking: the measured burner is missing from the app ranking');
+        console.log(`RP-UITEST tracking: burner ${(found.cpu / 1e6).toFixed(2)} s CPU, rank ${rank}, ${(found.wh * 1000).toFixed(2)} mWh, ` +
+            `energy ${sum.hasEnergy ? 'measured' : 'not readable'}; other apps: ${byCpu.filter(a => a.id !== tag).slice(0, 2).map(a => `${a.id} ${(a.cpu / 1e6).toFixed(2)} s`).join(', ')}`);
     }
 
     // The preferences window asks for a save, then for clearing.
@@ -1208,6 +1276,25 @@ async function slowdownRecorder(rp) {
         while (!predicate() && GLib.get_monotonic_time() < until) await sleep(100);
         check(predicate(), message);
     };
+    const { AppBottleneckSampler } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/collectors/appbottlenecks.js`);
+    const fixture = GLib.dir_make_tmp('rp-slowdown-apps-XXXXXX');
+    const scope = `${fixture}/app-gnome-org.example.Fixture-123.scope`;
+    GLib.mkdir_with_parents(scope, 0o700);
+    const files = {
+        'cpu.stat': 'usage_usec 10000\n', 'memory.current': '1048576\n',
+        'cpu.pressure': 'some avg10=30.00 total=400000\n',
+        'io.stat': '8:0 rbytes=2000 wbytes=4000\n',
+    };
+    for (const [name, value] of Object.entries(files)) GLib.file_set_contents(`${scope}/${name}`, value);
+    const appSampler = new AppBottleneckSampler({ session: fixture });
+    const end = appSampler.end.bind(appSampler);
+    appSampler.end = before => {
+        GLib.file_set_contents(`${scope}/cpu.pressure`, 'some avg10=40.00 total=1400000\n');
+        GLib.file_set_contents(`${scope}/cpu.stat`, 'usage_usec 3010000\n');
+        return end(before);
+    };
+    const actualAppSampler = rp._incidentApps;
+    rp._incidentApps = appSampler;
     const psi = rp._psi.sample;
     let since = GLib.get_monotonic_time();
     let total = 10e6;
@@ -1295,6 +1382,11 @@ async function slowdownRecorder(rp) {
         await scrollIntoView(rp, rp._incidentRows[0]);
         await clickActor(rp._incidentRows[0]);
         check(rp._incidentSelected === manual, 'slowdowns: clicking the latest capture did not show its timeline');
+        check(manual.apps?.resources[0].recent[0]?.value === 30 &&
+            manual.apps.resources[0].wait[0]?.value > 0 && manual.apps.resources[0].usage[0]?.value > 0,
+        'slowdowns: app waiting and CPU usage were not sampled independently');
+        check(rp._incidentAppBody.get_children().some(label => label.text.includes('org.example.Fixture (30.0%)')),
+            'slowdowns: app pressure ranking did not render');
         await shot('slowdowns-completed-dark');
 
         const withGap = rp._incidentCharts.get('cpuWait');
@@ -1319,6 +1411,11 @@ async function slowdownRecorder(rp) {
         await closeSlowdowns(rp);
     } finally {
         rp._psi.sample = psi;
+        rp._cancelIncidentApps();
+        rp._incidentApps = actualAppSampler;
+        for (const name of Object.keys(files)) GLib.unlink(`${scope}/${name}`);
+        GLib.rmdir(scope);
+        GLib.rmdir(fixture);
         if (pollingPaused) rp._startPolling();
         iface.set_string('color-scheme', scheme);
     }
@@ -1339,6 +1436,8 @@ async function slowdownRecorder(rp) {
     await scrollIntoView(reopened, reopened._incidentRows[0]);
     await clickActor(reopened._incidentRows[0]);
     check(reopened._incidentSelected?.at === manual.at, 'slowdowns: restored capture cannot be opened');
+    check(reopened._incidentAppBody.get_children().some(label => label.text.includes('org.example.Fixture (30.0%)')),
+        'slowdowns: restored capture has lost app bottleneck data');
     await closeSlowdowns(reopened);
     console.log('RP-UITEST slowdowns: automatic trigger, full manual window finished without a poll, timeline gap, and restored capture');
 }
@@ -1699,6 +1798,98 @@ async function processSearch(rp) {
     } finally {
         idle.force_exit();
         GLib.spawn_command_line_sync(`rm -rf ${dir}`);
+        rp._indicator.menu.close();
+        await sleep(400);
+    }
+}
+
+async function processMemoryInspector(rp) {
+    const dir = GLib.dir_make_tmp('rp-memory-inspector-XXXXXX');
+    const path = `${dir}/rpmemcheck`;
+    Gio.File.new_for_path(path).make_symbolic_link('/bin/sh', null);
+    const children = [];
+    const wait = async (condition, message) => {
+        for (let i = 0; i < 40 && !condition(); i++) await sleep(150);
+        check(condition(), message);
+    };
+    const click = async actor => {
+        await scrollIntoView(rp, actor);
+        await clickActor(actor);
+    };
+    const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+    const scheme = iface.get_string('color-scheme');
+    try {
+        for (let i = 0; i < 2; i++) children.push(Gio.Subprocess.new([path, '-c', 'read line'], Gio.SubprocessFlags.STDIN_PIPE));
+        iface.set_string('color-scheme', 'prefer-dark');
+        pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+        await sleep(300);
+        Main.overview.hide();
+        for (let i = 0; i < 30 && (Main.overview.visible || Main.overview.animationInProgress); i++) await sleep(100);
+
+        if (!rp._indicator.menu.isOpen) await clickActor(rp._indicator);
+        if (rp._activeTab !== 'overview') await click(rp._detailBackBtn);
+        await click(rp._summaryCards.memory.box);
+        check(rp._activeTab === 'memory', 'memory inspector: overview click did not open Memory');
+        const filter = rp._procSearch.memory.entry;
+        await click(filter);
+        for (const ch of 'rpmemcheck') await pressKey(Clutter.unicode_to_keysym(ch.codePointAt(0)), 120);
+        const row = () => rp._memProcWidgets?.find(w => w.group?.comm === 'rpmemcheck' && w.group.count === 2);
+        await wait(() => !!row(), 'memory inspector: both processes never appeared in one group');
+        await click(row().endBtn);
+        const bar = rp._memProcEnd;
+        check(bar.target?.comm === 'rpmemcheck' && bar.inspect.visible && !rp._memoryInspector,
+            'memory inspector: opening the action menu did not expose a lazy inspection');
+
+        await click(bar.inspect);
+        await wait(() => bar.memory.box.visible, 'memory inspector: no result after clicking Inspect memory');
+        check(bar.memory.coverage.text.startsWith('2 of 2 processes measured') &&
+            parseFloat(bar.memory.privateRow.val.text) > 0 && parseFloat(bar.memory.pssRow.val.text) > 0,
+            `memory inspector: missing live breakdown (${bar.memory.coverage.text})`);
+        await scrollIntoView(rp, bar.box);
+        check(cutOffLabels(bar.box).length === 0, 'memory inspector: dark labels cut off');
+        await shot('memory-inspector-dark');
+        await click(bar.cancel);
+        check(bar.step === 'menu' && bar.inspect.visible && !bar.memory.box.visible,
+            'memory inspector: Back to actions did not return to the group');
+
+        children[1].force_exit();
+        await new Promise((resolve, reject) => children[1].wait_async(null, (child, res) => {
+            try {
+                child.wait_finish(res);
+                resolve();
+            } catch (e) { reject(e); }
+        }));
+        check(bar.target.members.length === 2, 'memory inspector: the selected group changed after a process exited');
+        await click(bar.inspect);
+        await wait(() => bar.memory.box.visible, 'memory inspector: no result with one member exited');
+        check(bar.memory.coverage.text.startsWith('1 of 2 processes measured') && bar.memory.rows.visible,
+            `memory inspector: partial coverage was ${bar.memory.coverage.text}`);
+        iface.set_string('color-scheme', 'prefer-light');
+        await sleep(800);
+        checkTheme(rp, true, 'memory inspector light');
+        check(cutOffLabels(bar.box).length === 0, 'memory inspector: light labels cut off');
+        await scrollIntoView(rp, bar.box);
+        await shot('memory-inspector-partial-light');
+        await click(rp._detailBackBtn);
+        check(rp._activeTab === 'overview' && !bar.box.visible && !rp._memoryInspection,
+            'memory inspector: leaving the page kept the result or reading open');
+
+        await click(rp._summaryCards.memory.box);
+        await click(filter);
+        await pressChord([Clutter.KEY_Control_L, Clutter.KEY_a]);
+        for (const ch of 'gnome-shell') await pressKey(Clutter.unicode_to_keysym(ch.codePointAt(0)), 120);
+        const shellRow = () => rp._memProcWidgets?.find(w => w.group?.comm === 'gnome-shell');
+        await wait(() => !!shellRow(), 'memory inspector: GNOME Shell never appeared in the search');
+        await click(shellRow().endBtn);
+        check(bar.target?.comm === 'gnome-shell' && bar.inspect.visible && !bar.pause.visible && !bar.lower.visible && !bar.confirm.visible,
+            'memory inspector: the GNOME Shell row did not stay read-only');
+        console.log('RP-UITEST memory inspector: lazy live breakdown, exited member, Back to actions, and read-only shell');
+    } finally {
+        for (const child of children) child.force_exit();
+        GLib.unlink(path);
+        GLib.rmdir(dir);
+        iface.set_string('color-scheme', scheme);
         rp._indicator.menu.close();
         await sleep(400);
     }
@@ -2173,6 +2364,18 @@ async function translationCoverage(rp) {
 }
 
 async function run() {
+    if (GLib.getenv('RP_UI_WORKLOAD_ONLY') === '1') {
+        const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
+        check(rp?._indicator, 'target extension not enabled');
+        await prefsWindow(rp, 'workload');
+        return;
+    }
+    if (GLib.getenv('RP_UI_MEMORY_INSPECTOR_ONLY') === '1') {
+        const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
+        check(rp?._indicator, 'target extension not enabled');
+        await processMemoryInspector(rp);
+        return;
+    }
     if (GLib.getenv('RP_UI_INCIDENTS_ONLY') === '1') {
         const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
         check(rp?._indicator, 'target extension not enabled');
@@ -2185,6 +2388,15 @@ async function run() {
     check(ext?.stateObj, 'target extension not enabled');
     if (GLib.getenv('LANGUAGE') === 'xx') {
         await translationCoverage(ext.stateObj);
+        return;
+    }
+    if (GLib.getenv('RP_UI_DISK_ONLY') === '1') {
+        pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+        await sleep(300);
+        Main.overview.hide();
+        for (let i = 0; i < 30 && (Main.overview.visible || Main.overview.animationInProgress); i++) await sleep(100);
+        await diskDrivePerformance(ext.stateObj);
         return;
     }
 
@@ -2231,6 +2443,7 @@ async function run() {
     // Pages are built on first visit, not in enable().
     check(Object.keys(ext.stateObj._detailSections).length === 0, 'detail pages were built eagerly');
     await clickThrough(ext.stateObj, 'first open');
+    await diskDrivePerformance(ext.stateObj);
     await cycleTabs(ext.stateObj, 1, 'dark');
     check(Object.keys(ext.stateObj._detailSections).length === 8, 'detail pages missing after visiting every tab');
     await openSlowdowns(ext.stateObj);
@@ -2272,6 +2485,7 @@ async function run() {
     await alertsRecover(ext.stateObj);
     await panelShortcut(ext.stateObj);
     await endProcesses(ext.stateObj);
+    await processMemoryInspector(ext.stateObj);
     await processSearch(ext.stateObj);
     await historyAndUsage(ext.stateObj);
     await smoothGlide(ext.stateObj);

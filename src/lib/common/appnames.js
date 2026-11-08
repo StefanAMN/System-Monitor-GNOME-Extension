@@ -44,13 +44,13 @@ function desktopInfo(id) {
 export function appInfo(id) {
     let info = cache.get(id);
     if (info) return info;
-    if (PSEUDO[id]) {
+    if (Object.hasOwn(PSEUDO, id)) {
         info = { name: _(PSEUDO[id][0]), gicon: null, iconName: PSEUDO[id][1], desktop: false };
     } else {
         // Snaps name their desktop file <snap>_<app>.desktop.
         const entry = desktopInfo(id) ?? (id.startsWith('snap.') ? desktopInfo(`${id.slice(5)}_${id.slice(5)}`) : null);
         if (entry) info = { name: entry.get_display_name() || entry.get_name() || id, gicon: entry.get_icon(), iconName: null, desktop: true };
-        else if (SERVICES[id]) info = { name: _(SERVICES[id]), gicon: null, iconName: 'system-run-symbolic', desktop: false };
+        else if (Object.hasOwn(SERVICES, id)) info = { name: _(SERVICES[id]), gicon: null, iconName: 'system-run-symbolic', desktop: false };
         else info = { name: id.startsWith('snap.') ? id.slice(5) : id, gicon: null, iconName: 'application-x-executable-symbolic', desktop: false };
     }
     if (cache.size >= CACHE_LIMIT) cache.clear();

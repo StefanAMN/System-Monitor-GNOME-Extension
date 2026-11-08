@@ -168,7 +168,7 @@ const GLIDE = new Set([
 ]);
 // Never descended into: their entries are not the same thing from one
 // reading to the next.
-const OPAQUE = new Set(['processes', 'samples']);
+const OPAQUE = new Set(['processes', 'samples', 'drives']);
 
 // Objects and arrays this module created for a buffer. Only these are ever
 // written into: a buffer can also hold references to a reading's own

@@ -1591,6 +1591,118 @@ async function agentClicks(window, settings, diagnostics, fake) {
     await checkLaunch(settings, a, fake, 'pointer');
 }
 
+/** The real comparison controls, with equal windows and a deliberate I/O gap. */
+async function workloadOnly() {
+    Adw.init();
+    const { BatteryLedger, FINE_MS, saveLedger } = await import(`file://${root}/lib/engine/batteryledger.js`);
+    const { HistorySource, buildTrackingPage } = await import(`file://${root}/ui/prefs/tracking.js`);
+    const { palette, styleWindow } = await import(`file://${root}/ui/prefs/style.js`);
+    const dir = GLib.dir_make_tmp('rp-workload-ui-XXXXXX');
+    const path = `${dir}/battery-history.json`;
+    const start = Math.floor(Date.now() / FINE_MS) * FINE_MS - 24 * FINE_MS;
+    const fine = Array.from({ length: 24 }, (_unused, i) => {
+        const after = i >= 18;
+        return { t: start + i * FINE_MS, b: true, s: 300, cs: 300, cc: (after ? 40 : 60) * 1e6,
+            ms: 300, mu: (after ? 3072 : 4096) * 300, ds: i === 19 ? 0 : 300, dr: i === 19 ? 0 : 5e8,
+            dw: i === 19 ? 0 : 2.5e8, bs: 300, bc: (after ? 7 : 10) / 12 };
+    });
+    await saveLedger(path, new BatteryLedger({ fine }));
+    const settings = newSettings();
+    const history = new HistorySource(settings, path);
+    const window = new Adw.PreferencesWindow({ title: 'Resource Pulse', default_width: 660, default_height: 680 });
+    styleWindow(window);
+    const tracking = buildTrackingPage(settings, history);
+    const w = tracking.rows.workload;
+    window.add(tracking.page);
+    const manager = Adw.StyleManager.get_default();
+    const originalScheme = manager.color_scheme;
+    const scroll = async row => {
+        const view = findScrolled(window.get_visible_page());
+        const adj = view.get_vadjustment();
+        const [, p] = row.compute_point(view.get_child(), new Graphene.Point().init(0, 0));
+        adj.value = Math.min(Math.max(0, adj.value + p.y - 20), adj.upper - adj.page_size);
+        await sleep(350);
+    };
+    const click = async (row, name, x = 0.5, y = 0.5) => {
+        const [, p] = row.compute_point(window, new Graphene.Point().init(row.get_width() * x, row.get_height() * y));
+        const [sx, sy] = window.get_surface_transform();
+        await act(`PREFS-CHECK CLICK ${name} ${Math.round(p.x + sx)} ${Math.round(p.y + sy)}`);
+    };
+    const pick = async (row, selected, name, variant = null) => {
+        await scroll(row);
+        await click(row, `${name}-open`, 0.94);
+        let popover;
+        ok(await until(() => (popover = findAll(row, child => child instanceof Gtk.Popover && child.get_mapped())[0])),
+            `workload (pointer): ${name} opens its choices`);
+        if (!popover) return;
+        const target = row.model.get_string(selected);
+        let label;
+        ok(await until(() => (label = findAll(popover, child => child instanceof Gtk.Label && child.label === target && child.get_mapped())[0])),
+            `workload (pointer): choice '${target}' is visible in ${name}`);
+        if (!label) return;
+        if (variant) {
+            const contents = findAll(popover, child => child.get_css_name() === 'contents')[0] ?? popover;
+            const paint = render(contents);
+            const p = palette(variant === 'dark');
+            const bg = paint?.at(Math.floor(paint.width / 2), 3);
+            ok(bg && near(bg, p.popover), `workload (${variant}): open choices use ${bg ? show(bg) : 'no paint'} (expected ${p.popover})`);
+            print(`PREFS-CHECK SHOW workload-${variant}-choices`);
+            await sleep(1500);
+        }
+        const [, p] = label.compute_point(popover, new Graphene.Point().init(label.get_width() / 2, label.get_height() / 2));
+        const [px, py] = popover.get_surface_transform();
+        const surface = popover.get_surface();
+        await act(`PREFS-CHECK CLICK ${name}-choice ${Math.round(surface.get_position_x() + px + p.x)} ${Math.round(surface.get_position_y() + py + p.y)}`);
+        ok(await until(() => row.selected === selected && !popover.get_mapped()), `workload (pointer): ${name} selected entry ${selected}`);
+    };
+
+    try {
+        manager.color_scheme = Adw.ColorScheme.FORCE_DARK;
+        window.present();
+        await sleep(750);
+        await click(w.expander, 'workload-expand', 0.4);
+        ok(await until(() => w.expander.expanded && !!w.result), 'workload (pointer): comparison expands and shows the default ranges');
+        if (!w.result) return;
+        ok(w.result.metrics.cpu.before.value === 12 && w.result.metrics.cpu.after.value === 8 && w.result.metrics.read.change === null,
+            'workload: measured rates and the I/O gap are distinct');
+        await pick(w.duration, 1, 'workload-duration', 'dark');
+        ok(w.result?.seconds === 900, 'workload: choosing 15 minutes updates both ranges');
+        await pick(w.before, w.before.selected + 1, 'workload-before');
+        await pick(w.after, w.after.selected - 1, 'workload-after');
+        ok(w.result?.metrics.cpu.before.value === 12 && w.result.metrics.cpu.after.value === 8,
+            'workload: changing both start choices keeps the intended results');
+        ok(w.metrics.read.subtitle.includes('66% measured') && w.metrics.read.subtitle.includes('Change unavailable'),
+            'workload: incomplete I/O coverage is visible in the comparison');
+
+        for (const [variant, scheme] of [['dark', Adw.ColorScheme.FORCE_DARK], ['light', Adw.ColorScheme.FORCE_LIGHT]]) {
+            manager.color_scheme = scheme;
+            await scroll(w.expander);
+            await sleep(700);
+            const p = palette(variant === 'dark');
+            const image = render(window);
+            const [, point] = w.duration.compute_point(window, new Graphene.Point().init(5, w.duration.get_height() / 2));
+            const bg = image?.at(point.x, point.y);
+            ok(bg && near(bg, p.card), `workload (${variant}): selectors use ${bg ? show(bg) : 'no paint'} (expected ${p.card})`);
+            const cut = findAll(w.expander, child => child instanceof Gtk.Label && child.get_mapped() && child.get_layout().is_ellipsized());
+            ok(cut.length === 0, `workload (${variant}): labels cut off: ${cut.map(child => child.label).join(', ')}`);
+            print(`PREFS-CHECK SHOW workload-${variant}-ranges`);
+            await sleep(1500);
+            await scroll(w.metrics.cpu);
+            print(`PREFS-CHECK SHOW workload-${variant}-results`);
+            await sleep(1500);
+        }
+        await pick(w.duration, 0, 'workload-shorter', 'light');
+    } finally {
+        window.destroy();
+        tracking.dispose();
+        history.dispose();
+        manager.color_scheme = originalScheme;
+        GLib.unlink(path);
+        GLib.rmdir(dir);
+        print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} workload checks passed`);
+    }
+}
+
 /**
  * The pseudo-language run (gjs -m prefs-check.js <root> coverage, LANGUAGE=xx
  * from ./scripts/dev.sh test-i18n): the window as the panel opens it, all
@@ -1636,6 +1748,12 @@ async function coverage() {
     for (const name of ['settings', 'tracking', 'diagnostics']) {
         window.set_visible_page_name(name);
         await sleep(800);
+        if (name === 'tracking') {
+            const compare = findAll(window.get_visible_page(), w => w instanceof Adw.ExpanderRow && w.title === Gettext.dgettext(domain, 'Compare workloads'))[0];
+            ok(!!compare, 'coverage: workload comparison is on Tracking');
+            if (compare) compare.expanded = true;
+            await sleep(400);
+        }
         const texts = [];
         for (const w of findAll(window.get_visible_page(), () => true)) {
             if (!w.get_mapped()) continue;
@@ -1662,7 +1780,7 @@ async function coverage() {
     print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} checks passed`);
 }
 
-(ARGV[1] === 'coverage' ? coverage() : main()).catch(e => {
+(ARGV[1] === 'coverage' ? coverage() : ARGV[1] === 'workload' ? workloadOnly() : main()).catch(e => {
     failures++;
     print(`PREFS-CHECK FAIL: ${e.message}\n${e.stack}`);
 }).finally(() => loop.quit());

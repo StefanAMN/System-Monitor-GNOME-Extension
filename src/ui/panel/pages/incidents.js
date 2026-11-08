@@ -4,7 +4,8 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-import { formatTemp } from '../../../lib/common/format.js';
+import { appInfo } from '../../../lib/common/appnames.js';
+import { formatBytes, formatSpeed, formatTemp } from '../../../lib/common/format.js';
 import { _, fill, N_, translated } from '../../../lib/common/i18n.js';
 import { INCIDENT_METRICS, INCIDENT_PRE_SECONDS, INCIDENT_SLOTS } from '../../../lib/engine/incidents.js';
 import { RingBuffer } from '../../../lib/engine/ringbuffer.js';
@@ -16,6 +17,16 @@ const TITLES = translated({
     thermal: N_('Temperature'), cpuWait: N_('CPU wait'), memoryWait: N_('Memory wait'), ioWait: N_('I/O wait'),
 });
 const TRIGGERS = translated({ manual: N_('Manual'), cpu: N_('CPU pressure'), memory: N_('Memory pressure'), io: N_('I/O pressure') });
+
+const APP_RESOURCES = [
+    { title: N_('CPU'), usage: N_('CPU usage (100% per core)'), format: value => percent(value) },
+    { title: N_('Memory'), usage: N_('Memory charged'), format: value => formatBytes(value) },
+    { title: N_('Disk I/O'), usage: N_('Disk throughput'), format: value => formatSpeed(value) },
+];
+
+function percent(value) {
+    return fill(_('{value}%'), { value: value.toFixed(1) });
+}
 
 function card(spacing) {
     return new St.BoxLayout({
@@ -68,6 +79,13 @@ export class IncidentPage {
         page.add_child(recent);
         this._incidentRows = [];
 
+        this._incidentAppCard = card(6);
+        this._incidentAppCard.visible = false;
+        this._incidentAppCard.add_child(heading(_('Apps around the trigger')));
+        this._incidentAppBody = new St.BoxLayout({ ...VERTICAL, x_expand: true, style: 'spacing: 6px;' });
+        this._incidentAppCard.add_child(this._incidentAppBody);
+        page.add_child(this._incidentAppCard);
+
         const timeline = card(6);
         timeline.visible = false;
         timeline.add_child(heading(_('Capture timeline')));
@@ -94,6 +112,36 @@ export class IncidentPage {
         this._incidentTimeline = timeline;
         page.add_child(timeline);
         return page;
+    }
+
+    _updateIncidentApps(capture) {
+        this._incidentAppCard.visible = !!capture;
+        this._incidentAppBody.destroy_all_children();
+        const add = (text, title = false) => {
+            const label = title ? heading(text) : new St.Label({ text, style_class: 'rp-fg-dim', x_expand: true });
+            this._wrapLabel(label);
+            this._incidentAppBody.add_child(label);
+        };
+        const apps = capture?.apps;
+        if (!apps || !apps.scopes.some(Boolean)) {
+            if (capture) add(_('App measurements are unavailable for this capture.'));
+            return;
+        }
+        add(_('Pressure shows the apps that waited. Usage ranks resource consumption separately. Wait percentages use the scope with the most wait for each app.'));
+        const ranking = (title, list, format, seen, total) => {
+            const entries = list.map(app => fill(_('{app} ({value})'), { app: appInfo(app.id).name, value: format(app.value) }));
+            const result = entries.join(' · ') || (seen ? _('No activity observed') : _('Unavailable'));
+            add(fill(_('{title} · {seen}/{total} scopes\n{result}'), { title, seen, total, result }));
+        };
+        for (let i = 0; i < APP_RESOURCES.length; i++) {
+            const { title, usage, format } = APP_RESOURCES[i];
+            const { coverage, recent, wait, usage: users } = apps.resources[i];
+            add(_(title), true);
+            ranking(_('Wait near trigger (10-second trend)'), recent, percent, coverage[0], apps.scopes[0]);
+            ranking(_('Wait after trigger'), wait, percent, coverage[1], apps.scopes[1]);
+            ranking(_(usage), users, format, coverage[2], apps.scopes[i === 1 ? 2 : 1]);
+        }
+        if (apps.estimated) add(_('Some disk rates are estimated from paired, readable process counters.'));
     }
 
     _updateIncidentPage() {
@@ -152,8 +200,10 @@ export class IncidentPage {
             this._incidentTempUnit = tempUnit;
             this._incidentCharts.get('thermal').refresh();
         }
-        if (!capture || capture === this._incidentChartCapture) return;
+        if (capture === this._incidentChartCapture) return;
         this._incidentChartCapture = capture;
+        this._updateIncidentApps(capture);
+        if (!capture) return;
         INCIDENT_METRICS.forEach((key, index) => {
             const chart = this._incidentCharts.get(key);
             chart.setSampleSeconds(capture.intervalSeconds);

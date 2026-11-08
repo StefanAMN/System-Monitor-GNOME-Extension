@@ -22,7 +22,7 @@ const BATCH = 24;
 const decoder = new TextDecoder('utf-8', { fatal: false });
 
 /** A cgroup file's text, or null when it is gone (the unit ended) or unreadable. */
-function readCgroupFile(path) {
+export function readCgroupFile(path) {
     try {
         return decoder.decode(GLib.file_get_contents(path)[1]);
     } catch (e) {
@@ -34,7 +34,7 @@ function readCgroupFile(path) {
 }
 
 /** Unit directories under `root`, slices descended into: [dir, name] pairs. */
-function listUnits(root) {
+export function listUnits(root) {
     const out = [];
     const pending = [root];
     while (pending.length > 0) {
@@ -115,7 +115,7 @@ export function sessionRootFrom(selfCgroup, mount = '/sys/fs/cgroup') {
     return null;
 }
 
-function usageUsec(stat) {
+export function usageUsec(stat) {
     const m = /^usage_usec (\d+)$/m.exec(stat);
     return m ? Number(m[1]) : null;
 }

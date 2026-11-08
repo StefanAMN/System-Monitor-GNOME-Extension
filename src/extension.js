@@ -18,6 +18,7 @@ import { DiskSampler } from './lib/collectors/disk.js';
 import { NetworkSampler } from './lib/collectors/network.js';
 import { ThermalSampler } from './lib/collectors/thermal.js';
 import { GpuSampler } from './lib/collectors/gpu.js';
+import { AppBottleneckSampler } from './lib/collectors/appbottlenecks.js';
 import { ProcessSampler } from './lib/collectors/process.js';
 import { ledgerPath } from './lib/engine/batterytracker.js';
 import { BatteryLedger, saveLedger } from './lib/engine/batteryledger.js';
@@ -160,8 +161,10 @@ export default class ResourcePulseExtension extends Extension {
         const incidentStore = this._incidentStore = new IncidentStore();
         const incidentGen = this._gen;
         this._incidentFinishId = 0;
+        this._incidentAppTimer = 0;
+        this._incidentApps = new AppBottleneckSampler();
         this._incidentsLoaded = false;
-        this._incidentsReady = incidentStore.load().then(captures => {
+        this._incidentsReady = incidentStore.restore(captures => {
             const completedWhileLoading = incidentRecorder.captures.length > 0;
             incidentRecorder.restore(captures);
             if (incidentGen === this._gen) {
@@ -202,6 +205,8 @@ export default class ResourcePulseExtension extends Extension {
         this._indicatorGone = false;
         this._indicator.connect('destroy', () => {
             this._indicatorGone = true;
+            this._cancelIncidentApps();
+            this._cancelProcessMemoryInspection?.();
             this._gen++;
             for (const key of ['_timeoutId', '_deferredPollId', '_glideId', '_fitIdleId', '_sizeIdleId', '_tooltipIdleId', '_causeTimerId', '_incidentFinishId']) {
                 if (this[key]) GLib.source_remove(this[key]);
@@ -311,6 +316,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._hideTooltip();
                 this._poll();
             } else {
+                if (this._activeTab === 'disk') this._updateDriveStats(null);
                 this._clearProcSearch();
                 if (this._stageReleaseId) {
                     global.stage.disconnect(this._stageReleaseId);
@@ -435,6 +441,8 @@ export default class ResourcePulseExtension extends Extension {
         // enable (screen lock) is reported as a gap, not attributed.
         this._tracker?.stop();
         this._tracker = null;
+        this._cancelIncidentApps();
+        this._cancelProcessMemoryInspection?.();
 
         this._gen++;
         this._samples?.close();
@@ -538,6 +546,7 @@ export default class ResourcePulseExtension extends Extension {
         this._gpuHist = null;
         this._sparklines = [];
         this._dskMountRows = null;
+        this._dskDriveList = this._dskDriveNote = this._dskDriveRows = this._dskDriveSnapshot = null;
         this._netIfaceRows = null;
         this._thmSensorRows = null;
         this._thmFanRows = null;

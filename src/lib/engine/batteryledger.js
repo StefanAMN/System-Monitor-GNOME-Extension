@@ -47,7 +47,7 @@ export const MAX_FINE = (FINE_KEPT_MS / FINE_MS) * 2;
 // Fields a five-minute bucket sums, as the hourly bucket does; and the
 // highest values it keeps.
 const FINE_SUMS = ['s', 'bw', 'pw', 'iw', 'gw', 'hs', 'uw', 'gpu', 'cpu', 'ms', 'mu', 'si', 'so', 'ps', 'pc', 'pm', 'pf', 'pi',
-    'ns', 'rx', 'tx', 'is', 'ir', 'it', 'ds', 'dr', 'dw', 'tt', 'ta'];
+    'ns', 'rx', 'tx', 'is', 'ir', 'it', 'ds', 'dr', 'dw', 'tt', 'ta', 'cs', 'cc', 'bs', 'bc'];
 const FINE_MAXES = ['mx', 'mt', 'sx', 'st', 'tm'];
 
 // Pseudo-app ids. They cannot clash with desktop ids, which never start with '@'.
@@ -107,11 +107,15 @@ function emptyBucket(start, onBattery) {
     // is: seconds the user was away; ir / it: bytes while away;
     // ds: seconds disks were read over; dr / dw: bytes the physical disks read / wrote;
     // tt: seconds the temperature was read over; tm: highest °C; ta: °C·s (time-weighted average × tt).
+    // cs / cc and bs / bc: covered seconds and matching CPU µs or battery Wh.
+    // Separate numerators let a bucket opened by an older build keep its totals
+    // while comparisons use only the part with known measurement coverage.
     return {
         t: start, b: onBattery, s: 0, bw: 0, pw: 0, iw: 0, gw: 0, hs: 0, uw: 0, gpu: 0, cpu: 0, energy: false, a: {},
         ms: 0, mu: 0, mx: 0, mt: 0, sx: 0, st: 0, si: 0, so: 0,
         ps: 0, pc: 0, pm: 0, pf: 0, pi: 0, ns: 0, rx: 0, tx: 0, is: 0, ir: 0, it: 0,
         ds: 0, dr: 0, dw: 0, tt: 0, tm: 0, ta: 0,
+        cs: 0, cc: 0, bs: 0, bc: 0,
     };
 }
 
@@ -125,6 +129,7 @@ function validBucket(bucket, withApps) {
         (bucket.b === undefined || typeof bucket.b === 'boolean') &&
         (bucket.energy === undefined || typeof bucket.energy === 'boolean') &&
         BUCKET_NUMBERS.every(key => bucket[key] === undefined || nonnegative(bucket[key])) &&
+        (!(bucket.cs > 0) || Number.isFinite(bucket.cc)) && (!(bucket.bs > 0) || Number.isFinite(bucket.bc)) &&
         (!withApps || (record(bucket.a) && Object.values(bucket.a).every(entry =>
             Array.isArray(entry) && entry.length >= 3 && entry.length <= 8 && entry.every(nonnegative))));
 }
@@ -150,6 +155,7 @@ export class BatteryLedger {
         this._prevNet = null;
         this._prevDisks = null;
         this._prevBatteryWh = state?.last?.batteryWh ?? null;
+        this._prevOnBattery = false;
         this._lastSeenWall = state?.last?.wall ?? null;
         this._packageLow = new LowPercentile();
         this.loadedVersion = LEDGER_VERSION;
@@ -256,6 +262,7 @@ export class BatteryLedger {
         this._prevNet = null;
         this._prevDisks = null;
         this._prevBatteryWh = null;
+        this._prevOnBattery = false;
         this._lastSeenWall = null;
         this._prevWall = 0;
     }
@@ -478,6 +485,10 @@ export class BatteryLedger {
             attributed = true;
             bucket.s += dt;
             bucket.bw += delivered;
+            if (onBattery && this._prevOnBattery && batteryWh > 0 && this._prevBatteryWh > 0 && batteryWh <= this._prevBatteryWh) {
+                bucket.bs = (bucket.bs ?? 0) + dt;
+                bucket.bc = (bucket.bc ?? 0) + delivered;
+            }
             if (hot) bucket.hs = (bucket.hs ?? 0) + dt;
             this._upgrade(bucket);
             if (idle) bucket.is += dt;
@@ -496,6 +507,10 @@ export class BatteryLedger {
             const cpuAvailable = Number.isFinite(usage.total) && Number.isFinite(this._prevTotal);
             const totalCpu = cpuAvailable ? Math.max(0, usage.total - this._prevTotal) : 0;
             bucket.cpu += totalCpu;
+            if (cpuAvailable && usage.total >= this._prevTotal) {
+                bucket.cs = (bucket.cs ?? 0) + dt;
+                bucket.cc = (bucket.cc ?? 0) + totalCpu;
+            }
 
             // GPU busy time per unit, as deltas (a unit or GPU client that is
             // new since the last sample counts from zero).
@@ -567,7 +582,7 @@ export class BatteryLedger {
 
         const fine = this._fineBucket(wall, onBattery);
         FINE_SUMS.forEach((key, i) => {
-            fine[key] += (bucket[key] ?? 0) - hourBefore[i];
+            fine[key] = (fine[key] ?? 0) + ((bucket[key] ?? 0) - hourBefore[i]);
         });
         if (attributed) {
             fine.energy ||= bucket.energy;
@@ -588,6 +603,7 @@ export class BatteryLedger {
         this._prevTotal = usage.total;
         this._prevSystem = usage.system;
         this._prevBatteryWh = batteryWh;
+        this._prevOnBattery = onBattery;
         this._lastSeenWall = wall;
         return attributed;
     }
