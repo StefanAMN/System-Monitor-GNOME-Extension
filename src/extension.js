@@ -30,7 +30,7 @@ import { RingBuffer } from './lib/engine/ringbuffer.js';
 import { AlertMonitor } from './lib/engine/alerts.js';
 import { PressureSampler } from './lib/collectors/pressure.js';
 import { ThrottleSampler } from './lib/collectors/throttle.js';
-import { BucketSeries, RANGES } from './lib/engine/longhistory.js';
+import { BucketSeries, HISTORY_TIERS } from './lib/engine/longhistory.js';
 import { loadNetUsage, netUsagePath, readBootId } from './lib/engine/netusage.js';
 import { RunningStats } from './lib/engine/stats.js';
 import { currentSessionIdentity, loadSessionState, saveSessionState, sessionStatePath } from './lib/engine/sessiontotals.js';
@@ -182,13 +182,13 @@ export default class ResourcePulseExtension extends Extension {
         // Every series, HISTORY_KEYS and those of a machine's several GPUs.
         this._histKeys = [...HISTORY_KEYS];
         this._gpuHist = new Map();
-        // 1 h and 24 h of buckets per key; fixed size, kept across interval changes.
+        // Fixed bucket tiers stay available across polling interval changes.
         this._long = {};
-        for (const [range, spec] of Object.entries(RANGES)) {
-            if (!spec) continue;
+        for (const [range, spec] of Object.entries(HISTORY_TIERS)) {
             this._long[range] = {};
             for (const key of HISTORY_KEYS) this._long[range][key] = new BucketSeries(spec.bucketUs, spec.capacity);
         }
+        this._historyTiers = Object.values(this._long);
         this._range = 'live';
         this._sparklines = [];
 
@@ -252,6 +252,10 @@ export default class ResourcePulseExtension extends Extension {
         // Keyboard navigation inside dropdown menu
         this._menuContainer.connect('key-press-event', (actor, event) => {
             const symbol = event.get_key_symbol();
+            if (symbol === Clutter.KEY_BackSpace && this._rangeChoices?.visible) {
+                this._showRangeChoices(false, true);
+                return Clutter.EVENT_STOP;
+            }
             if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
                 if (this._activeTab !== 'overview') {
                     this._activeTab = 'overview';
@@ -316,6 +320,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._hideTooltip();
                 this._poll();
             } else {
+                this._showRangeChoices(false);
                 if (this._activeTab === 'disk') this._updateDriveStats(null);
                 this._clearProcSearch();
                 if (this._stageReleaseId) {

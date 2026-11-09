@@ -52,32 +52,14 @@ export class DetailsMethods {
         this._addClickAnimations(backBtn);
         this._detailHeader.add_child(backBtn);
         this._detailHeader.add_child(this._detailHeaderTitleBox);
-        // Range of the page's charts: the live samples, the last hour, the last day.
-        const rangeBox = new St.BoxLayout({ style_class: 'rp-chip-bg rp-range-box', y_align: Clutter.ActorAlign.CENTER });
-        this._detailRangeBox = rangeBox;
-        this._rangeButtons = {};
-        for (const range of Object.keys(RANGES)) {
-            const button = new St.Button({
-                style_class: 'rp-range',
-                label: RANGES[range] ? _(RANGES[range].label) : (this._spanLabel || _('live')),
-                can_focus: true,
-                toggle_mode: true,
-                accessible_name: range === 'live' ? _('Recent samples') : fill(_('Last {span}'), { span: _(RANGES[range].label) }),
-                accessible_role: Atk.Role.TOGGLE_BUTTON,
-            });
-            button.connect('clicked', () => {
-                this._range = range;
-                this._applyRange();
-            });
-            rangeBox.add_child(button);
-            this._rangeButtons[range] = button;
-        }
-        this._detailHeader.add_child(rangeBox);
+        this._buildRangePicker();
+        this._detailHeader.add_child(this._detailRangeBox);
         this._applyRange();
         this._addClickAnimations(optBtn);
         this._detailHeader.add_child(optBtn);
 
         this._detailArea.add_child(this._detailHeader);
+        this._detailArea.add_child(this._rangeChoices);
         this._sampleStatusLabel = new St.Label({ style_class: 'rp-muted', visible: false, x_expand: true });
         this._sampleStatusLabel.clutter_text.line_wrap = true;
         this._detailArea.add_child(this._sampleStatusLabel);
@@ -100,6 +82,73 @@ export class DetailsMethods {
         this._menuContainer.add_child(this._detailArea);
     }
 
+    _buildRangePicker() {
+        const trigger = this._detailRangeBox = new St.Button({
+            style_class: 'rp-range rp-chip-bg rp-range-trigger', can_focus: true,
+            toggle_mode: true, accessible_role: Atk.Role.TOGGLE_BUTTON,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        const contents = new St.BoxLayout({ style_class: 'rp-range-trigger-content' });
+        this._rangeValue = new St.Label({ style_class: 'rp-fg', y_align: Clutter.ActorAlign.CENTER });
+        this._rangeChevron = new St.Icon({ icon_name: 'pan-down-symbolic', icon_size: 12, style_class: 'rp-fg-dim' });
+        contents.add_child(this._rangeValue);
+        contents.add_child(this._rangeChevron);
+        trigger.set_child(contents);
+
+        // The choices sit under the header so the panel can stay narrow.
+        const choices = this._rangeChoices = new St.BoxLayout({
+            ...VERTICAL, style_class: 'rp-surface rp-range-picker', x_expand: true, visible: false,
+        });
+        choices.add_child(new St.Label({ text: _('Chart range'), style_class: 'rp-fg-dim rp-range-heading' }));
+        this._rangeButtons = {};
+        let row;
+        const order = Object.keys(RANGES);
+        Object.entries(RANGES).forEach(([range, spec], i) => {
+            if (i % 3 === 0) {
+                row = new St.BoxLayout({ style_class: 'rp-range-row', x_expand: true });
+                choices.add_child(row);
+            }
+            const label = spec ? _(spec.label) : _('Live');
+            const button = new St.Button({
+                style_class: 'rp-range rp-range-choice', label, can_focus: true,
+                x_expand: true, toggle_mode: true, accessible_role: Atk.Role.TOGGLE_BUTTON,
+                accessible_name: spec ? fill(_('Last {span}'), { span: label }) : _('Recent samples'),
+            });
+            button.connect('clicked', () => {
+                this._range = range;
+                this._applyRange();
+                this._showRangeChoices(false, true);
+            });
+            button.connect('key-press-event', (_actor, event) => {
+                const key = event.get_key_symbol();
+                const rtl = choices.get_text_direction() === Clutter.TextDirection.RTL;
+                const step = key === Clutter.KEY_Left ? (rtl ? 1 : -1)
+                    : key === Clutter.KEY_Right ? (rtl ? -1 : 1)
+                    : key === Clutter.KEY_Up ? -3 : key === Clutter.KEY_Down ? 3 : 0;
+                if (!step) return Clutter.EVENT_PROPAGATE;
+                const next = i + step;
+                if (Math.abs(step) === 3 || Math.floor(next / 3) === Math.floor(i / 3))
+                    this._rangeButtons[order[next]]?.grab_key_focus();
+                return Clutter.EVENT_STOP;
+            });
+            this._rangeButtons[range] = button;
+            row.add_child(button);
+        });
+
+        trigger.connect('clicked', () => this._showRangeChoices(!choices.visible, true));
+    }
+
+    _showRangeChoices(open, focus = false) {
+        if (!this._rangeChoices) return;
+        this._rangeChoices.visible = open;
+        this._detailRangeBox.checked = open;
+        this._rangeChevron.icon_name = open ? 'pan-up-symbolic' : 'pan-down-symbolic';
+        if (focus) {
+            const target = open ? this._rangeButtons[this._range] : this._detailRangeBox;
+            target.grab_key_focus();
+        }
+    }
+
     _ensureDetailSection(key) {
         if (!this._detailSections || this._detailSections[key] || !this._detailBuilders?.[key]) return;
         const section = this._detailBuilders[key]();
@@ -119,6 +168,7 @@ export class DetailsMethods {
         const hadFocus = this._focusInPanel();
         // A page opens at its top, not at the offset the last one was left at.
         if (this._shownTab !== this._activeTab) {
+            this._showRangeChoices(false);
             if (this._shownTab === 'disk') this._updateDriveStats(null);
             this._closeProcessMemoryPage(this._shownTab);
             this._shownTab = this._activeTab;

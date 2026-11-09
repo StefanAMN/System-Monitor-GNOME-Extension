@@ -1,4 +1,4 @@
-// The poll loop (Aggregator side): which collectors run, history (live and 1 h / 24 h), network day totals, battery tracking, and gliding the shown values.
+// The poll loop (Aggregator side): which collectors run, history (live and bucketed), network day totals, battery tracking, and gliding the shown values.
 // Methods of the extension (installed by extension.js); `this` is the extension.
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
@@ -6,7 +6,7 @@ import Shell from 'gi://Shell';
 import { appBottlenecks } from '../../lib/engine/appbottlenecks.js';
 import { BatteryTracker } from '../../lib/engine/batterytracker.js';
 import { powerReadout, thermalUnavailable, sampleNote } from '../../lib/common/present.js';
-import { RANGES, BucketSeries } from '../../lib/engine/longhistory.js';
+import { RANGES, HISTORY_TIERS, BucketSeries } from '../../lib/engine/longhistory.js';
 import { SAMPLE_KEYS, freshSample, recordLiveSample } from '../../lib/engine/samples.js';
 import { RingBuffer } from '../../lib/engine/ringbuffer.js';
 import { DisplayAverage, interpolateReading, glideBuffer } from '../../lib/engine/smoothing.js';
@@ -237,25 +237,21 @@ export class PollingMethods {
         const missed = tick && this._historyAt !== null
             ? Math.max(0, Math.round((now - this._historyAt) / intervalUs) - 1) : 0;
         if (tick) this._historyAt = now;
-        const { hour, day } = this._long;
         const record = (key, value, metric, rate = null) => {
             const sample = data.samples[metric];
             if (!sample.fresh || (rate && !(rate.rateElapsedUs > 0))) value = NaN;
             const at = rate?.rateEndUs ?? sample.sampledAt ?? now;
             if (tick) recordLiveSample(this._hist[key], value, at, now, intervalUs, missed);
 
-            if (Number.isFinite(value)) {
-                if (rate) {
-                    hour[key].addRate(value, at, rate.rateElapsedUs);
-                    day[key].addRate(value, at, rate.rateElapsedUs);
-                } else {
-                    hour[key].add(value, at);
-                    day[key].add(value, at);
+            const measured = Number.isFinite(value);
+            if (!tick && !measured) return;
+            for (const tier of this._historyTiers) {
+                const series = tier[key];
+                if (measured) {
+                    if (rate) series.addRate(value, at, rate.rateElapsedUs);
+                    else series.add(value, at);
                 }
-            }
-            if (tick) {
-                hour[key].advance(now);
-                day[key].advance(now);
+                if (tick) series.advance(now);
             }
         };
 
@@ -295,8 +291,8 @@ export class PollingMethods {
         const hist = `gpu:${key}`;
         this._gpuHist.set(key, hist);
         this._hist[hist] = new RingBuffer(HISTORY_CAPACITY);
-        for (const [range, spec] of Object.entries(RANGES)) {
-            if (spec) this._long[range][hist] = new BucketSeries(spec.bucketUs, spec.capacity);
+        for (const [tier, spec] of Object.entries(HISTORY_TIERS)) {
+            this._long[tier][hist] = new BucketSeries(spec.bucketUs, spec.capacity);
         }
         this._histKeys.push(hist);
         return hist;
@@ -327,7 +323,7 @@ export class PollingMethods {
         const spec = RANGES[this._range];
         for (const spark of this._sparklines) {
             if (!spark.options.showGrid) continue;
-            spark.history = spec ? this._long[this._range][spark.histKey] : this._hist[spark.histKey];
+            spark.history = spec ? this._long[spec.tier][spark.histKey].window(spec.capacity) : this._hist[spark.histKey];
             spark.setSampleSeconds(spec ? spec.bucketUs / 1e6 : this._sampleSeconds);
             spark.setSpanLabel(spec ? _(spec.label) : this._spanLabel);
             spark.refresh();
@@ -337,7 +333,11 @@ export class PollingMethods {
             else button.remove_style_class_name('rp-range-on');
             button.checked = range === this._range;
         }
-        if (this._rangeButtons?.live) this._rangeButtons.live.label = this._spanLabel || _('live');
+        if (this._rangeValue) {
+            const label = spec ? _(spec.label) : this._spanLabel || _('Live');
+            this._rangeValue.text = label;
+            this._detailRangeBox.accessible_name = fill(_('Chart range: {span}'), { span: label });
+        }
     }
 
     /**

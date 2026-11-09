@@ -357,8 +357,9 @@ async function backup() {
 
     const page = new Adw.PreferencesPage();
     const built = buildBackupGroup(page, settings);
-    ok(built.rows.save && built.rows.restore && built.rows.reset && built.buttons.reset.has_css_class('destructive-action'),
-        'backup: the group has Save, Open and a destructive Reset');
+    ok(built.buttons.save.label === 'Save' && built.buttons.restore.label === 'Open' &&
+        built.buttons.reset.label === 'Reset' && built.buttons.reset.has_css_class('destructive-action'),
+    'backup: the group has Save, Open and a destructive Reset with no trailing dots');
     GLib.unlink(`${dir}/settings.json`);
     GLib.rmdir(dir);
 }
@@ -1592,6 +1593,53 @@ async function agentClicks(window, settings, diagnostics, fake) {
 }
 
 /** The real comparison controls, with equal windows and a deliberate I/O gap. */
+async function backupOnly() {
+    Adw.init();
+    const { buildBackupGroup } = await import(`file://${root}/ui/prefs/backup.js`);
+    const { styleWindow } = await import(`file://${root}/ui/prefs/style.js`);
+    await backup();
+    const settings = newSettings();
+    settings.set_string('unit-temp', 'F');
+    const window = new Adw.PreferencesWindow({ title: 'Resource Pulse', default_width: 560, default_height: 420 });
+    const page = new Adw.PreferencesPage({ title: 'Settings' });
+    styleWindow(window);
+    window.add(page);
+    const { buttons } = buildBackupGroup(page, settings);
+    const manager = Adw.StyleManager.get_default();
+    const original = manager.color_scheme;
+    const click = async (widget, name) => {
+        const [, point] = widget.compute_point(window, new Graphene.Point().init(widget.get_width() / 2, widget.get_height() / 2));
+        const [x, y] = window.get_surface_transform();
+        await act(`PREFS-CHECK CLICK ${name} ${Math.round(x + point.x)} ${Math.round(y + point.y)}`);
+    };
+    try {
+        window.present();
+        for (const [variant, scheme] of [['dark', Adw.ColorScheme.FORCE_DARK], ['light', Adw.ColorScheme.FORCE_LIGHT]]) {
+            manager.color_scheme = scheme;
+            await sleep(500);
+            print(`PREFS-CHECK SHOW backup-${variant}`);
+            await sleep(1300);
+            await click(buttons.reset, 'backup-reset');
+            let dialog;
+            ok(await until(() => (dialog = findAll(window, w => w instanceof Adw.AlertDialog && w.get_mapped())[0])),
+                'backup (pointer): Reset opens the confirmation');
+            if (!dialog) return;
+            print(`PREFS-CHECK SHOW backup-reset-${variant}`);
+            await sleep(1300);
+            const cancel = findAll(dialog, w => w instanceof Gtk.Button && w.label === 'Cancel')[0];
+            ok(!!cancel, 'backup (pointer): the confirmation has a Cancel button');
+            if (!cancel) return;
+            await click(cancel, 'backup-cancel');
+            ok(await until(() => !dialog.get_mapped()) && settings.get_string('unit-temp') === 'F',
+                'backup (pointer): cancelling leaves the saved setting');
+        }
+    } finally {
+        window.destroy();
+        manager.color_scheme = original;
+        print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} backup checks passed`);
+    }
+}
+
 async function workloadOnly() {
     Adw.init();
     const { BatteryLedger, FINE_MS, saveLedger } = await import(`file://${root}/lib/engine/batteryledger.js`);
@@ -1790,7 +1838,7 @@ async function coverage() {
     print(`PREFS-CHECK ${failures === 0 ? 'DONE' : 'FAILED'}: ${checks - failures} of ${checks} checks passed`);
 }
 
-(ARGV[1] === 'coverage' ? coverage() : ARGV[1] === 'workload' ? workloadOnly() : main()).catch(e => {
+(ARGV[1] === 'coverage' ? coverage() : ARGV[1] === 'workload' ? workloadOnly() : ARGV[1] === 'backup' ? backupOnly() : main()).catch(e => {
     failures++;
     print(`PREFS-CHECK FAIL: ${e.message}\n${e.stack}`);
 }).finally(() => loop.quit());

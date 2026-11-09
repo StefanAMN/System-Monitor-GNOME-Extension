@@ -1,6 +1,5 @@
-// Longer history for the detail charts: fixed-size series of time buckets
-// (1 minute over the last hour, 15 minutes over the last day), each holding
-// the average and the peak of the samples that fell into it. Engine layer.
+// Longer history for the detail charts: fixed-size series of time buckets,
+// each holding the average and the peak of the samples that fell into it.
 //
 // Memory is fixed at construction. A bucket
 // with no sample, because the metric was not read then, is NaN and drawn as
@@ -130,6 +129,32 @@ export class BucketSeries {
         return m;
     }
 
+    /** A shorter view of this ring, with the same live end and no copied samples. */
+    window(capacity) {
+        if (capacity === this.capacity) return this;
+        const source = this;
+        return {
+            capacity,
+            get length() {
+                return Math.min(capacity, source.length);
+            },
+            get(i) {
+                return i < 0 || i >= this.length ? NaN : source.get(source.length - this.length + i);
+            },
+            peakAt(i) {
+                return i < 0 || i >= this.length ? NaN : source.peakAt(source.length - this.length + i);
+            },
+            max() {
+                let value = 0;
+                for (let i = source.length - this.length; i < source.length; i++) {
+                    const peak = source.peakAt(i);
+                    if (peak > value) value = peak;
+                }
+                return value;
+            },
+        };
+    }
+
     clear() {
         this._head = 0;
         this._closed = 0;
@@ -140,10 +165,28 @@ export class BucketSeries {
     }
 }
 
-// The chart ranges: the live ring (one sample per poll) and two bucketed ones.
+// Nearby chart ranges share a bucket size and one retained history.
+export const HISTORY_TIERS = {
+    short: { bucketUs: 15e6, capacity: 121 },
+    hour: { bucketUs: 60e6, capacity: 61 },
+    medium: { bucketUs: 5 * 60e6, capacity: 73 },
+    day: { bucketUs: 15 * 60e6, capacity: 97 },
+};
+
+function range(tier, seconds, label) {
+    const { bucketUs } = HISTORY_TIERS[tier];
+    return { tier, bucketUs, capacity: seconds * 1e6 / bucketUs + 1, label };
+}
+
+// Translators: compact chart ranges, m for minutes and h for hours.
 export const RANGES = {
     live: null,
-    // Translators: chart ranges on a chip, kept short: one hour, 24 hours.
-    hour: { bucketUs: 60e6, capacity: 61, label: N_('1h') },
-    day: { bucketUs: 15 * 60e6, capacity: 97, label: N_('24h') },
+    fiveMinutes: range('short', 5 * 60, N_('5m')),
+    quarterHour: range('short', 15 * 60, N_('15m')),
+    halfHour: range('short', 30 * 60, N_('30m')),
+    hour: range('hour', 3600, N_('1h')),
+    threeHours: range('medium', 3 * 3600, N_('3h')),
+    sixHours: range('medium', 6 * 3600, N_('6h')),
+    halfDay: range('day', 12 * 3600, N_('12h')),
+    day: range('day', 24 * 3600, N_('24h')),
 };

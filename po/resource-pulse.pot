@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-08 22:44+0200\n"
+"POT-Creation-Date: 2026-11-09 14:35+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1079,12 +1079,35 @@ msgid ""
 "{total} over {hours} h without input ({sent} of it sent), about {rate}/s."
 msgstr ""
 
-#. Translators: chart ranges on a chip, kept short: one hour, 24 hours.
-#: src/lib/engine/longhistory.js:147
+#: src/lib/engine/longhistory.js:184
+msgid "5m"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:185
+msgid "15m"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:186
+msgid "30m"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:187
 msgid "1h"
 msgstr ""
 
-#: src/lib/engine/longhistory.js:148
+#: src/lib/engine/longhistory.js:188
+msgid "3h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:189
+msgid "6h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:190
+msgid "12h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:191
 msgid "24h"
 msgstr ""
 
@@ -1369,15 +1392,19 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:62 src/ui/panel/polling.js:340
-msgid "live"
+#: src/ui/panel/details.js:102
+msgid "Chart range"
 msgstr ""
 
-#: src/ui/panel/details.js:65
+#: src/ui/panel/details.js:111 src/ui/panel/polling.js:337
+msgid "Live"
+msgstr ""
+
+#: src/ui/panel/details.js:115
 msgid "Last {span}"
 msgstr ""
 
-#: src/ui/panel/details.js:65
+#: src/ui/panel/details.js:115
 msgid "Recent samples"
 msgstr ""
 
@@ -1898,6 +1925,10 @@ msgstr ""
 msgid "{s}s"
 msgstr ""
 
+#: src/ui/panel/polling.js:339
+msgid "Chart range: {span}"
+msgstr ""
+
 #: src/ui/panel/processes.js:22
 msgid "{process}, {value} CPU"
 msgstr ""
@@ -2200,7 +2231,7 @@ msgstr ""
 msgid "Preview report"
 msgstr ""
 
-#: src/ui/prefs/agent.js:179
+#: src/ui/prefs/agent.js:179 src/ui/prefs/backup.js:103
 msgid "Open"
 msgstr ""
 
@@ -2257,15 +2288,12 @@ msgid "Reset all settings"
 msgstr ""
 
 #: src/ui/prefs/backup.js:102
-msgid "Save…"
+msgid "Save"
 msgstr ""
 
-#: src/ui/prefs/backup.js:103
-msgid "Open…"
-msgstr ""
-
-#: src/ui/prefs/backup.js:104
-msgid "Reset…"
+#: src/ui/prefs/backup.js:104 src/ui/prefs/backup.js:142
+#: src/ui/prefs/rows.js:514
+msgid "Reset"
 msgstr ""
 
 #: src/ui/prefs/backup.js:119
@@ -2302,10 +2330,6 @@ msgstr ""
 msgid ""
 "Every setting goes back to its default: pinned metrics, units, alerts, the "
 "panel's size. Battery history is kept."
-msgstr ""
-
-#: src/ui/prefs/backup.js:142 src/ui/prefs/rows.js:514
-msgid "Reset"
 msgstr ""
 
 #: src/ui/prefs/backup.js:147

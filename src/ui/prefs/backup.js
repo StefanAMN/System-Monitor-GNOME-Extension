@@ -99,9 +99,9 @@ export function buildBackupGroup(page, settings) {
         restore: new Adw.ActionRow({ title: _('Restore from a file'), subtitle: _('Settings the file does not have keep their values.') }),
         reset: new Adw.ActionRow({ title: _('Reset all settings'), subtitle: _('Back to how they were when the extension was installed. Battery history is kept.') }),
     };
-    const saveButton = button(_('Save…'));
-    const restoreButton = button(_('Open…'));
-    const resetButton = button(_('Reset…'), true);
+    const saveButton = button(_('Save'));
+    const restoreButton = button(_('Open'));
+    const resetButton = button(_('Reset'), true);
     rows.save.add_suffix(saveButton);
     rows.restore.add_suffix(restoreButton);
     rows.reset.add_suffix(resetButton);

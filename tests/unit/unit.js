@@ -31,7 +31,7 @@ import { parsePressure, PressureSampler } from '../../src/lib/collectors/pressur
 import { parseMeminfo, parseVmstatSwap, parsePressureTotals, MachineUsageSampler } from '../../src/lib/collectors/machineusage.js';
 import { AppIoSampler } from '../../src/lib/collectors/appio.js';
 import { componentView, healthView, bars, COMPONENTS, stepFor, zoomAbout, clampRange, MIN_SPAN_MS } from '../../src/lib/engine/trackingview.js';
-import { BucketSeries, RANGES } from '../../src/lib/engine/longhistory.js';
+import { BucketSeries, HISTORY_TIERS, RANGES } from '../../src/lib/engine/longhistory.js';
 import { DisplayAverage, DISPLAY_WINDOW_US, interpolateReading, glideBuffer } from '../../src/lib/engine/smoothing.js';
 import { NetUsage, DAYS_KEPT as NET_DAYS_KEPT } from '../../src/lib/engine/netusage.js';
 import { BatteryLedger, LedgerFormatError, loadLedger, saveLedger, SYSTEM, OTHER, MORE, APPS_PER_BUCKET, MAX_BUCKETS, DAYS_KEPT, MEMORY_PLACES, FINE_MS, FINE_KEPT_MS, MAX_FINE, HEALTH_DAYS_KEPT } from '../../src/lib/engine/batteryledger.js';
@@ -643,6 +643,27 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
     eq(b.length, 0, 'buckets: clear');
     eq([RANGES.hour.capacity * RANGES.hour.bucketUs / 60e6, (RANGES.day.capacity - 1) * RANGES.day.bucketUs / 3600e6], [61, 24], 'buckets: an hour of minutes and a day of quarter hours');
     eq([agoLabel(90, 60), agoLabel(3, 900), agoLabel(1, 60)], ['1h 30m ago', '45m ago', '1m ago'], 'ago: hours for the long ranges');
+}
+
+{
+    const spans = Object.values(RANGES).filter(Boolean);
+    eq(spans.map(spec => (spec.capacity - 1) * spec.bucketUs / 60e6), [5, 15, 30, 60, 180, 360, 720, 1440],
+        'chart ranges: each bucket view matches the time shown');
+    ok(spans.every(spec => spec.capacity <= HISTORY_TIERS[spec.tier].capacity),
+        'chart ranges: every view fits in its shared tier');
+    const b = new BucketSeries(60e6, 5);
+    const view = b.window(3);
+    eq([view.capacity, view.length, b.window(5) === b], [3, 0, true], 'chart range window: empty and full-size views');
+    b.addRate(900, 50e6, 30e6);
+    b.addRate(120, 125e6, 5e6);
+    b.addRate(240, 135e6, 10e6);
+    b.advance(180e6);
+    eq([view.length, Number.isNaN(view.get(0)), view.get(1), view.peakAt(1), view.max(), Number.isNaN(view.get(2))],
+        [3, true, 200, 240, 240, true], 'chart range window: retains gaps and rate averages, and excludes the old peak');
+    b.addRate(50, 185e6, 5e6);
+    b.advance(240e6);
+    eq([view.get(0), view.get(1), Number.isNaN(view.get(2))], [200, 50, true],
+        'chart range window: follows the source ring as it rolls forward');
 }
 
 // Network and disk rates remain per second, with measured time as the weight.

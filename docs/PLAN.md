@@ -1893,3 +1893,44 @@ The short overhead test at a two-second refresh measured +0.47% of one core
 with the menu closed and +0.54% including tracking. Open overview and CPU
 measured +1.53% and +0.93%. Each of the three churn rounds ended with 1148
 actors. The run used 15-second windows and a zero-second soak.
+
+## Component chart range selector and Backup labels
+
+| Work | Verification |
+|---|---|
+| Reuse fixed Linux chart history for nine ranges | Check each time span, the bounded tier sizes, window rollover, gaps, peaks, and time-weighted per-second rates in GJS. Confirm no additional collector reads are scheduled. |
+| Replace the three chips with a compact selector in component headers | Use compositor pointer and keyboard input to open, choose, and dismiss the selector. Check light and dark renders, persistence through page navigation, and isolation from the fixed Slowdowns timeline. |
+| Remove ellipses in Backup | Check the exact Save, Open, and Reset labels in the preferences test. Open and cancel the reset confirmation with real pointer input and check the installed user theme. |
+| Recheck the observer budget and shipping paths | Run lint, units, tracking UI and translation checks, ZIP installation, and the short Shell overhead and churn test. |
+
+Two focused runs stopped at keyboard checks. On GNOME 50.1 the Shell's
+popup grab handled Escape before the extension, closing the full panel.
+Backspace successfully collapsed the selector and restored focus. The
+next assertion found that generic directional focus traversal on the
+nested range rows did not reach the adjacent choice. This is Shell focus
+and event routing. The revised plan preserves the Shell's Escape action,
+uses Backspace to collapse the selector, and handles direction keys at
+the focused grid choice. The next real-key run checks opening, adjacent
+focus, activation, and both dismissal paths separately.
+
+The range choices are Live, 5m, 15m, 30m, 1h, 3h, 6h, 12h and 24h.
+Live follows the configured poll cadence and the header shows its current
+span. The selected range follows component navigation. Four shared bucket
+tiers provide 15-second, one-minute, five-minute and 15-minute resolution.
+Shorter views look into the same fixed ring, so no bucket data is copied.
+The two new tiers add about 50 KiB across the 11 default chart histories.
+No new recurring reads or timers were needed.
+
+Lint and all 911 unit checks passed. The chart test passed on GNOME 50.1
+and in GNOME 46 and 51 containers. It drove the range selector with real
+clicks and keys and checked every choice, time-weighted rates, retained
+history, and both theme renders. All 16 Backup checks passed with the
+installed Orchis stylesheet. The pointer opened and cancelled Reset in
+both themes. The translation suite read 257 panel labels on 10 pages.
+The 86-file ZIP installed and stayed active for eight seconds with a clean
+extension log.
+
+The 15-second overhead check at a two-second refresh measured +0.33% of one
+core with the menu closed and +0.42% including tracking. Open Overview and CPU
+measured +3.47% and +2.40%. The three menu churn rounds ended with 1171 actors
+each. The run used a zero-second soak.

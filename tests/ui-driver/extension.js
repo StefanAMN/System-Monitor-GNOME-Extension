@@ -198,6 +198,20 @@ async function scrollIntoView(rp, actor) {
     }
 }
 
+async function chooseChartRange(rp, range) {
+    if (!rp._rangeChoices.visible) {
+        await scrollIntoView(rp, rp._detailRangeBox);
+        await clickActor(rp._detailRangeBox);
+    }
+    const choice = rp._rangeButtons[range];
+    check(rp._rangeChoices.is_mapped(), 'range: clicking the selector did not open its choices');
+    await scrollIntoView(rp, choice);
+    await clickActor(choice);
+    const label = range === 'live' ? rp._spanLabel : choice.label;
+    check(!rp._rangeChoices.visible && rp._range === range && choice.checked &&
+        rp._rangeValue.text === label, `range: choosing ${range} did not update and close the selector`);
+}
+
 async function clickThrough(rp, label) {
     await clickActor(rp._indicator);
     check(rp._indicator.menu.isOpen, `${label}: clicking the panel button did not open the menu`);
@@ -930,7 +944,7 @@ async function prefsWindow(rp, mode = '1200') {
         `prefs: ${verdict.join(' | ') || `no verdict (exit ${proc.get_exit_status()})`}`);
     console.log(`RP-UITEST ${verdict.join(' | ')}`);
     for (let i = 0; i < 20 && titled(); i++) await sleep(150);
-    if (mode === 'workload') return;
+    if (mode === 'workload' || mode === 'backup') return;
 
     // The real window, from the overview's menu button: all settings live there.
     rp._indicator.menu.open();
@@ -1105,11 +1119,9 @@ async function gpuPageFollowsReadings(rp) {
     await scrollIntoView(rp, first.spark);
     await hoverActor(first.spark);
     check(first.spark._hoverX >= 0, `gpu page: a card's chart ignores the pointer (${first.spark._hoverX})`);
-    await scrollIntoView(rp, rp._rangeButtons.hour);
-    await clickActor(rp._rangeButtons.hour);
+    await chooseChartRange(rp, 'hour');
     check(first.spark.history === rp._long.hour['gpu:card0'] && last.spark.history === rp._long.hour['gpu:card2'], 'gpu page: the 1h range left the cards\' charts');
-    await scrollIntoView(rp, rp._rangeButtons.live);
-    await clickActor(rp._rangeButtons.live);
+    await chooseChartRange(rp, 'live');
     check(first.spark.history === rp._hist['gpu:card0'], 'gpu page: the live range left the card\'s chart');
 
     // The set changes (a dock, a driver loaded late): cards rebuilt, old charts dropped.
@@ -1558,9 +1570,11 @@ async function componentChartHistory(rp) {
     await until(() => !rp._pollInFlight, 'charts: the prior poll did not drain');
     for (const key of ['netRx', 'netTx', 'dskRead', 'dskWrite']) {
         rp._hist[key].clear();
-        rp._long.hour[key].clear();
-        rp._long.day[key].clear();
+        for (const tier of rp._historyTiers) tier[key].clear();
     }
+    const { RANGES } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/engine/longhistory.js`);
+    const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+    const scheme = iface.get_string('color-scheme');
     const pins = rp._settings.get_strv('pinned-metrics');
     const thm = rp._thm.sample;
     const net = rp._net.sample;
@@ -1609,6 +1623,26 @@ async function componentChartHistory(rp) {
         await back();
         await open('network');
         check(values(rp._netRxSparkline.history).includes(120), 'charts: reopening Network lost a recorded point');
+        for (const variant of ['dark', 'light']) {
+            iface.set_string('color-scheme', `prefer-${variant}`);
+            await sleep(500);
+            await click(rp._detailRangeBox);
+            check(rp._rangeChoices.is_mapped() && Object.keys(rp._rangeButtons).length === 9 &&
+                rp._rangeButtons.live.label === 'Live' && cutOffLabels(rp._rangeChoices).length === 0,
+            `range: ${variant} choices do not fit or Live is missing`);
+            await shot(`chart-range-picker-${variant}`);
+            await pressKey(Clutter.KEY_BackSpace);
+            check(!rp._rangeChoices.visible && rp._activeTab === 'network' &&
+                global.stage.get_key_focus() === rp._detailRangeBox, 'range: Backspace did not close the choices and restore focus');
+        }
+        await pressKey(Clutter.KEY_Return);
+        check(rp._rangeChoices.visible && global.stage.get_key_focus() === rp._rangeButtons.live,
+            `range: Return did not open choices with current focus (${global.stage.get_key_focus()})`);
+        await pressKey(Clutter.KEY_Right);
+        check(global.stage.get_key_focus() === rp._rangeButtons.fiveMinutes,
+            `range: arrow did not focus the 5m option (${global.stage.get_key_focus()})`);
+        await pressKey(Clutter.KEY_Return);
+        check(rp._range === 'fiveMinutes' && !rp._rangeChoices.visible, 'range: Return did not select 5m');
 
         for (const [tab, sparkName, expected, formatted] of [
             ['network', '_netRxSparkline', 120, '120.0 KB/s'],
@@ -1619,10 +1653,12 @@ async function componentChartHistory(rp) {
                 await open(tab);
             }
             const spark = rp[sparkName];
-            for (const range of ['live', 'hour', 'day', 'live']) {
-                await click(rp._rangeButtons[range]);
-                const series = range === 'live' ? rp._hist : rp._long[range];
-                check(rp._range === range && spark.history === series[spark.histKey], `charts: ${tab} did not switch to ${range}`);
+            const ranges = tab === 'network' ? [...Object.keys(RANGES).slice(2), 'live'] : ['hour', 'day', 'live'];
+            for (const range of ranges) {
+                await chooseChartRange(rp, range);
+                const spec = RANGES[range];
+                check(spec ? spark.history.capacity === spec.capacity && spark.sampleSeconds === spec.bucketUs / 1e6
+                    : spark.history === rp._hist[spark.histKey], `charts: ${tab} did not switch to ${range}`);
                 await until(() => values(spark.history).some(value => Math.abs(value - expected) < 1e-9),
                     `charts: ${tab} ${range} rescaled a per-second rate`);
                 check(spark.options.formatValue(expected) === formatted, `charts: ${tab} ${range} rate is missing its per-second unit`);
@@ -1636,8 +1672,19 @@ async function componentChartHistory(rp) {
                 }
             }
         }
-        console.log('RP-UITEST charts: thermal history retained, network gaps, and per-second rates across live, hour and day');
+        await chooseChartRange(rp, 'halfDay');
+        await click(rp._detailRangeBox);
+        await back();
+        check(!rp._rangeChoices.visible, 'range: navigating away left the choices expanded');
+        await open('thermal');
+        check(rp._thmSparkline.spanLabel === '12h' && rp._rangeValue.text === '12h', 'range: navigation lost the selected time span');
+        await chooseChartRange(rp, 'live');
+        await click(rp._detailRangeBox);
+        await pressKey(Clutter.KEY_Escape);
+        check(!rp._menuOpen && !rp._rangeChoices.visible, 'range: Escape did not close the panel and hide the choices');
+        console.log('RP-UITEST charts: history retention, nine ranges, per-second rates and keyboard selection');
     } finally {
+        iface.set_string('color-scheme', scheme);
         rp._thm.sample = thm;
         rp._net.sample = net;
         rp._dsk.sample = dsk;
@@ -1654,11 +1701,7 @@ async function historyAndUsage(rp) {
     rp._updateTabVisibility();
     await sleep(800);
     const spark = rp._cpuSparkline;
-    const clickRange = async range => {
-        await scrollIntoView(rp, rp._rangeButtons[range]);
-        await clickActor(rp._rangeButtons[range]);
-    };
-    await clickRange('hour');
+    await chooseChartRange(rp, 'hour');
     check(rp._range === 'hour' && spark.history === rp._long.hour.cpu && spark.spanLabel === '1h',
         `range: 1h click gave range ${rp._range}, span '${spark.spanLabel}'`);
     // The run so far has lasted minutes: there are buckets with samples.
@@ -1666,9 +1709,9 @@ async function historyAndUsage(rp) {
     const filled = Array.from({ length: h.length }, (_, i) => h.get(i)).filter(Number.isFinite).length;
     check(h.length >= 2 && filled >= 2, `range: 1h CPU history has ${h.length} buckets, ${filled} with samples`);
     await shot('range-1h');
-    await clickRange('day');
+    await chooseChartRange(rp, 'day');
     check(spark.history === rp._long.day.cpu && spark.spanLabel === '24h', `range: 24h shows '${spark.spanLabel}'`);
-    await clickRange('live');
+    await chooseChartRange(rp, 'live');
     check(spark.history === rp._hist.cpu && spark.spanLabel === rp._spanLabel, `range: back to live shows '${spark.spanLabel}'`);
 
     rp._activeTab = 'network';
@@ -2458,6 +2501,11 @@ async function translationCoverage(rp) {
             if (actor.mapped && actor instanceof St.Label) texts++;
         });
         scan(rp._indicator.menu.box, `${tab} page`);
+        if (tab === 'network') {
+            rp._showRangeChoices(true);
+            scan(rp._rangeChoices, 'chart range choices');
+            rp._showRangeChoices(false);
+        }
     }
     rp._indicator.menu.close();
     console.log(`RP-UITEST coverage: ${texts} panel labels read on ${pages.length} pages`);
@@ -2480,6 +2528,12 @@ async function translationCoverage(rp) {
 }
 
 async function run() {
+    if (GLib.getenv('RP_UI_BACKUP_ONLY') === '1') {
+        const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
+        check(rp?._indicator, 'target extension not enabled');
+        await prefsWindow(rp, 'backup');
+        return;
+    }
     if (GLib.getenv('RP_UI_CHARTS_ONLY') === '1') {
         const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
         check(rp?._indicator, 'target extension not enabled');
@@ -2493,6 +2547,7 @@ async function run() {
         const reopened = Main.extensionManager.lookup(TARGET).stateObj;
         await componentChartHistory(reopened);
         await prefsWindow(reopened, 'workload');
+        await prefsWindow(reopened, 'backup');
         return;
     }
     if (GLib.getenv('RP_UI_WORKLOAD_ONLY') === '1') {

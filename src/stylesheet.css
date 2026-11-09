@@ -677,7 +677,10 @@
 .rp-light .rp-end-button:hover, .rp-light .rp-end-button:focus { background-color: rgba(53, 132, 228, 0.18); }
 
 /* ── Chart range (detail header) ──────────────────────────────────────────── */
-.rp-range-box { border-radius: 99px; padding: 2px; spacing: 2px; }
+.rp-range-trigger-content { spacing: 4px; }
+.rp-range-picker { border-radius: 12px; padding: 9px; spacing: 5px; margin-bottom: 10px; }
+.rp-range-heading { font-size: 0.8em; font-weight: 600; padding: 2px 4px; }
+.rp-range-row { spacing: 5px; }
 .rp-range {
     border-radius: 99px;
     padding: 3px 9px;
@@ -685,6 +688,8 @@
     font-weight: 600;
     color: #a0a0b8;
 }
+.rp-range-trigger { padding: 5px 8px; }
+.rp-range-choice { border-radius: 7px; padding: 5px 8px; min-width: 38px; font-size: 0.85em; }
 .rp-range:hover, .rp-range:focus { background-color: rgba(255, 255, 255, 0.08); }
 .rp-range.rp-range-on { background-color: rgba(53, 132, 228, 0.35); color: #ffffff; }
 .rp-light .rp-range { color: #5e5c64; }
