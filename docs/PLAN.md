@@ -1934,3 +1934,26 @@ The 15-second overhead check at a two-second refresh measured +0.33% of one
 core with the menu closed and +0.42% including tracking. Open Overview and CPU
 measured +3.47% and +2.40%. The three menu churn rounds ended with 1171 actors
 each. The run used a zero-second soak.
+
+## In-header chart range slider
+
+The horizontal control replaces the title while open and occupies the same
+header row. It selects the nine existing history spans independently of
+Linux polling. The native Shell slider previews during a drag and commits
+the new chart view on release, reusing the existing fixed history tiers.
+
+Use real compositor drags and keys to verify every range, selection commit
+on release, stable chart coordinates when opening and closing, navigation,
+and light/dark rendering. Run lint, unit, translation, compatibility and
+package checks.
+
+All 911 unit checks passed. Real-pointer slider coverage passed on GNOME
+Shell 46, 50.1, and 51. It checked every preset, chart Y coordinates in
+both themes, the preview/commit boundary, keyboard selection, and the
+unchanged polling setting. The drag uses the Shell's existing slider
+gesture handling. Pseudo-language coverage read 259 panel labels on
+10 pages. The rebuilt 86-file ZIP stayed active for eight seconds in
+an isolated Shell.
+
+The combined GNOME 50.1 tracking UI suite passed the slider, Slowdowns,
+workload, and Backup scenarios.

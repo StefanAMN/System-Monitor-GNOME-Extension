@@ -328,16 +328,7 @@ export class PollingMethods {
             spark.setSpanLabel(spec ? _(spec.label) : this._spanLabel);
             spark.refresh();
         }
-        for (const [range, button] of Object.entries(this._rangeButtons ?? {})) {
-            if (range === this._range) button.add_style_class_name('rp-range-on');
-            else button.remove_style_class_name('rp-range-on');
-            button.checked = range === this._range;
-        }
-        if (this._rangeValue) {
-            const label = spec ? _(spec.label) : this._spanLabel || _('Live');
-            this._rangeValue.text = label;
-            this._detailRangeBox.accessible_name = fill(_('Chart range: {span}'), { span: label });
-        }
+        if (!this._rangeDragging) this._syncRangeSlider();
     }
 
     /**

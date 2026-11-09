@@ -252,8 +252,8 @@ export default class ResourcePulseExtension extends Extension {
         // Keyboard navigation inside dropdown menu
         this._menuContainer.connect('key-press-event', (actor, event) => {
             const symbol = event.get_key_symbol();
-            if (symbol === Clutter.KEY_BackSpace && this._rangeChoices?.visible) {
-                this._showRangeChoices(false, true);
+            if (symbol === Clutter.KEY_BackSpace && this._rangeSlider?.visible) {
+                this._showRangeSlider(false, true);
                 return Clutter.EVENT_STOP;
             }
             if (symbol === Clutter.KEY_Escape || symbol === Clutter.KEY_BackSpace) {
@@ -320,7 +320,7 @@ export default class ResourcePulseExtension extends Extension {
                 this._hideTooltip();
                 this._poll();
             } else {
-                this._showRangeChoices(false);
+                this._showRangeSlider(false);
                 if (this._activeTab === 'disk') this._updateDriveStats(null);
                 this._clearProcSearch();
                 if (this._stageReleaseId) {

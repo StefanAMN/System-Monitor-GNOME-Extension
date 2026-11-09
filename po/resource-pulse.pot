@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-09 14:35+0200\n"
+"POT-Creation-Date: 2026-11-09 14:50+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -204,7 +204,7 @@ msgstr ""
 #: src/lib/common/present.js:70 src/lib/common/settingsmodel.js:24
 #: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:21
 #: src/ui/panel/constants.js:65 src/ui/panel/dashboard.js:382
-#: src/ui/panel/details.js:14 src/ui/panel/overview.js:638
+#: src/ui/panel/details.js:18 src/ui/panel/overview.js:638
 #: src/ui/panel/pages/gpu.js:213
 msgid "GPU"
 msgstr ""
@@ -288,7 +288,7 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:117
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:62
-#: src/ui/panel/details.js:13 src/ui/panel/details.js:40
+#: src/ui/panel/details.js:17 src/ui/panel/details.js:44
 #: src/ui/panel/overview.js:631 src/ui/panel/pages/incidents.js:22
 #: src/ui/panel/topbar.js:213
 msgid "CPU"
@@ -297,7 +297,7 @@ msgstr ""
 #: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:101
 #: src/lib/common/settingsmodel.js:122 src/lib/engine/agentreport.js:21
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:63
-#: src/ui/panel/details.js:13 src/ui/panel/overview.js:632
+#: src/ui/panel/details.js:17 src/ui/panel/overview.js:632
 #: src/ui/panel/pages/incidents.js:23 src/ui/prefs/diagnostics.js:24
 #: src/ui/prefs/tracking.js:556
 msgid "Memory"
@@ -305,31 +305,31 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:17 src/lib/engine/agentreport.js:22
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:71
-#: src/ui/panel/details.js:13 src/ui/panel/overview.js:633
+#: src/ui/panel/details.js:17 src/ui/panel/overview.js:633
 #: src/ui/prefs/diagnostics.js:25 src/ui/prefs/tracking.js:541
 msgid "Battery"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:18 src/ui/panel/constants.js:20
-#: src/ui/panel/details.js:13 src/ui/panel/overview.js:637
+#: src/ui/panel/details.js:17 src/ui/panel/overview.js:637
 #: src/ui/panel/pages/gpu.js:73
 msgid "Power"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:19 src/ui/panel/constants.js:21
-#: src/ui/panel/details.js:14 src/ui/panel/overview.js:634
+#: src/ui/panel/details.js:18 src/ui/panel/overview.js:634
 #: src/ui/prefs/tracking.js:568
 msgid "Disk"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:20 src/lib/engine/agentreport.js:23
 #: src/lib/engine/agentreport.js:173 src/ui/panel/constants.js:21
-#: src/ui/panel/details.js:14 src/ui/panel/overview.js:635
+#: src/ui/panel/details.js:18 src/ui/panel/overview.js:635
 #: src/ui/prefs/diagnostics.js:26 src/ui/prefs/tracking.js:580
 msgid "Network"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:21 src/ui/panel/details.js:14
+#: src/lib/common/settingsmodel.js:21 src/ui/panel/details.js:18
 #: src/ui/panel/overview.js:636
 msgid "Thermal"
 msgstr ""
@@ -1379,33 +1379,25 @@ msgid_plural "Yours only · {n} system processes need administrator rights"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/panel/details.js:15 src/ui/panel/overview.js:580
+#: src/ui/panel/details.js:19 src/ui/panel/overview.js:580
 msgid "Slowdowns"
 msgstr ""
 
-#: src/ui/panel/details.js:30
+#: src/ui/panel/details.js:34
 msgid "Back to the overview"
 msgstr ""
 
-#: src/ui/panel/details.js:44 src/ui/panel/overview.js:604
+#: src/ui/panel/details.js:48 src/ui/panel/overview.js:604
 #: src/ui/prefs/window.js:44
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:102
-msgid "Chart range"
-msgstr ""
-
-#: src/ui/panel/details.js:111 src/ui/panel/polling.js:337
+#: src/ui/panel/details.js:151
 msgid "Live"
 msgstr ""
 
-#: src/ui/panel/details.js:115
-msgid "Last {span}"
-msgstr ""
-
-#: src/ui/panel/details.js:115
-msgid "Recent samples"
+#: src/ui/panel/details.js:154
+msgid "Chart range: {span}"
 msgstr ""
 
 #: src/ui/panel/overview.js:575
@@ -1655,7 +1647,7 @@ msgstr ""
 msgid "No supported GPU driver (nvidia-smi, amdgpu, i915 or xe)"
 msgstr ""
 
-#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:566
+#: src/ui/panel/pages/gpu.js:213 src/ui/panel/polling.js:557
 msgid "{chart} over time"
 msgstr ""
 
@@ -1923,10 +1915,6 @@ msgstr ""
 
 #: src/ui/panel/polling.js:60
 msgid "{s}s"
-msgstr ""
-
-#: src/ui/panel/polling.js:339
-msgid "Chart range: {span}"
 msgstr ""
 
 #: src/ui/panel/processes.js:22

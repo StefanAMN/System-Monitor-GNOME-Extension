@@ -199,17 +199,36 @@ async function scrollIntoView(rp, actor) {
 }
 
 async function chooseChartRange(rp, range) {
-    if (!rp._rangeChoices.visible) {
-        await scrollIntoView(rp, rp._detailRangeBox);
-        await clickActor(rp._detailRangeBox);
+    await scrollIntoView(rp, rp._detailRangeBox);
+    if (!rp._rangeSlider.visible) await clickActor(rp._detailRangeBox);
+    const slider = rp._rangeSlider;
+    check(slider.is_mapped(), 'range: clicking the time span did not open the slider');
+    if (rp._range !== range) {
+        const stops = ['live', 'fiveMinutes', 'quarterHour', 'halfHour', 'hour', 'threeHours', 'sixHours', 'halfDay', 'day'];
+        const before = rp._range;
+        const [x, y] = slider.get_transformed_position();
+        const [w, h] = slider.get_transformed_size();
+        const from = x + 5 + slider.value * (w - 10);
+        const to = x + 5 + stops.indexOf(range) / (stops.length - 1) * (w - 10);
+        const now = () => GLib.get_monotonic_time();
+        const move = value => pointer.notify_absolute_motion(now(), value, y + h / 2);
+        move(from);
+        await sleep(100);
+        pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+        try {
+            for (let i = 1; i <= 6; i++) {
+                move(from + (to - from) * i / 6);
+                await sleep(40);
+            }
+            check(rp._range === before && rp._rangeDragging, 'range: the chart changed before drag release');
+        } finally {
+            pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+            await sleep(250);
+        }
     }
-    const choice = rp._rangeButtons[range];
-    check(rp._rangeChoices.is_mapped(), 'range: clicking the selector did not open its choices');
-    await scrollIntoView(rp, choice);
-    await clickActor(choice);
-    const label = range === 'live' ? rp._spanLabel : choice.label;
-    check(!rp._rangeChoices.visible && rp._range === range && choice.checked &&
-        rp._rangeValue.text === label, `range: choosing ${range} did not update and close the selector`);
+    check(rp._range === range, `range: dragging to ${range} selected ${rp._range}`);
+    await clickActor(rp._detailRangeBox);
+    check(!slider.visible, 'range: clicking the span did not dismiss the slider');
 }
 
 async function clickThrough(rp, label) {
@@ -1623,26 +1642,27 @@ async function componentChartHistory(rp) {
         await back();
         await open('network');
         check(values(rp._netRxSparkline.history).includes(120), 'charts: reopening Network lost a recorded point');
+        const refresh = rp._settings.get_int('poll-interval-ms');
+        const chart = rp._netRxSparkline;
         for (const variant of ['dark', 'light']) {
             iface.set_string('color-scheme', `prefer-${variant}`);
             await sleep(500);
+            const [, beforeY] = chart.get_transformed_position();
             await click(rp._detailRangeBox);
-            check(rp._rangeChoices.is_mapped() && Object.keys(rp._rangeButtons).length === 9 &&
-                rp._rangeButtons.live.label === 'Live' && cutOffLabels(rp._rangeChoices).length === 0,
-            `range: ${variant} choices do not fit or Live is missing`);
-            await shot(`chart-range-picker-${variant}`);
+            const [, afterY] = chart.get_transformed_position();
+            check(rp._rangeSlider.is_mapped() && rp._rangeSlider.width > 100 && rp._rangeValue.text === 'Live' &&
+                Math.abs(beforeY - afterY) < 0.5, `range: the ${variant} slider moved the chart (${beforeY} -> ${afterY})`);
+            await shot(`chart-range-slider-${variant}`);
             await pressKey(Clutter.KEY_BackSpace);
-            check(!rp._rangeChoices.visible && rp._activeTab === 'network' &&
-                global.stage.get_key_focus() === rp._detailRangeBox, 'range: Backspace did not close the choices and restore focus');
+            check(!rp._rangeSlider.visible && rp._activeTab === 'network' &&
+                global.stage.get_key_focus() === rp._detailRangeBox, 'range: Backspace did not close the slider and restore focus');
         }
         await pressKey(Clutter.KEY_Return);
-        check(rp._rangeChoices.visible && global.stage.get_key_focus() === rp._rangeButtons.live,
-            `range: Return did not open choices with current focus (${global.stage.get_key_focus()})`);
+        check(rp._rangeSlider.visible && global.stage.get_key_focus() === rp._rangeSlider,
+            'range: Return did not open and focus the slider');
         await pressKey(Clutter.KEY_Right);
-        check(global.stage.get_key_focus() === rp._rangeButtons.fiveMinutes,
-            `range: arrow did not focus the 5m option (${global.stage.get_key_focus()})`);
-        await pressKey(Clutter.KEY_Return);
-        check(rp._range === 'fiveMinutes' && !rp._rangeChoices.visible, 'range: Return did not select 5m');
+        check(rp._range === 'fiveMinutes', `range: arrow selected ${rp._range} instead of 5m`);
+        await pressKey(Clutter.KEY_BackSpace);
 
         for (const [tab, sparkName, expected, formatted] of [
             ['network', '_netRxSparkline', 120, '120.0 KB/s'],
@@ -1675,14 +1695,15 @@ async function componentChartHistory(rp) {
         await chooseChartRange(rp, 'halfDay');
         await click(rp._detailRangeBox);
         await back();
-        check(!rp._rangeChoices.visible, 'range: navigating away left the choices expanded');
+        check(!rp._rangeSlider.visible, 'range: navigating away left the choices expanded');
         await open('thermal');
         check(rp._thmSparkline.spanLabel === '12h' && rp._rangeValue.text === '12h', 'range: navigation lost the selected time span');
         await chooseChartRange(rp, 'live');
         await click(rp._detailRangeBox);
         await pressKey(Clutter.KEY_Escape);
-        check(!rp._menuOpen && !rp._rangeChoices.visible, 'range: Escape did not close the panel and hide the choices');
-        console.log('RP-UITEST charts: history retention, nine ranges, per-second rates and keyboard selection');
+        check(!rp._menuOpen && !rp._rangeSlider.visible, 'range: Escape did not close the panel and hide the choices');
+        check(rp._settings.get_int('poll-interval-ms') === refresh, 'range: the slider changed the polling interval');
+        console.log('RP-UITEST charts: nine drag ranges, keyboard selection, fixed chart position and unchanged polling');
     } finally {
         iface.set_string('color-scheme', scheme);
         rp._thm.sample = thm;
@@ -2502,9 +2523,9 @@ async function translationCoverage(rp) {
         });
         scan(rp._indicator.menu.box, `${tab} page`);
         if (tab === 'network') {
-            rp._showRangeChoices(true);
-            scan(rp._rangeChoices, 'chart range choices');
-            rp._showRangeChoices(false);
+            rp._showRangeSlider(true);
+            scan(rp._rangeSlider, 'chart range slider');
+            rp._showRangeSlider(false);
         }
     }
     rp._indicator.menu.close();
