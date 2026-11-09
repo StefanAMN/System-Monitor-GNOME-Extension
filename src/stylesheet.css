@@ -679,9 +679,11 @@
 /* ── Chart range (detail header) ──────────────────────────────────────────── */
 .rp-range-trigger-content { spacing: 5px; }
 .rp-range-trigger-content StLabel { min-width: 25px; }
+.rp-range-control { width: 86px; }
+.rp-range-limits { padding: 0 2px; font-size: 0.68em; }
 .resource-pulse-popup .rp-range-slider {
     color: #74b4ff;
-    -slider-handle-radius: 5px;
+    -slider-handle-radius: 4px;
     -barlevel-height: 3px;
     -barlevel-background-color: rgba(180, 180, 205, 0.24);
     -barlevel-active-background-color: #599be9;

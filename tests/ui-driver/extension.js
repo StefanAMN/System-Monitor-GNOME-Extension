@@ -198,18 +198,22 @@ async function scrollIntoView(rp, actor) {
     }
 }
 
-async function chooseChartRange(rp, range) {
+async function chooseChartRange(rp, range, offset = 0) {
     await scrollIntoView(rp, rp._detailRangeBox);
-    if (!rp._rangeSlider.visible) await clickActor(rp._detailRangeBox);
+    if (!rp._rangeControl.visible) await clickActor(rp._detailRangeBox);
     const slider = rp._rangeSlider;
     check(slider.is_mapped(), 'range: clicking the time span did not open the slider');
-    if (rp._range !== range) {
-        const stops = ['live', 'fiveMinutes', 'quarterHour', 'halfHour', 'hour', 'threeHours', 'sixHours', 'halfDay', 'day'];
+    let releasePosition = slider.value;
+    if (rp._range !== range || offset) {
+        const { RANGES } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/engine/longhistory.js`);
+        const stops = Object.keys(RANGES);
         const before = rp._range;
         const [x, y] = slider.get_transformed_position();
         const [w, h] = slider.get_transformed_size();
-        const from = x + 5 + slider.value * (w - 10);
-        const to = x + 5 + stops.indexOf(range) / (stops.length - 1) * (w - 10);
+        const radius = slider.get_theme_node().get_length('-slider-handle-radius');
+        const from = x + radius + slider.value * (w - 2 * radius);
+        const fraction = stops.indexOf(range) / (stops.length - 1) + offset;
+        const to = x + radius + fraction * (w - 2 * radius);
         const now = () => GLib.get_monotonic_time();
         const move = value => pointer.notify_absolute_motion(now(), value, y + h / 2);
         move(from);
@@ -221,14 +225,17 @@ async function chooseChartRange(rp, range) {
                 await sleep(40);
             }
             check(rp._range === before && rp._rangeDragging, 'range: the chart changed before drag release');
+            releasePosition = slider.value;
         } finally {
             pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
             await sleep(250);
         }
     }
     check(rp._range === range, `range: dragging to ${range} selected ${rp._range}`);
+    check(Math.abs(slider.value - releasePosition) < 0.001, 'range: the thumb jumped on release');
     await clickActor(rp._detailRangeBox);
-    check(!slider.visible, 'range: clicking the span did not dismiss the slider');
+    check(!rp._rangeControl.visible, 'range: clicking the span did not dismiss the slider');
+    return releasePosition;
 }
 
 async function clickThrough(rp, label) {
@@ -1643,26 +1650,45 @@ async function componentChartHistory(rp) {
         await open('network');
         check(values(rp._netRxSparkline.history).includes(120), 'charts: reopening Network lost a recorded point');
         const refresh = rp._settings.get_int('poll-interval-ms');
-        const chart = rp._netRxSparkline;
+        await back();
+        await open('memory');
+        const sizeKeys = ['menu-custom-width', 'menu-custom-height'];
+        const savedSize = sizeKeys.map(key => rp._settings.get_int(key));
+        rp._settings.set_int(sizeKeys[0], 360);
+        rp._settings.set_int(sizeKeys[1], 530);
+        await sleep(600);
+        const chart = rp._memSparkline;
         for (const variant of ['dark', 'light']) {
             iface.set_string('color-scheme', `prefer-${variant}`);
             await sleep(500);
             const [, beforeY] = chart.get_transformed_position();
             await click(rp._detailRangeBox);
             const [, afterY] = chart.get_transformed_position();
-            check(rp._rangeSlider.is_mapped() && rp._rangeSlider.width > 100 && rp._rangeValue.text === 'Live' &&
-                Math.abs(beforeY - afterY) < 0.5, `range: the ${variant} slider moved the chart (${beforeY} -> ${afterY})`);
+            check(rp._rangeSlider.is_mapped() && rp._rangeSlider.width <= 90 && rp._rangeValue.text === 'Live' &&
+                rp._rangeMin.is_mapped() && rp._rangeMin.text === 'Live' &&
+                rp._rangeMax.is_mapped() && rp._rangeMax.text === '24h', `range: the ${variant} rail is oversized or missing limits`);
+            check(rp._detailHeaderTitle.is_mapped() && rp._detailHeaderTitle.text === 'Memory' &&
+                !rp._detailHeaderTitle.clutter_text.get_layout().is_ellipsized() &&
+                Math.abs(beforeY - afterY) < 0.5, `range: the ${variant} slider clipped the title or moved the chart (${beforeY} -> ${afterY})`);
             await shot(`chart-range-slider-${variant}`);
             await pressKey(Clutter.KEY_BackSpace);
-            check(!rp._rangeSlider.visible && rp._activeTab === 'network' &&
+            check(!rp._rangeControl.visible && rp._activeTab === 'memory' &&
                 global.stage.get_key_focus() === rp._detailRangeBox, 'range: Backspace did not close the slider and restore focus');
         }
         await pressKey(Clutter.KEY_Return);
-        check(rp._rangeSlider.visible && global.stage.get_key_focus() === rp._rangeSlider,
+        check(rp._rangeControl.visible && global.stage.get_key_focus() === rp._rangeSlider,
             'range: Return did not open and focus the slider');
         await pressKey(Clutter.KEY_Right);
-        check(rp._range === 'fiveMinutes', `range: arrow selected ${rp._range} instead of 5m`);
+        check(rp._range === 'threeMinutes', `range: arrow selected ${rp._range} instead of 3m`);
         await pressKey(Clutter.KEY_BackSpace);
+        const position = await chooseChartRange(rp, 'tenMinutes', 0.019);
+        await click(rp._detailRangeBox);
+        check(Math.abs(rp._rangeSlider.value - position) < 0.001 &&
+            Math.abs(position - 3 / 16) > 0.008, 'range: reopening lost the between-marker thumb position');
+        await pressKey(Clutter.KEY_BackSpace);
+        sizeKeys.forEach((key, i) => rp._settings.set_int(key, savedSize[i]));
+        await back();
+        await open('network');
 
         for (const [tab, sparkName, expected, formatted] of [
             ['network', '_netRxSparkline', 120, '120.0 KB/s'],
@@ -1673,7 +1699,7 @@ async function componentChartHistory(rp) {
                 await open(tab);
             }
             const spark = rp[sparkName];
-            const ranges = tab === 'network' ? [...Object.keys(RANGES).slice(2), 'live'] : ['hour', 'day', 'live'];
+            const ranges = tab === 'network' ? [...Object.keys(RANGES).slice(1), 'live'] : ['hour', 'day', 'live'];
             for (const range of ranges) {
                 await chooseChartRange(rp, range);
                 const spec = RANGES[range];
@@ -1695,15 +1721,15 @@ async function componentChartHistory(rp) {
         await chooseChartRange(rp, 'halfDay');
         await click(rp._detailRangeBox);
         await back();
-        check(!rp._rangeSlider.visible, 'range: navigating away left the choices expanded');
+        check(!rp._rangeControl.visible, 'range: navigating away left the choices expanded');
         await open('thermal');
         check(rp._thmSparkline.spanLabel === '12h' && rp._rangeValue.text === '12h', 'range: navigation lost the selected time span');
         await chooseChartRange(rp, 'live');
         await click(rp._detailRangeBox);
         await pressKey(Clutter.KEY_Escape);
-        check(!rp._menuOpen && !rp._rangeSlider.visible, 'range: Escape did not close the panel and hide the choices');
+        check(!rp._menuOpen && !rp._rangeControl.visible, 'range: Escape did not close the panel and hide the choices');
         check(rp._settings.get_int('poll-interval-ms') === refresh, 'range: the slider changed the polling interval');
-        console.log('RP-UITEST charts: nine drag ranges, keyboard selection, fixed chart position and unchanged polling');
+        console.log('RP-UITEST charts: 17 ranges, visible Memory title, slider limits, fixed chart position and retained thumb');
     } finally {
         iface.set_string('color-scheme', scheme);
         rp._thm.sample = thm;
@@ -2524,7 +2550,7 @@ async function translationCoverage(rp) {
         scan(rp._indicator.menu.box, `${tab} page`);
         if (tab === 'network') {
             rp._showRangeSlider(true);
-            scan(rp._rangeSlider, 'chart range slider');
+            scan(rp._rangeControl, 'chart range slider');
             rp._showRangeSlider(false);
         }
     }

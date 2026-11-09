@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-09 14:50+0200\n"
+"POT-Creation-Date: 2026-11-09 15:05+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -204,7 +204,7 @@ msgstr ""
 #: src/lib/common/present.js:70 src/lib/common/settingsmodel.js:24
 #: src/lib/common/settingsmodel.js:132 src/ui/panel/constants.js:21
 #: src/ui/panel/constants.js:65 src/ui/panel/dashboard.js:382
-#: src/ui/panel/details.js:18 src/ui/panel/overview.js:638
+#: src/ui/panel/details.js:42 src/ui/panel/overview.js:638
 #: src/ui/panel/pages/gpu.js:213
 msgid "GPU"
 msgstr ""
@@ -288,7 +288,7 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:15 src/lib/common/settingsmodel.js:117
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:62
-#: src/ui/panel/details.js:17 src/ui/panel/details.js:44
+#: src/ui/panel/details.js:41 src/ui/panel/details.js:68
 #: src/ui/panel/overview.js:631 src/ui/panel/pages/incidents.js:22
 #: src/ui/panel/topbar.js:213
 msgid "CPU"
@@ -297,7 +297,7 @@ msgstr ""
 #: src/lib/common/settingsmodel.js:16 src/lib/common/settingsmodel.js:101
 #: src/lib/common/settingsmodel.js:122 src/lib/engine/agentreport.js:21
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:63
-#: src/ui/panel/details.js:17 src/ui/panel/overview.js:632
+#: src/ui/panel/details.js:41 src/ui/panel/overview.js:632
 #: src/ui/panel/pages/incidents.js:23 src/ui/prefs/diagnostics.js:24
 #: src/ui/prefs/tracking.js:556
 msgid "Memory"
@@ -305,31 +305,31 @@ msgstr ""
 
 #: src/lib/common/settingsmodel.js:17 src/lib/engine/agentreport.js:22
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:71
-#: src/ui/panel/details.js:17 src/ui/panel/overview.js:633
+#: src/ui/panel/details.js:41 src/ui/panel/overview.js:633
 #: src/ui/prefs/diagnostics.js:25 src/ui/prefs/tracking.js:541
 msgid "Battery"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:18 src/ui/panel/constants.js:20
-#: src/ui/panel/details.js:17 src/ui/panel/overview.js:637
+#: src/ui/panel/details.js:41 src/ui/panel/overview.js:637
 #: src/ui/panel/pages/gpu.js:73
 msgid "Power"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:19 src/ui/panel/constants.js:21
-#: src/ui/panel/details.js:18 src/ui/panel/overview.js:634
+#: src/ui/panel/details.js:42 src/ui/panel/overview.js:634
 #: src/ui/prefs/tracking.js:568
 msgid "Disk"
 msgstr ""
 
 #: src/lib/common/settingsmodel.js:20 src/lib/engine/agentreport.js:23
 #: src/lib/engine/agentreport.js:173 src/ui/panel/constants.js:21
-#: src/ui/panel/details.js:18 src/ui/panel/overview.js:635
+#: src/ui/panel/details.js:42 src/ui/panel/overview.js:635
 #: src/ui/prefs/diagnostics.js:26 src/ui/prefs/tracking.js:580
 msgid "Network"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:21 src/ui/panel/details.js:18
+#: src/lib/common/settingsmodel.js:21 src/ui/panel/details.js:42
 #: src/ui/panel/overview.js:636
 msgid "Thermal"
 msgstr ""
@@ -1080,34 +1080,66 @@ msgid ""
 msgstr ""
 
 #: src/lib/engine/longhistory.js:184
-msgid "5m"
+msgid "3m"
 msgstr ""
 
 #: src/lib/engine/longhistory.js:185
-msgid "15m"
+msgid "5m"
 msgstr ""
 
 #: src/lib/engine/longhistory.js:186
-msgid "30m"
+msgid "10m"
 msgstr ""
 
 #: src/lib/engine/longhistory.js:187
-msgid "1h"
+msgid "15m"
 msgstr ""
 
 #: src/lib/engine/longhistory.js:188
-msgid "3h"
+msgid "20m"
 msgstr ""
 
 #: src/lib/engine/longhistory.js:189
-msgid "6h"
+msgid "30m"
 msgstr ""
 
 #: src/lib/engine/longhistory.js:190
-msgid "12h"
+msgid "45m"
 msgstr ""
 
 #: src/lib/engine/longhistory.js:191
+msgid "1h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:192
+msgid "2h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:193
+msgid "3h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:194
+msgid "4h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:195
+msgid "6h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:196
+msgid "9h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:197
+msgid "12h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:198
+msgid "18h"
+msgstr ""
+
+#: src/lib/engine/longhistory.js:199
 msgid "24h"
 msgstr ""
 
@@ -1379,24 +1411,24 @@ msgid_plural "Yours only · {n} system processes need administrator rights"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/ui/panel/details.js:19 src/ui/panel/overview.js:580
+#: src/ui/panel/details.js:43 src/ui/panel/overview.js:580
 msgid "Slowdowns"
 msgstr ""
 
-#: src/ui/panel/details.js:34
+#: src/ui/panel/details.js:58
 msgid "Back to the overview"
 msgstr ""
 
-#: src/ui/panel/details.js:48 src/ui/panel/overview.js:604
+#: src/ui/panel/details.js:72 src/ui/panel/overview.js:604
 #: src/ui/prefs/window.js:44
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:151
+#: src/ui/panel/details.js:138 src/ui/panel/details.js:174
 msgid "Live"
 msgstr ""
 
-#: src/ui/panel/details.js:154
+#: src/ui/panel/details.js:177
 msgid "Chart range: {span}"
 msgstr ""
 

@@ -647,7 +647,7 @@ eq(parsePressure(''), { some: null, full: null }, 'pressure: empty file');
 
 {
     const spans = Object.values(RANGES).filter(Boolean);
-    eq(spans.map(spec => (spec.capacity - 1) * spec.bucketUs / 60e6), [5, 15, 30, 60, 180, 360, 720, 1440],
+    eq(spans.map(spec => (spec.capacity - 1) * spec.bucketUs / 60e6), [3, 5, 10, 15, 20, 30, 45, 60, 120, 180, 240, 360, 540, 720, 1080, 1440],
         'chart ranges: each bucket view matches the time shown');
     ok(spans.every(spec => spec.capacity <= HISTORY_TIERS[spec.tier].capacity),
         'chart ranges: every view fits in its shared tier');

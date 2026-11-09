@@ -181,12 +181,20 @@ function range(tier, seconds, label) {
 // Translators: compact chart ranges, m for minutes and h for hours.
 export const RANGES = {
     live: null,
+    threeMinutes: range('short', 3 * 60, N_('3m')),
     fiveMinutes: range('short', 5 * 60, N_('5m')),
+    tenMinutes: range('short', 10 * 60, N_('10m')),
     quarterHour: range('short', 15 * 60, N_('15m')),
+    twentyMinutes: range('short', 20 * 60, N_('20m')),
     halfHour: range('short', 30 * 60, N_('30m')),
+    threeQuarters: range('hour', 45 * 60, N_('45m')),
     hour: range('hour', 3600, N_('1h')),
+    twoHours: range('medium', 2 * 3600, N_('2h')),
     threeHours: range('medium', 3 * 3600, N_('3h')),
+    fourHours: range('medium', 4 * 3600, N_('4h')),
     sixHours: range('medium', 6 * 3600, N_('6h')),
+    nineHours: range('day', 9 * 3600, N_('9h')),
     halfDay: range('day', 12 * 3600, N_('12h')),
+    threeQuarterDay: range('day', 18 * 3600, N_('18h')),
     day: range('day', 24 * 3600, N_('24h')),
 };

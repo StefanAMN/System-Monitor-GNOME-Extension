@@ -1957,3 +1957,34 @@ an isolated Shell.
 
 The combined GNOME 50.1 tracking UI suite passed the slider, Slowdowns,
 workload, and Backup scenarios.
+
+## Compact chart range slider
+
+Keep a short rail beside the component title. Label the endpoints within the
+existing header height. Insert eight intermediate spans using the same four
+history tiers, and keep the drag position when committing the nearest span.
+The Linux collection cadence and data formats stay the same.
+
+Verify every span against its bucket tier in units. Use compositor input to
+check a narrow Memory header, both themes, intermediate selections, the exact
+thumb position after release and reopen, and the chart position during the
+interaction. Run lint, translation and package checks.
+
+GNOME 51 applied the native 0.1 arrow increment before the extension's
+key signal callback, skipping one of the finer ranges. Moving the signal
+handler to the parent capture path also left the native increment active.
+Both failures concern keyboard event routing. The control now uses a
+native Slider subclass override so the arrow and endpoint keys have one
+handler before falling back to the Shell's default handling for other keys.
+
+The GNOME 51 container still used its native arrow handler after the key
+vfunc override. Its installed Slider source binds arrows through the
+Clutter binding pool to `_moveLeft` and `_moveRight`. The subclass will
+override those two callbacks and route the older Shell vfunc to the
+same methods. Re-run the compositor key test on both Shell paths.
+
+The focused compositor test passed on GNOME 46, 50.1, and 51. It exercised
+all 17 spans, the narrow Memory header in both themes, and the saved thumb
+position after reopening. Unit tests, lint, pseudo-localization, and the
+isolated ZIP install also passed. The slider reuses the existing buffers and
+updates the chart only on release. Sampling performance was not re-profiled.

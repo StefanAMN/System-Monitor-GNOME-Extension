@@ -252,7 +252,7 @@ export default class ResourcePulseExtension extends Extension {
         // Keyboard navigation inside dropdown menu
         this._menuContainer.connect('key-press-event', (actor, event) => {
             const symbol = event.get_key_symbol();
-            if (symbol === Clutter.KEY_BackSpace && this._rangeSlider?.visible) {
+            if (symbol === Clutter.KEY_BackSpace && this._rangeControl?.visible) {
                 this._showRangeSlider(false, true);
                 return Clutter.EVENT_STOP;
             }
