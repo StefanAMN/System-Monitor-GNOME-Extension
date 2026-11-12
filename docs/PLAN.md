@@ -1988,3 +1988,89 @@ all 17 spans, the narrow Memory header in both themes, and the saved thumb
 position after reopening. Unit tests, lint, pseudo-localization, and the
 isolated ZIP install also passed. The slider reuses the existing buffers and
 updates the chart only on release. Sampling performance was not re-profiled.
+
+## Live range feedback and fixed detail navigation
+
+Move the detail header into a vertical frame above the scrolling body and
+apply saved panel dimensions to that frame. Preserve keyboard routing and
+scroll-to-content helpers. Handle pointer movement over the open range rail
+and apply each new history range during dragging. Reuse existing history
+tiers, with no new polling work or persistence formats on Linux GNOME 46–51.
+
+Prove the scrolling failure first with compositor wheel input. Verify every
+component back button remains in place and clickable at a short panel height.
+Verify hover without a pressed button and chart updates before drag release,
+then run existing chart, unit, lint and packaged-install checks. The baseline
+UI driver snapshot is /tmp/rp-ui-driver-before-live-range.js.
+
+The baseline compositor test reproduced CPU navigation leaving the panel
+(back button Y 55 to -502). The first new-layout chart run reached hover and
+drag checks, then clicked the header using stale coordinates immediately
+after restoring the panel width. This is a test/layout synchronization issue.
+Keep a layout-settle wait for fixed actors as well as scrolled actors before
+retrying. The control and frame architecture do not need changing.
+
+The broader checks exposed two more assumptions tied to the old layout.
+The size test measured the scroll viewport rather than the panel frame
+(the viewport now reserves 8 px for its scrollbar). The new navigation test
+also assumed reopening always shows the overview, although Escape preserves
+the selected page. These are layout/test synchronization issues. Re-plan the
+checks to measure the saved frame dimensions and use the visible back button
+to return to the overview before clicking cards. Keep the narrower viewport
+available for its scrollbar.
+
+GNOME 51 passed the complete focused run. On GNOME 46 and 50, the Memory
+back button stayed in place but did not activate after wheel scrolling.
+Stop further broad reruns and inspect the compositor press/release path with
+a short header-only probe. Classify the difference as Shell input routing or
+focus/layout synchronization before changing the handler.
+
+A deferred navigation callback and an explicit native fake_release both
+failed to restore the second click. Revert these speculative changes. The
+button is unpressed and there is no extension drag grab before the failing
+click. Inspect the native input target/grab and ancestor event route next.
+
+The native event target revealed the root cause: after scrolling Memory,
+the Shell dispatched header clicks to the scrolled menu container even
+though a fresh position pick returned the back button. The content extends
+above its viewport. Add an explicit allocation clip to the ScrollView so
+older Shell input picking cannot overlap the fixed header. Re-run the short
+probe before repeating the full checks.
+
+Neither clipping the ScrollView nor clipping its containing bin corrected
+older Shell event targeting. Stop the clip approach and remove both changes.
+Place the header above the scroll frame in the popup's paint/pick stack,
+reserving its height in the vertical layout with a native height constraint.
+This makes the visible header win input picking even on older Shells. Route
+keyboard handling through the common popup ancestor.
+
+The header-only pointer run passed with the header painted above the body.
+Its height must be reserved explicitly after allocation, and BinLayout needs
+y_expand for START alignment. The common keyboard root also needs reactive
+input enabled: moving the handler to the default nonreactive popup widget
+prevented Backspace from bubbling. Enable that root before repeating checks.
+
+Final focused compositor checks passed on GNOME 46, 50.1 and 51. The full
+suite reached accessibility, where expanding the named panel root exposed
+anonymous structural containers to a test that treated every sensitive
+panel as an interactive control. Include native FOCUSABLE state in the
+AT-SPI fixture and audit unnamed controls/focusable objects. Keep the header
+inside the named panel tree and verify its single range toggle. A short
+accessibility-only route now isolates this check.
+
+St also marks anonymous structural panels as FOCUSABLE, so that state could
+not distinguish them from controls. Remove the extra AT-SPI field and exclude
+the structural panel role from the unnamed-control assertion. The focused
+AT-SPI test passed, including the single named chart-range control and process
+actions. Repeat the full suite with that corrected fixture.
+
+Completed verification. The full GNOME 50.1 UI regression passed, including
+pointer and keyboard navigation, resizing, accessibility, process actions,
+light/dark rendering and disable/re-enable teardown. Re-enable took 49.3 ms.
+The final focused chart/header suite passed on GNOME 46, 50.1 and 51. Unit
+regressions and lint passed, and the final ZIP installed and ran for 8 seconds
+in an isolated Shell. Sampling CPU/RAM overhead was not re-profiled.
+
+The final header uses preferred-height reservation updated on style changes,
+which avoids changing layout during allocation. Hover and drag only switch
+the existing chart histories when the selected span changes.

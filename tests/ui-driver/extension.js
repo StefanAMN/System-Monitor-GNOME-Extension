@@ -187,6 +187,10 @@ async function dragInWindow(metaWindow, x1, y1, x2, y2) {
 // finished: a click sent while the content still moves lands elsewhere
 // (seen in the slower compat containers).
 async function scrollIntoView(rp, actor) {
+    if (!rp._menuViewport.contains(actor)) {
+        await sleep(400);
+        return;
+    }
     ensureActorVisibleInScrollView(rp._scrollView, actor);
     const adj = rp._scrollView.vadjustment ?? rp._scrollView.get_vscroll_bar?.()?.get_adjustment();
     let last = NaN;
@@ -207,7 +211,6 @@ async function chooseChartRange(rp, range, offset = 0) {
     if (rp._range !== range || offset) {
         const { RANGES } = await import(`file://${Main.extensionManager.lookup(TARGET).path}/lib/engine/longhistory.js`);
         const stops = Object.keys(RANGES);
-        const before = rp._range;
         const [x, y] = slider.get_transformed_position();
         const [w, h] = slider.get_transformed_size();
         const radius = slider.get_theme_node().get_length('-slider-handle-radius');
@@ -224,7 +227,8 @@ async function chooseChartRange(rp, range, offset = 0) {
                 move(from + (to - from) * i / 6);
                 await sleep(40);
             }
-            check(rp._range === before && rp._rangeDragging, 'range: the chart changed before drag release');
+            check(rp._range === range && rp._rangeDragging, 'range: the chart did not change during dragging');
+            check(rp._netRxSparkline.spanLabel === (RANGES[range]?.label ?? rp._spanLabel), 'range: chart span did not update during dragging');
             releasePosition = slider.value;
         } finally {
             pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
@@ -613,7 +617,7 @@ async function panelKeyboard(rp) {
     const card = rp._summaryCards.cpu.box;
     card.grab_key_focus();
     await pressKey(Clutter.KEY_Return);
-    check(rp._activeTab === 'cpu' && focusWithin(rp._detailArea), `keyboard: Return on the CPU card gave '${rp._activeTab}' with the focus elsewhere`);
+    check(rp._activeTab === 'cpu' && (focusWithin(rp._detailHeader) || focusWithin(rp._detailArea)), `keyboard: Return on the CPU card gave '${rp._activeTab}' with the focus elsewhere`);
     await pressKey(Clutter.KEY_BackSpace);
     check(rp._activeTab === 'overview' && rp._indicator.menu.isOpen && focusWithin(rp._overviewPage),
         `keyboard: Backspace left the tab at '${rp._activeTab}', focus ${focusWithin(rp._overviewPage) ? 'kept' : 'lost'}`);
@@ -631,15 +635,15 @@ async function panelSizeFollows(rp) {
     // second make likely.
     rp._indicator.menu.open();
     await sleep(600);
-    const auto = Math.round(rp._menuViewport.allocation.get_width());
+    const auto = Math.round(rp._panelFrame.allocation.get_width());
     s.set_int('menu-custom-width', 460);
     s.set_int('menu-custom-height', 600);
     await sleep(800);
-    check(Math.round(rp._menuViewport.allocation.get_width()) === 460, `panel size: ${Math.round(rp._menuViewport.allocation.get_width())} px wide after a stored 460`);
+    check(Math.round(rp._panelFrame.allocation.get_width()) === 460, `panel size: ${Math.round(rp._panelFrame.allocation.get_width())} px wide after a stored 460`);
     s.set_int('menu-custom-width', 0);
     s.set_int('menu-custom-height', 0);
     await sleep(800);
-    check(Math.round(rp._menuViewport.allocation.get_width()) === auto, `panel size: ${Math.round(rp._menuViewport.allocation.get_width())} px after a reset, ${auto} before`);
+    check(Math.round(rp._panelFrame.allocation.get_width()) === auto, `panel size: ${Math.round(rp._panelFrame.allocation.get_width())} px after a reset, ${auto} before`);
     rp._indicator.menu.close();
     await sleep(400);
 }
@@ -681,10 +685,11 @@ function a11yNodes(tree, out = []) {
     return out;
 }
 
-// Interactive (reactive, so 'sensitive') objects a screen reader would
-// reach without a name; labels are named by their text.
+// Controls need names. Structural panels inherit sensitive/focusable states
+// in St's AT-SPI tree even when they offer no interaction.
 function a11yUnnamed(tree) {
-    return a11yNodes(tree).filter(n => n.showing && n.sensitive && !n.name && n.role !== 'label' && n.role !== 'text')
+    return a11yNodes(tree).filter(n => n.showing && n.sensitive && !n.name &&
+        !['label', 'text', 'panel'].includes(n.role))
         .map(n => n.role);
 }
 
@@ -756,7 +761,7 @@ async function screenReader(rp) {
         nodes = a11yNodes(panel);
         check(a11yUnnamed(panel).length === 0, `a11y: unnamed on the CPU page: ${a11yUnnamed(panel).join(', ')}`);
         const toggles = nodes.filter(n => n.showing && n.role === 'toggle button');
-        check(toggles.length === 3 && toggles.filter(n => n.checked).length === 1, `a11y: range toggles ${toggles.map(n => `${n.name}${n.checked ? ' (checked)' : ''}`).join(', ')}`);
+        check(toggles.length === 1 && toggles[0].name.startsWith('Chart range:'), `a11y: range toggles ${toggles.map(n => `${n.name}${n.checked ? ' (checked)' : ''}`).join(', ')}`);
         const rows = rp._procWidgets.filter(w => w.item.visible);
         const items = nodes.filter(n => n.showing && n.role === 'list item');
         check(rows.length > 0 && items.length === rows.length, `a11y: ${items.length} process list items offered for ${rows.length} rows`);
@@ -1680,6 +1685,12 @@ async function componentChartHistory(rp) {
             'range: Return did not open and focus the slider');
         await pressKey(Clutter.KEY_Right);
         check(rp._range === 'threeMinutes', `range: arrow selected ${rp._range} instead of 3m`);
+        const [sx, sy] = rp._rangeSlider.get_transformed_position();
+        const [sw, sh] = rp._rangeSlider.get_transformed_size();
+        pointer.notify_absolute_motion(GLib.get_monotonic_time(), sx + sw - 1, sy + sh / 2);
+        await sleep(200);
+        check(rp._range === 'day' && rp._memSparkline.spanLabel === '24h' && !rp._rangeDragging,
+            'range: hovering without pressing did not update the chart');
         await pressKey(Clutter.KEY_BackSpace);
         const position = await chooseChartRange(rp, 'tenMinutes', 0.019);
         await click(rp._detailRangeBox);
@@ -2574,7 +2585,50 @@ async function translationCoverage(rp) {
     console.log(`RP-UITEST coverage: ${lines.join(' | ')}`);
 }
 
+async function fixedDetailHeader(rp) {
+    pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    Main.overview.hide();
+    await sleep(700);
+    const keys = ['menu-custom-width', 'menu-custom-height'];
+    const saved = keys.map(key => rp._settings.get_int(key));
+    try {
+        rp._settings.set_int(keys[0], 400);
+        rp._settings.set_int(keys[1], 320);
+        await clickActor(rp._indicator);
+        if (rp._activeTab !== 'overview') await clickActor(rp._detailBackBtn);
+        for (const tab of [...TABS.slice(1), 'incidents']) {
+            const entry = tab === 'incidents' ? rp._incidentEntryButton : rp._summaryCards[tab].box;
+            await scrollIntoView(rp, entry);
+            await clickActor(entry);
+            check(rp._activeTab === tab, `header: failed to open ${tab}`);
+            const [, beforeY] = rp._detailBackBtn.get_transformed_position();
+            const [x, y] = rp._scrollView.get_transformed_position();
+            const [w, h] = rp._scrollView.get_transformed_size();
+            check(beforeY + rp._detailBackBtn.height <= y + 1, `header: ${tab} overlaps the scrolling body`);
+            pointer.notify_absolute_motion(GLib.get_monotonic_time(), x + w / 2, y + h * 0.7);
+            for (let i = 0; i < 12; i++) {
+                pointer.notify_discrete_scroll(GLib.get_monotonic_time(), Clutter.ScrollDirection.DOWN, Clutter.ScrollSource.WHEEL);
+                await sleep(60);
+            }
+            await sleep(400);
+            const [, afterY] = rp._detailBackBtn.get_transformed_position();
+            check(Math.abs(beforeY - afterY) < 1, `header: ${tab} back button scrolled from ${beforeY} to ${afterY}`);
+            await shot(`header-scrolled-${tab}`);
+            await clickActor(rp._detailBackBtn);
+            check(rp._activeTab === 'overview', `header: ${tab} back button cannot be clicked after scrolling`);
+        }
+        await clickActor(rp._indicator);
+        console.log('RP-UITEST header: every component back button stays clickable after pointer scrolling');
+    } finally {
+        keys.forEach((key, i) => rp._settings.set_int(key, saved[i]));
+    }
+}
+
 async function run() {
+    if (GLib.getenv('RP_UI_HEADER_ONLY') === '1') {
+        await fixedDetailHeader(Main.extensionManager.lookup(TARGET).stateObj);
+        return;
+    }
     if (GLib.getenv('RP_UI_BACKUP_ONLY') === '1') {
         const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
         check(rp?._indicator, 'target extension not enabled');
@@ -2585,6 +2639,7 @@ async function run() {
         const rp = Main.extensionManager.lookup(TARGET)?.stateObj;
         check(rp?._indicator, 'target extension not enabled');
         await componentChartHistory(rp);
+        await fixedDetailHeader(rp);
         return;
     }
     if (GLib.getenv('RP_UI_TRACKING_ONLY') === '1') {
@@ -2672,6 +2727,12 @@ async function run() {
         check(kids.filter(k => k.style_class === 'resource-pulse-divider' && k.width > 0).length === 7, 'top-bar dividers missing');
     }
     await topBarFits(ext.stateObj);
+    if (GLib.getenv('RP_UI_A11Y_ONLY') === '1') {
+        Main.overview.hide();
+        await sleep(700);
+        await screenReader(ext.stateObj);
+        return;
+    }
 
     // Pages are built on first visit, not in enable().
     check(Object.keys(ext.stateObj._detailSections).length === 0, 'detail pages were built eagerly');
@@ -2710,6 +2771,7 @@ async function run() {
     await severalBatteries(ext.stateObj);
     await batteryTracking(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
+    await fixedDetailHeader(ext.stateObj);
     await screenReader(ext.stateObj);
     await independentCollectors(ext.stateObj);
     await stuckCollector(ext.stateObj);

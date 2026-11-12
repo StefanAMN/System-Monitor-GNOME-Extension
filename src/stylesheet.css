@@ -715,3 +715,8 @@
     padding: 4px 10px;
     border-radius: 8px;
 }
+
+/* The detail navigation sits above the scrolling body. */
+.rp-panel-frame { background-color: #1e1e1e; border-radius: 14px; }
+.rp-light .rp-panel-frame { background-color: #f6f5f4; }
+.rp-fixed-detail-header { padding: 16px 16px 0; margin-bottom: 0; }

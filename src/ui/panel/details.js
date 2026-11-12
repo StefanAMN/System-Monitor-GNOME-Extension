@@ -87,7 +87,19 @@ export class DetailsMethods {
         this._addClickAnimations(optBtn);
         this._detailHeader.add_child(optBtn);
 
-        this._detailArea.add_child(this._detailHeader);
+        this._detailHeader.add_style_class_name('rp-fixed-detail-header');
+        // Paint the fixed header after the scroller. Older Shells otherwise
+        // target pointer events at the content extending above its viewport.
+        this._detailHeader.y_align = Clutter.ActorAlign.START;
+        this._detailHeader.x_expand = true;
+        this._detailHeader.y_expand = true;
+        this._detailHeaderSpace = new St.Widget();
+        this._detailHeader.connect('style-changed', () => {
+            this._detailHeaderSpace.height = this._detailHeader.get_preferred_height(-1)[1];
+        });
+        this._panelFrame.insert_child_at_index(this._detailHeaderSpace, 0);
+        this._popupStack.add_child(this._detailHeader);
+        this._detailHeaderSpace.height = this._detailHeader.get_preferred_height(-1)[1];
         this._sampleStatusLabel = new St.Label({ style_class: 'rp-muted', visible: false, x_expand: true });
         this._sampleStatusLabel.clutter_text.line_wrap = true;
         this._detailArea.add_child(this._sampleStatusLabel);
@@ -141,12 +153,22 @@ export class DetailsMethods {
         limits.add_child(this._rangeMax);
         control.add_child(limits);
 
+        slider.connect('motion-event', (_actor, event) => {
+            if (!control.visible || this._rangeDragging) return Clutter.EVENT_PROPAGATE;
+            const [ok, x] = slider.transform_stage_point(...event.get_coords());
+            if (!ok) return Clutter.EVENT_PROPAGATE;
+            const radius = slider.get_theme_node().get_length('-slider-handle-radius');
+            const width = slider.width - 2 * radius;
+            if (width <= 0) return Clutter.EVENT_PROPAGATE;
+            const fraction = Math.max(0, Math.min(1, (x - radius) / width));
+            slider.value = slider.get_text_direction() === Clutter.TextDirection.RTL ? 1 - fraction : fraction;
+            return Clutter.EVENT_PROPAGATE;
+        });
         slider.connect('drag-begin', () => { this._rangeDragging = true; });
         slider.connect('notify::value', () => {
             if (!control.visible || this._rangeSliderSyncing) return;
             const index = Math.round(slider.value * LAST_RANGE);
-            if (this._rangeDragging) this._showRangeValue(RANGE_ORDER[index]);
-            else this._selectChartRange(index, slider.value);
+            this._selectChartRange(index, slider.value);
         });
         slider.connect('drag-end', () => {
             this._rangeDragging = false;
@@ -166,6 +188,7 @@ export class DetailsMethods {
             return;
         }
         this._range = range;
+        this._showRangeValue(range);
         this._applyRange();
     }
 
@@ -208,7 +231,7 @@ export class DetailsMethods {
     /** Whether the keyboard focus is on something inside the panel. */
     _focusInPanel() {
         const focus = global.stage.get_key_focus();
-        return !!focus && this._menuContainer.contains(focus);
+        return !!focus && this._popupStack.contains(focus);
     }
 
     _updateTabVisibility() {
@@ -226,6 +249,8 @@ export class DetailsMethods {
         // the visible tab: fetch it now instead of after up to one interval.
         // _poll() itself coalesces bursts (keyboard navigation, re-renders).
         if (this._menuOpen && this._activeTab !== 'incidents') this._poll();
+        this._detailHeader.visible = this._activeTab !== 'overview';
+        this._detailHeaderSpace.visible = this._detailHeader.visible;
         if (this._activeTab === 'overview') {
             if (!this._overviewPage.visible) {
                 this._overviewPage.opacity = 0;
@@ -272,6 +297,6 @@ export class DetailsMethods {
         // Hiding the page that held the keyboard focus drops the focus;
         // hand it to the page now shown so a keyboard user keeps their place.
         if (hadFocus && !this._focusInPanel())
-            this._menuContainer.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
+            this._popupStack.navigate_focus(null, St.DirectionType.TAB_FORWARD, false);
     }
 }

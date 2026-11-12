@@ -37,10 +37,10 @@ export class SizingMethods {
                 this._menuViewport.height = -1;
                 this._menuViewport.style = `width: ${defaultWidth}px; min-width: ${defaultWidth}px; max-width: ${defaultWidth}px;`;
             }
-            if (this._scrollView) {
-                this._scrollView.width = defaultWidth;
-                this._scrollView.height = -1;
-                this._scrollView.style = `width: ${defaultWidth}px; max-height: ${defaultMaxHeight}px;`;
+            if (this._panelFrame) {
+                this._panelFrame.width = defaultWidth;
+                this._panelFrame.height = -1;
+                this._panelFrame.style = `width: ${defaultWidth}px; max-height: ${defaultMaxHeight}px;`;
             }
             if (this._popupStack) {
                 this._popupStack.width = defaultWidth;
@@ -86,12 +86,12 @@ export class SizingMethods {
         this._currentHeight = h;
         if (this._menuViewport) {
             this._menuViewport.width = w;
-            this._menuViewport.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px; min-height: ${h}px;`;
+            this._menuViewport.style = `width: ${w}px; min-width: ${w}px; max-width: ${w}px;`;
         }
-        if (this._scrollView) {
-            this._scrollView.width = w;
-            this._scrollView.height = h;
-            this._scrollView.style = `width: ${w}px; height: ${h}px; min-height: ${h}px; max-height: ${h}px;`;
+        if (this._panelFrame) {
+            this._panelFrame.width = w;
+            this._panelFrame.height = h;
+            this._panelFrame.style = `width: ${w}px; height: ${h}px; min-height: ${h}px; max-height: ${h}px;`;
         }
         if (this._popupStack) {
             this._popupStack.width = w;

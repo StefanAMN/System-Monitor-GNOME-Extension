@@ -228,6 +228,8 @@ export default class ResourcePulseExtension extends Extension {
         // (Tab, arrow keys) only descends through St widgets.
         this._popupStack = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
+            reactive: true,
+            accessible_name: _('Resource Pulse panel'),
             x_expand: true,
             y_expand: true
         });
@@ -243,14 +245,15 @@ export default class ResourcePulseExtension extends Extension {
         this._menuContainer = new St.BoxLayout({
             ...VERTICAL,
             style_class: 'resource-pulse-menu-section',
-            accessible_name: _('Resource Pulse panel'),
             reactive: true,
             x_expand: true,
             y_expand: true
         });
 
         // Keyboard navigation inside dropdown menu
-        this._menuContainer.connect('key-press-event', (actor, event) => {
+        this._panelFrame = new St.BoxLayout({ ...VERTICAL, x_expand: true, y_expand: true,
+            style_class: 'rp-panel-frame', reactive: true });
+        this._popupStack.connect('key-press-event', (actor, event) => {
             const symbol = event.get_key_symbol();
             if (symbol === Clutter.KEY_BackSpace && this._rangeControl?.visible) {
                 this._showRangeSlider(false, true);
@@ -288,7 +291,8 @@ export default class ResourcePulseExtension extends Extension {
         this._menuViewport = new St.BoxLayout({ ...VERTICAL, x_expand: true, y_expand: true });
         this._menuViewport.add_child(this._menuContainer);
         this._scrollView.add_child(this._menuViewport);
-        this._popupStack.add_child(this._scrollView);
+        this._panelFrame.add_child(this._scrollView);
+        this._popupStack.add_child(this._panelFrame);
 
         // Build Corner Resize Handles
         this._buildCornerResizeHandles();
