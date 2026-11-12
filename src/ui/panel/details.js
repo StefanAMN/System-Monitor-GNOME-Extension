@@ -153,17 +153,6 @@ export class DetailsMethods {
         limits.add_child(this._rangeMax);
         control.add_child(limits);
 
-        slider.connect('motion-event', (_actor, event) => {
-            if (!control.visible || this._rangeDragging) return Clutter.EVENT_PROPAGATE;
-            const [ok, x] = slider.transform_stage_point(...event.get_coords());
-            if (!ok) return Clutter.EVENT_PROPAGATE;
-            const radius = slider.get_theme_node().get_length('-slider-handle-radius');
-            const width = slider.width - 2 * radius;
-            if (width <= 0) return Clutter.EVENT_PROPAGATE;
-            const fraction = Math.max(0, Math.min(1, (x - radius) / width));
-            slider.value = slider.get_text_direction() === Clutter.TextDirection.RTL ? 1 - fraction : fraction;
-            return Clutter.EVENT_PROPAGATE;
-        });
         slider.connect('drag-begin', () => { this._rangeDragging = true; });
         slider.connect('notify::value', () => {
             if (!control.visible || this._rangeSliderSyncing) return;

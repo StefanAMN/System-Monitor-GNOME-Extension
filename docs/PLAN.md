@@ -2074,3 +2074,20 @@ in an isolated Shell. Sampling CPU/RAM overhead was not re-profiled.
 The final header uses preferred-height reservation updated on style changes,
 which avoids changing layout during allocation. Hover and drag only switch
 the existing chart histories when the selected span changes.
+
+
+## Drag-only chart range feedback
+
+Remove the pointer-hover handler while retaining live range updates from the
+native slider during a pressed drag. This is confined to the GNOME Shell
+presentation layer and adds no collection work. Verify with compositor input
+that hovering leaves the range and thumb unchanged, that dragging updates the
+chart before release, and that release/reopening retains the thumb position.
+Run the focused chart/header tests on GNOME 46, 50.1 and 51, unit regressions,
+lint and the ZIP install check. The UI-driver snapshot is stored at
+/tmp/rp-ui-driver-before-drag-only.js.
+
+Verified on GNOME 46, 50.1 and 51 with real pointer events. Unpressed hover
+preserved the thumb and chart range, and all 17 spans updated during dragging
+before release. Fixed-header navigation checks also passed. Unit regressions,
+lint and the isolated ZIP install passed. CPU/RAM overhead was not re-profiled.

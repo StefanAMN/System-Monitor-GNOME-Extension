@@ -1685,12 +1685,14 @@ async function componentChartHistory(rp) {
             'range: Return did not open and focus the slider');
         await pressKey(Clutter.KEY_Right);
         check(rp._range === 'threeMinutes', `range: arrow selected ${rp._range} instead of 3m`);
+        const beforeHover = rp._rangeSlider.value;
         const [sx, sy] = rp._rangeSlider.get_transformed_position();
         const [sw, sh] = rp._rangeSlider.get_transformed_size();
         pointer.notify_absolute_motion(GLib.get_monotonic_time(), sx + sw - 1, sy + sh / 2);
         await sleep(200);
-        check(rp._range === 'day' && rp._memSparkline.spanLabel === '24h' && !rp._rangeDragging,
-            'range: hovering without pressing did not update the chart');
+        check(rp._range === 'threeMinutes' && rp._memSparkline.spanLabel === '3m' &&
+            rp._rangeSlider.value === beforeHover && !rp._rangeDragging,
+            'range: hovering without pressing changed the range or thumb');
         await pressKey(Clutter.KEY_BackSpace);
         const position = await chooseChartRange(rp, 'tenMinutes', 0.019);
         await click(rp._detailRangeBox);
