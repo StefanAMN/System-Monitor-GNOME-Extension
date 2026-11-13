@@ -2091,3 +2091,16 @@ Verified on GNOME 46, 50.1 and 51 with real pointer events. Unpressed hover
 preserved the thumb and chart range, and all 17 spans updated during dragging
 before release. Fixed-header navigation checks also passed. Unit regressions,
 lint and the isolated ZIP install passed. CPU/RAM overhead was not re-profiled.
+
+
+## Remove top-panel smoothing hint
+
+Remove the smoothing sentence appended to top-panel hover text and its unused
+metric set. Refresh the translation template. Verify the remaining tooltip
+with the existing compositor-driven top-bar hover check, and run lint,
+translation coverage and the ZIP install check.
+
+Verified with real pointer hover in GNOME 50.1. The top-bar tooltip and
+accessibility checks passed, translation coverage passed across 10 panel
+pages and preferences, lint passed, and the ZIP installed and ran for 8 s.
+This text-only change was not separately profiled for CPU or RAM usage.

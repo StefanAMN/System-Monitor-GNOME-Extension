@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-09 15:05+0200\n"
+"POT-Creation-Date: 2026-11-13 08:01+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
-#: src/extension.js:246
+#: src/extension.js:232
 msgid "Resource Pulse panel"
 msgstr ""
 
@@ -123,7 +123,7 @@ msgstr ""
 
 #. Translators: hours and minutes of battery left, kept short for the top bar.
 #: src/lib/common/format.js:47 src/lib/common/format.js:54
-#: src/ui/panel/topbar.js:294
+#: src/ui/panel/topbar.js:290
 msgid "{h}h {m}m"
 msgstr ""
 
@@ -290,7 +290,7 @@ msgstr ""
 #: src/ui/panel/constants.js:20 src/ui/panel/constants.js:62
 #: src/ui/panel/details.js:41 src/ui/panel/details.js:68
 #: src/ui/panel/overview.js:631 src/ui/panel/pages/incidents.js:22
-#: src/ui/panel/topbar.js:213
+#: src/ui/panel/topbar.js:211
 msgid "CPU"
 msgstr ""
 
@@ -472,7 +472,7 @@ msgstr ""
 msgid "Gigabytes (GB)"
 msgstr ""
 
-#: src/lib/common/settingsmodel.js:109 src/ui/panel/topbar.js:32
+#: src/lib/common/settingsmodel.js:109 src/ui/panel/topbar.js:30
 msgid "Alerts"
 msgstr ""
 
@@ -1348,11 +1348,11 @@ msgstr ""
 msgid "Idle"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:229
+#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:227
 msgid "{time} left"
 msgstr ""
 
-#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:229
+#: src/ui/panel/dashboard.js:118 src/ui/panel/topbar.js:227
 msgid "{time} to full"
 msgstr ""
 
@@ -1424,11 +1424,11 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
-#: src/ui/panel/details.js:138 src/ui/panel/details.js:174
+#: src/ui/panel/details.js:150 src/ui/panel/details.js:186
 msgid "Live"
 msgstr ""
 
-#: src/ui/panel/details.js:177
+#: src/ui/panel/details.js:189
 msgid "Chart range: {span}"
 msgstr ""
 
@@ -2119,80 +2119,76 @@ msgstr ""
 msgid "Resize the panel"
 msgstr ""
 
-#: src/ui/panel/topbar.js:116
+#: src/ui/panel/topbar.js:114
 msgid "{metric}: {value}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:213
+#: src/ui/panel/topbar.js:211
 msgid "Load: {load}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:214
+#: src/ui/panel/topbar.js:212
 msgid "Freq: {frequency}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:220
+#: src/ui/panel/topbar.js:218
 msgid ""
 "Used: {used} / {total}\n"
 "Available: {available}\n"
 "Swap: {swap}%"
 msgstr ""
 
-#: src/ui/panel/topbar.js:224
+#: src/ui/panel/topbar.js:222
 msgid ""
 "Battery not available\n"
 "No battery was detected."
 msgstr ""
 
-#: src/ui/panel/topbar.js:230
+#: src/ui/panel/topbar.js:228
 msgid ""
 "Battery: {percent}% ({state})\n"
 "Health: {health}% · Rate: {rate}W"
 msgstr ""
 
-#: src/ui/panel/topbar.js:238
+#: src/ui/panel/topbar.js:236
 msgid "Power draw not available"
 msgstr ""
 
-#: src/ui/panel/topbar.js:240
+#: src/ui/panel/topbar.js:238
 msgid "n/a on AC"
 msgstr ""
 
-#: src/ui/panel/topbar.js:241
+#: src/ui/panel/topbar.js:239
 msgid ""
 "System Draw: {system}\n"
 "CPU Package: {package}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:247
+#: src/ui/panel/topbar.js:245
 msgid ""
 "Space used on /: {percent}% ({free} free)\n"
 "Busy: {busy}% · Read {read} · Write {write}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:255
+#: src/ui/panel/topbar.js:253
 msgid ""
 "Download: {down}\n"
 "Upload: {up}\n"
 "Session: ↓ {sessionDown}  ↑ {sessionUp}"
 msgstr ""
 
-#: src/ui/panel/topbar.js:259
+#: src/ui/panel/topbar.js:257
 msgid "Fan: {rpm} RPM"
 msgstr ""
 
-#: src/ui/panel/topbar.js:261
+#: src/ui/panel/topbar.js:259
 msgid ""
 "Temperature not available\n"
 "No readable hwmon or thermal-zone sensor was found."
 msgstr ""
 
-#: src/ui/panel/topbar.js:262
+#: src/ui/panel/topbar.js:260
 msgid "Package Temp: {temp}"
-msgstr ""
-
-#: src/ui/panel/topbar.js:271
-msgid "10 s average · turn off Smooth changes for immediate readings"
 msgstr ""
 
 #: src/ui/panel/widgets.js:426

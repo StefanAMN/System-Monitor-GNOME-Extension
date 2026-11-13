@@ -12,8 +12,6 @@ import { _, fill } from '../../lib/common/i18n.js';
 import { formatBytes, formatSpeed, formatSpeedCompact, formatTemp, formatDuration, batteryStateLabel } from '../../lib/common/format.js';
 import { TOP_BAR_FIT_MARGIN_PX, METRIC_NAMES } from './constants.js';
 
-const AVERAGED_METRICS = new Set(['cpu', 'gpu', 'power', 'disk', 'network']);
-
 export class TopbarMethods {
     _rebuildTopBar() {
         this._indicatorBox.destroy_all_children();
@@ -267,8 +265,6 @@ export class TopbarMethods {
                 widget.sampleNote = sampleNote(data, key, now);
                 widget.box.opacity = widget.sampleNote ? 160 : 255;
                 if (widget.sampleNote) this._tooltipTexts[key] += `\n${widget.sampleNote}`;
-                if (this._smoothOn() && AVERAGED_METRICS.has(key))
-                    this._tooltipTexts[key] += `\n${_('10 s average · turn off Smooth changes for immediate readings')}`;
             }
         }
 
