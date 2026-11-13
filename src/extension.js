@@ -242,6 +242,16 @@ export default class ResourcePulseExtension extends Extension {
             y_expand: true
         });
 
+        // Older Shells expose unnamed native scrollbar thumbs as buttons.
+        for (const [bar, name] of [
+            [this._scrollView.get_hscroll_bar?.(), _('Scroll horizontally')],
+            [this._scrollView.get_vscroll_bar?.(), _('Scroll vertically')],
+        ]) {
+            for (const child of bar?.get_children() ?? []) {
+                if (child instanceof St.Button && !child.accessible_name) child.accessible_name = name;
+            }
+        }
+
         this._menuContainer = new St.BoxLayout({
             ...VERTICAL,
             style_class: 'resource-pulse-menu-section',

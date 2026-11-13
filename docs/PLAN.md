@@ -2177,3 +2177,24 @@ Remote acceptance requires the check job, GNOME 46–51 compatibility jobs and
 Memory soak for the exact pushed SHA to complete successfully. Use gh run
 list --commit <SHA> and gh run watch <RUN_ID> --exit-status, inspect failed
 job logs and artifacts, and repeat verification for any corrective push.
+
+
+The first corrective remote run passed the navigation checkpoint and exposed
+native scrollbar thumbs named as anonymous buttons on GNOME 46–48. The
+AT-SPI tree places both controls under the ScrollView's native scrollbars.
+Give those thumbs localized horizontal/vertical scroll names when the older
+scrollbar API is available, keeping the unnamed-control assertion strict.
+
+GNOME 47 also reported 64% busy for the Xe residency fixture. The sampler
+uses measured elapsed time correctly, while the test assumed its 400 ms
+sleep would complete within about 500 ms. Verify the fixture against its
+actual recorded monotonic timestamps so scheduling delays remain meaningful.
+UI and unit snapshots precede this work in /tmp/rp-ui-before-a11y-ci.js and
+/tmp/rp-unit-before-ci-xe.js.
+
+The older-Shell accessibility reproduction now passes on GNOME 46, and the
+same check passes on GNOME 51. The delayed Xe case reproduced at 75% with
+the old assertion and passes with measured timestamps. All unit suites pass
+on the host and GNOME 47; lint and the isolated ZIP install also pass. The
+failed intermediate workflow was cancelled after preserving its artifacts;
+verify the complete CI run for this follow-up push against the criteria above.

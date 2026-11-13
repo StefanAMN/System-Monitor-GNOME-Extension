@@ -1142,11 +1142,13 @@ const sleep = ms => new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms,
         Gio.File.new_for_path(`${sys}/class/drm/card0/device`).make_symbolic_link('../../../devices/pci0000:00/0000:00:02.0', null);
         const sampler = new GpuSampler(sys);
         await sampler.sample();
-        await sleep(400);
-        // 200 ms asleep out of about 400: the elapsed time is measured, so a range.
+        const startUs = sampler._cards[0].prevRc6Time;
+        await sleep(800);
         put('tile0/gt0/gtidle/idle_residency_ms', 1200);
         const r = await sampler.sample();
-        ok(r.percent >= 30 && r.percent <= 60, `gpu xe: load from the idle residency (${r.percent} %)`);
+        // Runner delays change the valid busy percentage for a fixed idle delta.
+        const elapsedMs = (sampler._cards[0].prevRc6Time - startUs) / 1000;
+        eq(r.percent, Math.round(100 * (1 - 200 / elapsedMs)), 'gpu xe: load uses measured time across delayed reads');
         eq([r.driver, r.clock, r.maxClock, r.temp], ['xe', 1950, 2050, 47], 'gpu xe: named by its driver, with its clocks and package temperature');
         GLib.spawn_command_line_sync(`rm -rf ${sys}`);
     }
