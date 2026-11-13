@@ -2132,3 +2132,48 @@ short-panel scrolling and fixed detail navigation. Default-monitor hover
 and accessibility checks, unit regressions, lint, shell syntax and ZIP install
 checks also passed. Sampling CPU/RAM overhead was not re-profiled.
 Reproduce with RP_UI_MONITOR=1280x1000 RP_UI_OVERVIEW_HEIGHT_ONLY=1 ./scripts/dev.sh test-ui.
+
+
+## Repair recent CI regressions and verify remote runs
+
+Audit failed Actions runs since the last green commit, group distinct errors,
+and reproduce them with the same container commands as CI. Fix the underlying
+UI, test or lifecycle issues within their existing layers. Preserve sampling
+cadence, bounded histories and unprivileged collector behavior. Snapshot any
+test rigs before modifying them. Prove each fix with its failing case, then
+run the affected compatibility suites and watch the pushed commit's complete
+CI matrix and memory soak to their terminal results.
+
+
+Artifacts from the first failing run (42618958231) and the compact-slider
+run (42622783193) show the obsolete three-toggle accessibility assertion.
+That assertion was already fixed before this audit. The latest six Shell
+jobs all fail in fixedDetailHeader after CPU and Memory, when the Battery
+card is hidden on the runner. The missing-battery fixture reproduced that
+failure locally. Navigate to hidden-hardware pages with real arrow keys
+from the CPU page and keep the back-button assertions for every tab.
+The UI-driver snapshot is /tmp/rp-ui-before-ci-repair.js.
+
+The local missing-battery reproduction passed after keyboard navigation was
+added, but the GNOME 51 fixture run still clicked a card that became hidden
+during its scroll wait. The pre-fixture battery poll could finish after the
+fixture was installed. This is test synchronization: wait for a completed
+missing-battery snapshot with no poll in flight before starting navigation.
+
+Two standalone GNOME 51 probes failed before the first CPU click. The kept
+screenshot shows Activities still open: a newly created virtual pointer
+starts in its hot corner. Move that pointer onto the desktop before hiding
+Activities and wait for its animation to finish, as the other focused UI
+routes already do. Keep the fixture-settling check as an explicit precondition.
+
+Local verification passed: the missing-battery header test on the host and
+GNOME 46, the corrected standalone startup/header test on GNOME 51, lint and
+all unit suites. The unit churn check kept file descriptors at 12 before and
+after. The normal full UI suite now installs the missing-battery fixture,
+so laptops also exercise the runner's absent-hardware case. No production
+sampler or UI behavior changes are required by the failures found so far.
+
+Remote acceptance requires the check job, GNOME 46–51 compatibility jobs and
+Memory soak for the exact pushed SHA to complete successfully. Use gh run
+list --commit <SHA> and gh run watch <RUN_ID> --exit-status, inspect failed
+job logs and artifacts, and repeat verification for any corrective push.

@@ -107,6 +107,7 @@ Whenever the user corrects an assumption, API usage, design choice, or performan
 
 ## Lessons
 <!-- Newest on top. Delete what no longer applies. -->
+- When pushing changes, inspect the CI run for the pushed commit, follow every required job through completion, and investigate failures before reporting the work complete.
 - When resizing the overview panel, let the metric grid absorb spare height so the hardware information card ends at the normal bottom padding.
 - When changing chart ranges with the pointer, update during a pressed drag only. Hovering over the rail must leave the thumb and range unchanged. Keep every detail page’s back button outside its scrolling content.
 - When refining the chart range slider, keep the component title visible, label both ends of the rail, and keep the thumb at the release position while offering finer history ranges.

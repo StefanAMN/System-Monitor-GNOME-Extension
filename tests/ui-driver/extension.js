@@ -2592,21 +2592,45 @@ async function translationCoverage(rp) {
     console.log(`RP-UITEST coverage: ${lines.join(' | ')}`);
 }
 
-async function fixedDetailHeader(rp) {
+async function fixedDetailHeader(rp, withoutBattery = false) {
     pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+    await sleep(300);
     Main.overview.hide();
-    await sleep(700);
+    for (let i = 0; i < 30 && (Main.overview.visible || Main.overview.animationInProgress); i++)
+        await sleep(100);
+    check(!Main.overview.visible, 'header: Activities did not close');
     const keys = ['menu-custom-width', 'menu-custom-height'];
     const saved = keys.map(key => rp._settings.get_int(key));
+    const batterySample = rp._bat.sample;
+    if (withoutBattery) {
+        rp._bat.sample = async (...args) => ({
+            ...await batterySample.apply(rp._bat, args), present: false, batteries: [],
+        });
+    }
     try {
+        if (withoutBattery) {
+            for (let i = 0; i < 80 && (rp._pollInFlight || rp._lastData?.bat?.present !== false); i++)
+                await sleep(100);
+            check(!rp._pollInFlight && rp._lastData?.bat?.present === false,
+                'header: missing-battery fixture did not settle');
+        }
         rp._settings.set_int(keys[0], 400);
         rp._settings.set_int(keys[1], 320);
         await clickActor(rp._indicator);
         if (rp._activeTab !== 'overview') await clickActor(rp._detailBackBtn);
         for (const tab of [...TABS.slice(1), 'incidents']) {
             const entry = tab === 'incidents' ? rp._incidentEntryButton : rp._summaryCards[tab].box;
-            await scrollIntoView(rp, entry);
-            await clickActor(entry);
+            if (entry.visible) {
+                await scrollIntoView(rp, entry);
+                await clickActor(entry);
+            } else {
+                // Hardware absent on CI still has a keyboard-accessible page.
+                await scrollIntoView(rp, rp._summaryCards.cpu.box);
+                await clickActor(rp._summaryCards.cpu.box);
+                rp._detailBackBtn.grab_key_focus();
+                for (let i = 1; i < TABS.indexOf(tab); i++) await pressKey(Clutter.KEY_Right);
+            }
             check(rp._activeTab === tab, `header: failed to open ${tab}`);
             const [, beforeY] = rp._detailBackBtn.get_transformed_position();
             const [x, y] = rp._scrollView.get_transformed_position();
@@ -2627,6 +2651,7 @@ async function fixedDetailHeader(rp) {
         await clickActor(rp._indicator);
         console.log('RP-UITEST header: every component back button stays clickable after pointer scrolling');
     } finally {
+        rp._bat.sample = batterySample;
         keys.forEach((key, i) => rp._settings.set_int(key, saved[i]));
     }
 }
@@ -2696,7 +2721,7 @@ async function run() {
         return;
     }
     if (GLib.getenv('RP_UI_HEADER_ONLY') === '1') {
-        await fixedDetailHeader(Main.extensionManager.lookup(TARGET).stateObj);
+        await fixedDetailHeader(Main.extensionManager.lookup(TARGET).stateObj, true);
         return;
     }
     if (GLib.getenv('RP_UI_BACKUP_ONLY') === '1') {
@@ -2841,7 +2866,7 @@ async function run() {
     await severalBatteries(ext.stateObj);
     await batteryTracking(ext.stateObj);
     await keyboardOpensCards(ext.stateObj);
-    await fixedDetailHeader(ext.stateObj);
+    await fixedDetailHeader(ext.stateObj, true);
     await screenReader(ext.stateObj);
     await independentCollectors(ext.stateObj);
     await stuckCollector(ext.stateObj);
