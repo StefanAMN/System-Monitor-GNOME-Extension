@@ -243,11 +243,11 @@ export default class ResourcePulseExtension extends Extension {
         });
 
         // Older Shells expose unnamed native scrollbar thumbs as buttons.
-        for (const [bar, name] of [
-            [this._scrollView.get_hscroll_bar?.(), _('Scroll horizontally')],
-            [this._scrollView.get_vscroll_bar?.(), _('Scroll vertically')],
-        ]) {
-            for (const child of bar?.get_children() ?? []) {
+        for (const bar of this._scrollView.get_children()) {
+            if (!(bar instanceof St.ScrollBar)) continue;
+            const vertical = bar.orientation === Clutter.Orientation.VERTICAL || bar.vertical === true;
+            const name = vertical ? _('Scroll vertically') : _('Scroll horizontally');
+            for (const child of bar.get_children()) {
                 if (child instanceof St.Button && !child.accessible_name) child.accessible_name = name;
             }
         }

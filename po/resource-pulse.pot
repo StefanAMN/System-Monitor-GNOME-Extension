@@ -9,7 +9,7 @@ msgstr ""
 "Project-Id-Version: Resource Pulse\n"
 "Report-Msgid-Bugs-To: https://github.com/StefanAMN/System-Monitor-GNOME-"
 "Extension/issues\n"
-"POT-Creation-Date: 2026-11-13 22:01+0200\n"
+"POT-Creation-Date: 2026-11-13 22:18+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -23,11 +23,11 @@ msgstr ""
 msgid "Resource Pulse panel"
 msgstr ""
 
-#: src/extension.js:247
+#: src/extension.js:249
 msgid "Scroll horizontally"
 msgstr ""
 
-#: src/extension.js:248
+#: src/extension.js:249
 msgid "Scroll vertically"
 msgstr ""
 

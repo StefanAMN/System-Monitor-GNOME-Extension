@@ -2198,3 +2198,16 @@ the old assertion and passes with measured timestamps. All unit suites pass
 on the host and GNOME 47; lint and the isolated ZIP install also pass. The
 failed intermediate workflow was cancelled after preserving its artifacts;
 verify the complete CI run for this follow-up push against the criteria above.
+
+The next remote run exposed a GNOME 48 scrollbar API transition: ScrollView
+no longer exports get_hscroll_bar/get_vscroll_bar, although its native thumbs
+still need names. GNOME 46's ScrollBar exposes vertical; GNOME 48 exposes
+orientation. Inspecting those installed typelibs confirmed the mismatch.
+Use the ScrollView's native ScrollBar children and either orientation property,
+then verify accessibility on both sides of this API change before pushing.
+
+The native-child/orientation implementation passes focused accessibility
+checks on GNOME 46, 48 and 51. Lint and the installed-ZIP smoke check pass.
+The remaining compatibility jobs in the preceding run are still useful for
+exposing failures after the fixed navigation/accessibility checkpoints; watch
+those as well as the complete workflow for the next pushed head.
