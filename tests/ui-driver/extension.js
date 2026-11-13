@@ -356,7 +356,8 @@ function checkTheme(rp, light, label) {
 }
 
 // The overview is a grid: every visible card has the same size, whatever it
-// has to say, and every bar sits on the same line of its card.
+// has to say, allowing one pixel of rounding when spare height is divided
+// across rows. Every bar sits on the same line of its card.
 // A grid that stays uneven is a bug; one that evens out within 3 s is a
 // first layout still running on a slow runner (seen once on CI: the CPU
 // card at 92 px on the first open), noted in the log.
@@ -364,18 +365,22 @@ async function overviewGrid(rp, label) {
     const cards = Object.entries(rp._summaryCards).filter(([, card]) => card.box.visible);
     check(cards.length >= 6, `${label}: only ${cards.length} overview cards are visible`);
     const size = card => `${Math.round(card.box.width)}x${Math.round(card.box.height)}`;
+    const even = () => ['width', 'height'].every(axis => {
+        const lengths = cards.map(([, card]) => card.box[axis]);
+        return Math.max(...lengths) - Math.min(...lengths) <= 1;
+    });
     let sizes = new Set(cards.map(([, card]) => size(card)));
     let waited = 0;
-    for (; sizes.size > 1 && waited < 3000; waited += 250) {
+    for (; !even() && waited < 3000; waited += 250) {
         await sleep(250);
         sizes = new Set(cards.map(([, card]) => size(card)));
     }
-    if (waited > 0 && sizes.size === 1) console.log(`RP-UITEST ${label}: overview cards evened out after ${waited} ms`);
-    check(sizes.size === 1, `${label}: overview cards differ in size (${cards.map(([key, card]) => `${key} ${size(card)}`).join(', ')})`);
+    if (waited > 0 && even()) console.log(`RP-UITEST ${label}: overview cards evened out after ${waited} ms`);
+    check(even(), `${label}: overview cards differ in size (${cards.map(([key, card]) => `${key} ${size(card)}`).join(', ')})`);
     const barLine = card => Math.round(card.pbar.get_transformed_position()[1] - card.box.get_transformed_position()[1]);
     const lines = new Set(cards.map(([, card]) => barLine(card)));
-    check(lines.size === 1, `${label}: bars sit at different heights (${cards.map(([key, card]) => `${key} ${barLine(card)}`).join(', ')})`);
-    console.log(`RP-UITEST ${label}: ${cards.length} overview cards of ${[...sizes][0]}, bar at ${[...lines][0]}px`);
+    check(Math.max(...lines) - Math.min(...lines) <= 1, `${label}: bars sit at different heights (${cards.map(([key, card]) => `${key} ${barLine(card)}`).join(', ')})`);
+    console.log(`RP-UITEST ${label}: ${cards.length} overview cards of ${[...sizes].join(", ")}, bar at ${[...lines][0]}px`);
 }
 
 // No row of the GPU page may show a placeholder: what the GPU does not
@@ -2626,7 +2631,70 @@ async function fixedDetailHeader(rp) {
     }
 }
 
+async function overviewFillsHeight(rp) {
+    pointer ??= seat().create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
+    pointer.notify_absolute_motion(GLib.get_monotonic_time(), 640, 400);
+    Main.overview.hide();
+    await sleep(700);
+    const keys = ['menu-custom-width', 'menu-custom-height'];
+    const saved = keys.map(key => rp._settings.get_int(key));
+    const iface = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+    const scheme = iface.get_string('color-scheme');
+    const bottomGap = () => {
+        const [, y] = rp._panelFrame.get_transformed_position();
+        const [, cardY] = rp._hwCard.get_transformed_position();
+        return y + rp._panelFrame.height - cardY - rp._hwCard.height;
+    };
+    const verify = async tag => {
+        await overviewGrid(rp, tag);
+        const padding = rp._menuContainer.get_theme_node().get_padding(St.Side.BOTTOM);
+        check(Math.abs(bottomGap() - padding) <= 2,
+            `${tag}: gap below CPU information card is ${bottomGap()} px, padding is ${padding} px`);
+        await shot(`overview-height-${tag}`);
+    };
+    try {
+        rp._settings.set_int(keys[0], 648);
+        rp._settings.set_int(keys[1], 725);
+        await clickActor(rp._indicator);
+        await sleep(700);
+        await shot('overview-height-before');
+        await verify('dark');
+        iface.set_string('color-scheme', 'prefer-light');
+        await sleep(600);
+        await verify('light');
+        const handle = rp._resizeHandles.se;
+        const [x, y] = handle.get_transformed_position();
+        const now = () => GLib.get_monotonic_time();
+        const startX = x + handle.width / 2;
+        const startY = y + handle.height / 2;
+        pointer.notify_absolute_motion(now(), startX, startY);
+        await sleep(200);
+        pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.PRESSED);
+        try {
+            for (let i = 1; i <= 12; i++) {
+                pointer.notify_absolute_motion(now(), startX + 48 * i / 12, startY + 80 * i / 12);
+                await sleep(40);
+            }
+        } finally {
+            pointer.notify_button(now(), Clutter.BUTTON_PRIMARY, Clutter.ButtonState.RELEASED);
+        }
+        await sleep(600);
+        check(rp._currentHeight > 780, 'overview: pointer resize did not grow the panel');
+        await verify('resized');
+        await clickActor(rp._indicator);
+    } finally {
+        keys.forEach((key, i) => rp._settings.set_int(key, saved[i]));
+        iface.set_string('color-scheme', scheme);
+    }
+}
+
 async function run() {
+    if (GLib.getenv('RP_UI_OVERVIEW_HEIGHT_ONLY') === '1') {
+        const rp = Main.extensionManager.lookup(TARGET).stateObj;
+        await overviewFillsHeight(rp);
+        await fixedDetailHeader(rp);
+        return;
+    }
     if (GLib.getenv('RP_UI_HEADER_ONLY') === '1') {
         await fixedDetailHeader(Main.extensionManager.lookup(TARGET).stateObj);
         return;

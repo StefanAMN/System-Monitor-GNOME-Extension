@@ -60,7 +60,7 @@ export class OverviewMethods {
         const [r, g, b] = color;
         const box = new St.BoxLayout({
             style_class: `resource-pulse-metric-card tint-${key}`,
-            ...VERTICAL, reactive: true, can_focus: true, x_expand: true,
+            ...VERTICAL, reactive: true, can_focus: true, x_expand: true, y_expand: true,
             // Named with its value by _nameValues (a11y.js).
             accessible_name: label, accessible_role: Atk.Role.PUSH_BUTTON
         });
@@ -74,9 +74,9 @@ export class OverviewMethods {
         const valueLabel = new St.Label({ text: placeholder, style_class: 'rp-fg', style: 'font-size: 1.7em; font-weight: bold;' });
         box.add_child(valueLabel);
 
-        // The slot keeps its height whether it holds a graph, a line of
-        // text or (a metric with nothing to add) nothing visible at all.
-        const slot = new St.Bin({ style_class: 'rp-card-slot', x_expand: true, height: CARD_SLOT_HEIGHT });
+        // The slot has the same minimum height for graphs and detail lines.
+        // It absorbs spare card height so the progress bars stay aligned.
+        const slot = new St.Bin({ style_class: 'rp-card-slot', x_expand: true, y_expand: true, height: CARD_SLOT_HEIGHT });
         let sparkline = null;
         let subLabel = null;
         if (spark) {
@@ -619,13 +619,13 @@ export class OverviewMethods {
         // Unified 2-Column Reorderable Card Grid
         const grid = new Clutter.GridLayout({ column_homogeneous: true, row_homogeneous: false });
         this._overviewGridLayout = grid;
-        this._overviewGrid = new St.Widget({ layout_manager: grid, style_class: 'resource-pulse-overview-grid', x_expand: true });
+        this._overviewGrid = new St.Widget({ layout_manager: grid, style_class: 'resource-pulse-overview-grid', x_expand: true, y_expand: true });
         this._overviewPage.add_child(this._overviewGrid);
 
         this._summaryCards = {};
 
         // One template for all eight cards, so the grid is even: name,
-        // value, a slot of fixed height (trend graph or one line of detail)
+        // value, a shared slot (trend graph or one line of detail)
         // and a bar. `spark` names the history a card's trend graph draws.
         const cards = [
             { key: 'cpu', label: _('CPU'), color: [0.208, 0.518, 0.894], placeholder: '--%', spark: 'cpu' },

@@ -2104,3 +2104,31 @@ Verified with real pointer hover in GNOME 50.1. The top-bar tooltip and
 accessibility checks passed, translation coverage passed across 10 panel
 pages and preferences, lint passed, and the ZIP installed and ran for 8 s.
 This text-only change was not separately profiled for CPU or RAM usage.
+
+
+## Fill spare overview height
+
+The requested gap is below the bottom CPU hardware information card. Let
+the metric grid and its cards absorb spare vertical space, keeping bars
+aligned and the hardware card above normal bottom padding. This changes only
+GNOME Shell layout, with no sampling work. Reproduce the saved 648 × 725
+panel on a larger virtual monitor, then prove the gap is just the themed
+padding using real resize input, equal-card checks and light/dark screenshots.
+Also verify a short panel still scrolls and the fixed back button works.
+Snapshots of the UI driver and dev script are in /tmp/rp-ui-before-overview-height.js
+and /tmp/rp-dev-before-overview-height.sh.
+
+The baseline reproduced a 69 px gap with 16 px padding. The first layout
+run filled that space but failed the old exact-height assertion: dividing
+53 extra pixels across four rows requires one row to be a pixel taller.
+This is native layout pixel rounding, not sampling or synchronization.
+Allow at most one pixel of variation in grid sizes and bar offsets, then
+verify the remaining bottom gap and actual resize behavior.
+
+Verified. The saved-size gap fell from 69 px to the themed 16 px padding,
+and stayed at 16 px after real pointer resizing. Light/dark screenshots were
+inspected. The focused test passed on GNOME 46, 50.1 and 51, including
+short-panel scrolling and fixed detail navigation. Default-monitor hover
+and accessibility checks, unit regressions, lint, shell syntax and ZIP install
+checks also passed. Sampling CPU/RAM overhead was not re-profiled.
+Reproduce with RP_UI_MONITOR=1280x1000 RP_UI_OVERVIEW_HEIGHT_ONLY=1 ./scripts/dev.sh test-ui.

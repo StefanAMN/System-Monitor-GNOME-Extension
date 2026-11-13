@@ -459,7 +459,7 @@ run_driver() {
     start_log_stream "$LOG" "$SANDBOX/session.log"
     env "${LANG_ENV[@]}" XDG_DATA_HOME="$SANDBOX/data" XDG_CONFIG_HOME="$SANDBOX/config" XDG_RUNTIME_DIR="$SANDBOX/run" RP_UITEST_SHOTS="$SANDBOX/shots" \
     dbus-run-session -- bash -c '
-        env ${RP_SHELL_ENV:-} gnome-shell --headless --virtual-monitor 1280x720 >> "'"$LOG"'" 2>&1 &
+        env ${RP_SHELL_ENV:-} gnome-shell --headless --virtual-monitor "${RP_UI_MONITOR:-1280x720}" >> "'"$LOG"'" 2>&1 &
         SHELL_PID=$!
         trap "kill $SHELL_PID 2>/dev/null; wait $SHELL_PID 2>/dev/null" EXIT INT TERM
         sleep 3
